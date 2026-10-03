@@ -1,0 +1,32 @@
+{
+  "schema": "ezs.orchestrator.config.v1",
+  "servers": {
+    "dev": {
+      "root": "H:\\EZScore_dev",
+      "backend_port": 8602,
+      "public_port": 8502,
+      "allowed_envs": [
+        "dev",
+        "prod"
+      ],
+      "default_env": "dev"
+    },
+    "prod": {
+      "root": "H:\\EZScore",
+      "backend_port": 8511,
+      "gateway_port": 8510,
+      "public_port": 8501,
+      "allowed_envs": [
+        "prod"
+      ],
+      "default_env": "prod"
+    }
+  },
+  "analysis": {
+    "python": "H:\\EZScore\\.venv-py313\\Scripts\\python.exe",
+    "entrypoint": "analysis\\worker_entrypoint.py"
+  },
+  "resources": {
+    "gpu_slots": 1
+  }
+}
