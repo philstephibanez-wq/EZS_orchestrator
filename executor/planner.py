@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from config.loader import RuntimeConfig
 from contracts.job import JobEnvelope
@@ -19,11 +20,6 @@ class ExecutionPlan:
 
 
 class ExecutionPlanner:
-    """Resolve the target checkout before execution.
-
-    This module does not implement any analysis algorithm.
-    """
-
     def __init__(self, config: RuntimeConfig):
         self.config = config
 
@@ -31,10 +27,10 @@ class ExecutionPlanner:
     def _resolved(path: Path) -> Path:
         return path.resolve(strict=False)
 
-    @staticmethod
-    def _is_under(path: Path, root: Path) -> bool:
+    @classmethod
+    def _is_under(cls, path: Path, root: Path) -> bool:
         try:
-            path.resolve(strict=False).relative_to(root.resolve(strict=False))
+            cls._resolved(path).relative_to(cls._resolved(root))
             return True
         except ValueError:
             return False
@@ -52,15 +48,29 @@ class ExecutionPlanner:
                 f"Cross-root path forbidden for {job.target.value}: {path}"
             )
 
+    def validate_payload_paths(self, job: JobEnvelope, value: Any) -> None:
+        if isinstance(value, dict):
+            for nested in value.values():
+                self.validate_payload_paths(job, nested)
+            return
+        if isinstance(value, (list, tuple)):
+            for nested in value:
+                self.validate_payload_paths(job, nested)
+            return
+        if not isinstance(value, str):
+            return
+
+        # Only absolute Windows paths are checked here.
+        if len(value) >= 3 and value[1:3] in {":\\", ":/"}:
+            self.validate_external_path(job, Path(value))
+
     def plan(self, job: JobEnvelope) -> ExecutionPlan:
         job.validate()
+        self.validate_payload_paths(job, job.payload)
         root = self.root_for(job.target)
         entrypoint = root / self.config.analysis_entrypoint
-
-        # The analysis code MUST be owned by the target checkout.
         if not self._is_under(entrypoint, root):
             raise RuntimeError("Analysis entrypoint escaped target root")
-
         return ExecutionPlan(
             job_id=job.job_id,
             target=job.target,

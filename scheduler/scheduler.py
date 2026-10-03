@@ -14,9 +14,9 @@ class _Queued:
 
 
 class Scheduler:
-    """Generic resource scheduler.
+    """Pure resource scheduler.
 
-    No musical-analysis knowledge is allowed here.
+    It has no HTTP knowledge and no musical-analysis knowledge.
     """
 
     def __init__(self, gpu_slots: int = 1):
@@ -29,17 +29,16 @@ class Scheduler:
 
     def submit(self, job: JobEnvelope) -> None:
         job.validate()
-        sequence = next(self._counter)
-        # Higher priority runs first, FIFO within identical priority.
-        heapq.heappush(self._queue, _Queued((-job.priority, sequence), job))
+        heapq.heappush(
+            self._queue,
+            _Queued((-job.priority, next(self._counter)), job),
+        )
 
     def next_ready(self) -> JobEnvelope | None:
         if not self._queue:
             return None
-
-        # R1: scan by scheduler order for the first resource-compatible job.
         skipped: list[_Queued] = []
-        selected: JobEnvelope | None = None
+        selected = None
         while self._queue:
             item = heapq.heappop(self._queue)
             if item.job.resource_class == "gpu" and self._gpu_in_use >= self.gpu_slots:
@@ -49,7 +48,6 @@ class Scheduler:
             if selected.resource_class == "gpu":
                 self._gpu_in_use += 1
             break
-
         for item in skipped:
             heapq.heappush(self._queue, item)
         return selected

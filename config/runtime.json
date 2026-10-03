@@ -1,5 +1,6 @@
 {
-  "schema": "ezs.orchestrator.config.v1",
+  "schema": "ezs.orchestrator.config.v2",
+  "orchestrator_root": "H:\\EZS_orchestrator",
   "servers": {
     "dev": {
       "root": "H:\\EZScore_dev",
@@ -28,5 +29,9 @@
   },
   "resources": {
     "gpu_slots": 1
+  },
+  "transport": {
+    "dev_url": "http://127.0.0.1:8502",
+    "prod_url": "http://127.0.0.1:8501"
   }
 }

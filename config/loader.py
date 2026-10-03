@@ -10,11 +10,14 @@ from contracts.target import Target
 
 @dataclass(frozen=True, slots=True)
 class RuntimeConfig:
+    orchestrator_root: Path
     dev: ServerSpec
     prod: ServerSpec
     analysis_python: Path
     analysis_entrypoint: Path
     gpu_slots: int
+    dev_url: str
+    prod_url: str
 
 
 def load_runtime_config(path: Path | None = None) -> RuntimeConfig:
@@ -22,7 +25,7 @@ def load_runtime_config(path: Path | None = None) -> RuntimeConfig:
         path = Path(__file__).resolve().parent / "runtime.json"
 
     data = json.loads(path.read_text(encoding="utf-8"))
-    if data.get("schema") != "ezs.orchestrator.config.v1":
+    if data.get("schema") != "ezs.orchestrator.config.v2":
         raise ValueError("Unsupported orchestrator config schema")
 
     def server(target: Target) -> ServerSpec:
@@ -41,10 +44,14 @@ def load_runtime_config(path: Path | None = None) -> RuntimeConfig:
     if slots < 1:
         raise ValueError("gpu_slots must be >= 1")
 
+    transport = data["transport"]
     return RuntimeConfig(
+        orchestrator_root=Path(data["orchestrator_root"]),
         dev=server(Target.DEV),
         prod=server(Target.PROD),
         analysis_python=Path(data["analysis"]["python"]),
         analysis_entrypoint=Path(data["analysis"]["entrypoint"]),
         gpu_slots=slots,
+        dev_url=str(transport["dev_url"]).rstrip("/"),
+        prod_url=str(transport["prod_url"]).rstrip("/"),
     )
