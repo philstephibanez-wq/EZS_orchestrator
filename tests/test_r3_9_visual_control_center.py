@@ -8,10 +8,26 @@ class R39VisualControlCenterContractTest(unittest.TestCase):
         self.assertEqual(web.HOST, "127.0.0.1")
         self.assertEqual(web.DEFAULT_PORT, 8700)
 
-    def test_prod_has_no_mutating_visual_action(self):
+    def test_prod_mutations_are_limited_to_protected_lifecycle(self):
         source = Path(web.__file__).read_text(encoding="utf-8")
-        for term in ("prod-server-start","prod-server-stop","prod-server-restart","prod-caddy-start","service-start-prod"):
-            self.assertNotIn(term, source)
+        # R3.10 deliberately authorizes only protected PROD operations from the
+        # local Control Center; arbitrary deployment/business mutations remain absent.
+        for term in (
+            "prod-start",
+            "prod-stop",
+            "prod-restart",
+            "prod-maintenance-on",
+            "prod-maintenance-off",
+        ):
+            self.assertIn(term, source)
+        for forbidden in (
+            "prod-deploy",
+            "prod-db-",
+            "prod-analysis-",
+            "prod-storage-",
+            "service-start-prod",
+        ):
+            self.assertNotIn(forbidden, source)
 
     def test_token_required(self):
         source = Path(web.__file__).read_text(encoding="utf-8")

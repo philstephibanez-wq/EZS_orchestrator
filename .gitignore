@@ -1,7 +1,11 @@
 __pycache__/
 *.py[cod]
 .env.local
+.pytest_cache/
+.coverage
+htmlcov/
 runtime/*
 !runtime/.gitkeep
 logs/*
 !logs/.gitkeep
+*.log

@@ -14,19 +14,23 @@ class R38CaddyIsolationTest(unittest.TestCase):
 
     def test_dev_is_strictly_dev(self):
         text = self.manager._render(Target.DEV)
-        self.assertIn("127.0.0.1:8502", text)
+        # R3.10: wildcard host on the target port, but loopback-only bind.
+        self.assertIn(":8502 {", text)
+        self.assertIn("bind 127.0.0.1", text)
         self.assertIn("127.0.0.1:8602", text)
         self.assertIn("H:/EZScore_dev/var/storage/stems", text)
-        self.assertNotIn("127.0.0.1:8501", text)
+        self.assertNotIn(":8501 {", text)
         self.assertNotIn("127.0.0.1:8510", text)
         self.assertNotIn('H:/EZScore/var/storage/stems"', text)
 
     def test_prod_is_strictly_prod(self):
         text = self.manager._render(Target.PROD)
-        self.assertIn("127.0.0.1:8501", text)
+        # Public Host (Cloudflare) must match while Caddy remains bound to loopback.
+        self.assertIn(":8501 {", text)
+        self.assertIn("bind 127.0.0.1", text)
         self.assertIn("127.0.0.1:8510", text)
         self.assertIn("H:/EZScore/var/storage/stems", text)
-        self.assertNotIn("127.0.0.1:8502", text)
+        self.assertNotIn(":8502 {", text)
         self.assertNotIn("127.0.0.1:8602", text)
         self.assertNotIn("H:/EZScore_dev/var/storage/stems", text)
 

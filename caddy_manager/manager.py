@@ -110,7 +110,8 @@ class CaddyManager:
             "    auto_https off\n"
             f"    admin 127.0.0.1:{admin_port}\n"
             "}\n\n"
-            f"http://127.0.0.1:{public_port} {{\n"
+            f":{public_port} {{\n"
+            "    bind 127.0.0.1\n"
             "    @media path /media/*\n"
             "    handle @media {\n"
             f"        forward_auth 127.0.0.1:{upstream_port} {{\n"
@@ -136,7 +137,7 @@ class CaddyManager:
                 return 100 <= int(response.status) < 500
         except Exception as exc:
             code = getattr(exc, "code", None)
-            return isinstance(code, int) and 100 <= code < 500
+            return isinstance(code, int) and 100 <= code < 600
 
     def view(self, target: Target) -> CaddyView:
         meta = self._read_metadata(target)
@@ -151,6 +152,24 @@ class CaddyManager:
             process_alive=alive,
             http_alive=self._http_alive(target) if alive else False,
         )
+
+    def _validate_target_isolation(self, target: Target) -> None:
+        spec = self._spec(target)
+        media_root = self._media_root(target)
+        dev_root = self.config.dev.root.resolve()
+        prod_root = self.config.prod.root.resolve()
+        resolved_media = media_root.resolve()
+
+        if target is Target.DEV:
+            if resolved_media == prod_root or prod_root in resolved_media.parents:
+                raise RuntimeError("caddy_cross_root_refused:dev->prod")
+            if int(spec.public_port) == int(self.config.prod.public_port):
+                raise RuntimeError("caddy_cross_port_refused:dev->prod")
+        else:
+            if resolved_media == dev_root or dev_root in resolved_media.parents:
+                raise RuntimeError("caddy_cross_root_refused:prod->dev")
+            if int(spec.public_port) == int(self.config.dev.public_port):
+                raise RuntimeError("caddy_cross_port_refused:prod->dev")
 
     def start(self, target: Target) -> CaddyView:
         current = self.view(target)
@@ -168,20 +187,7 @@ class CaddyManager:
         if not media_root.is_dir():
             raise RuntimeError(f"caddy_media_root_missing:{target.value}:{media_root}")
 
-        dev_root = self.config.dev.root.resolve()
-        prod_root = self.config.prod.root.resolve()
-        resolved_media = media_root.resolve()
-
-        if target is Target.DEV:
-            if resolved_media == prod_root or prod_root in resolved_media.parents:
-                raise RuntimeError("caddy_cross_root_refused:dev->prod")
-            if int(spec.public_port) == int(self.config.prod.public_port):
-                raise RuntimeError("caddy_cross_port_refused:dev->prod")
-        else:
-            if resolved_media == dev_root or dev_root in resolved_media.parents:
-                raise RuntimeError("caddy_cross_root_refused:prod->dev")
-            if int(spec.public_port) == int(self.config.dev.public_port):
-                raise RuntimeError("caddy_cross_port_refused:prod->dev")
+        self._validate_target_isolation(target)
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
@@ -249,3 +255,44 @@ class CaddyManager:
         raise RuntimeError(
             f"caddy_start_failed:{target.value}:see {self._err_log(target)}"
         )
+
+    def stop(self, target: Target) -> CaddyView:
+        current = self.view(target)
+        if not current.process_alive:
+            self._metadata_path(target).unlink(missing_ok=True)
+            return self.view(target)
+        if not self.caddy_exe.is_file():
+            raise RuntimeError(f"caddy_executable_missing:{self.caddy_exe}")
+
+        stopped = subprocess.run(
+            [
+                str(self.caddy_exe),
+                "stop",
+                "--address",
+                f"127.0.0.1:{self._admin_port(target)}",
+            ],
+            cwd=str(self.config.orchestrator_root),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            check=False,
+        )
+        if stopped.returncode != 0:
+            raise RuntimeError(
+                "caddy_stop_failed:"
+                + stopped.stdout.replace("\r", " ").replace("\n", " ")[:800]
+            )
+
+        deadline = time.time() + 5.0
+        while time.time() < deadline:
+            if not self._pid_alive(current.pid):
+                break
+            time.sleep(0.1)
+        if self._pid_alive(current.pid):
+            raise RuntimeError(f"caddy_stop_timeout:{target.value}:pid={current.pid}")
+        self._metadata_path(target).unlink(missing_ok=True)
+        return self.view(target)
+
+    def restart(self, target: Target) -> CaddyView:
+        self.stop(target)
+        return self.start(target)
