@@ -41,6 +41,9 @@ class ExecutionPlanner:
     def forbidden_root_for(self, target: Target) -> Path:
         return self.config.prod.root if target is Target.DEV else self.config.dev.root
 
+    def python_for(self, target: Target) -> Path:
+        return self.config.analysis_python_for(target)
+
     def validate_external_path(self, job: JobEnvelope, path: Path) -> None:
         forbidden = self.forbidden_root_for(job.target)
         if self._is_under(path, forbidden):
@@ -60,22 +63,59 @@ class ExecutionPlanner:
         if not isinstance(value, str):
             return
 
-        # Only absolute Windows paths are checked here.
         if len(value) >= 3 and value[1:3] in {":\\", ":/"}:
             self.validate_external_path(job, Path(value))
 
+    def _validate_job_structures(self, job: JobEnvelope) -> None:
+        for name in ("payload", "paths", "request", "song"):
+            value = getattr(job, name, None)
+            if value is not None:
+                self.validate_payload_paths(job, value)
+
+    def _validate_python_ownership(
+        self,
+        target: Target,
+        python_path: Path,
+        root: Path,
+    ) -> None:
+        """Validate topology only.
+
+        File-system availability is an execution concern and is checked by
+        JobExecutor immediately before spawning. Keeping existence out of the
+        planner makes architecture contracts deterministic/offline while still
+        preserving fail-closed runtime behavior.
+        """
+        forbidden = self.forbidden_root_for(target)
+
+        if self._is_under(python_path, forbidden):
+            raise RuntimeError(
+                f"Cross-root analysis Python forbidden for {target.value}: "
+                f"{python_path}"
+            )
+
+        if not self._is_under(python_path, root):
+            raise RuntimeError(
+                f"Analysis Python must be owned by {target.value} checkout: "
+                f"{python_path}"
+            )
+
     def plan(self, job: JobEnvelope) -> ExecutionPlan:
         job.validate()
-        self.validate_payload_paths(job, job.payload)
+        self._validate_job_structures(job)
+
         root = self.root_for(job.target)
+        python = self.python_for(job.target)
+        self._validate_python_ownership(job.target, python, root)
+
         entrypoint = root / self.config.analysis_entrypoint
         if not self._is_under(entrypoint, root):
             raise RuntimeError("Analysis entrypoint escaped target root")
+
         return ExecutionPlan(
             job_id=job.job_id,
             target=job.target,
             project_root=root,
-            python=self.config.analysis_python,
+            python=python,
             entrypoint=entrypoint,
             cwd=root,
         )

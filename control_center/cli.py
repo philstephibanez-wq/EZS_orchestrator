@@ -5,12 +5,13 @@ import json
 
 from config.loader import load_runtime_config
 from contracts.target import Target
+from orchestration.service import OrchestrationService
 from server_manager.manager import ServerManager
 from transport.jobs import JobTransport
 from transport.targets import TargetRegistry
 
 
-def target(value: str) -> Target:
+def parse_target(value: str) -> Target:
     return Target(value.lower())
 
 
@@ -25,21 +26,21 @@ def status() -> int:
             f"pid={view.pid or '-'} process={view.process_alive} "
             f"http={view.http_alive} ownership={view.ownership}"
         )
-    print(f"Analysis Python: {config.analysis_python}")
+    print(f"DEV Analysis Python: {config.analysis_python_for(Target.DEV)}")
+    print(f"PROD Analysis Python: {config.analysis_python_for(Target.PROD)}")
+    print(f"DEV Transport: {config.transport_url_for(Target.DEV)}")
+    print(f"PROD Transport: {config.transport_url_for(Target.PROD)}")
     print(f"Analysis entrypoint: {config.analysis_entrypoint}")
     print(f"GPU slots: {config.gpu_slots}")
     return 0
 
 
-def health() -> int:
-    return status()
-
-
-def queue_status() -> int:
+def queue_status(target: Target | None) -> int:
     config = load_runtime_config()
     transport = JobTransport(TargetRegistry(config))
+    targets = (target,) if target is not None else (Target.DEV, Target.PROD)
     failed = False
-    for item in (Target.DEV, Target.PROD):
+    for item in targets:
         try:
             jobs = transport.queue(item)
             print(f"{item.value.upper()}: {len(jobs)} job(s)")
@@ -51,10 +52,27 @@ def queue_status() -> int:
     return 1 if failed else 0
 
 
+def run_once(target: Target) -> int:
+    config = load_runtime_config()
+    service = OrchestrationService(config)
+    outcome = service.run_once(
+        target,
+        on_output=lambda line: print(line, flush=True),
+    )
+    if outcome is None:
+        print(f"No queued job for target={target.value}.")
+        return 0
+    print(
+        f"job_id={outcome.job_id} target={outcome.target.value} "
+        f"returncode={outcome.returncode}"
+    )
+    return 0 if outcome.returncode == 0 else outcome.returncode
+
+
 def server_action(action: str, target_value: str, env: str | None) -> int:
     config = load_runtime_config()
     manager = ServerManager(config)
-    item = target(target_value)
+    item = parse_target(target_value)
     if action == "start":
         view = manager.start(item, env)
     elif action == "stop":
@@ -72,7 +90,17 @@ def main() -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("status")
     sub.add_parser("health")
-    sub.add_parser("queue")
+
+    queue_parser = sub.add_parser("queue")
+    queue_parser.add_argument("--target", choices=("dev", "prod"), default=None)
+
+    run_parser = sub.add_parser("run-once")
+    run_parser.add_argument(
+        "--target",
+        choices=("dev", "prod"),
+        required=True,
+        help="Explicit physical target. No fallback is allowed.",
+    )
 
     for name in ("server-start", "server-stop", "server-restart"):
         p = sub.add_parser(name)
@@ -81,12 +109,12 @@ def main() -> int:
             p.add_argument("--env", choices=("dev", "prod"), default=None)
 
     args = parser.parse_args()
-    if args.command == "status":
+    if args.command in {"status", "health"}:
         return status()
-    if args.command == "health":
-        return health()
     if args.command == "queue":
-        return queue_status()
+        return queue_status(parse_target(args.target) if args.target else None)
+    if args.command == "run-once":
+        return run_once(parse_target(args.target))
     if args.command == "server-start":
         return server_action("start", args.target, args.env)
     if args.command == "server-stop":

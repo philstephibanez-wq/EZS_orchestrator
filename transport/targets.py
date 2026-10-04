@@ -46,12 +46,12 @@ class TargetRegistry:
     def endpoint(self, target: Target) -> TargetEndpoint:
         if target is Target.DEV:
             root = self.config.dev.root
-            url = self.config.dev_url
             override = os.environ.get("EZS_DEV_ANALYSIS_TOKEN")
         else:
             root = self.config.prod.root
-            url = self.config.prod_url
             override = os.environ.get("EZS_PROD_ANALYSIS_TOKEN")
+
+        url = self.config.transport_url_for(target)
 
         env = read_env_local(root)
         token = override or env.get("ANALYSIS_WORKER_TOKEN") or ""

@@ -10,6 +10,7 @@ from pathlib import Path
 from config.loader import RuntimeConfig
 from contracts.server import ServerSpec
 from contracts.target import Target
+from runtime_guard.activity import analysis_execution_active
 from .process import (
     atomic_json,
     command_line,
@@ -171,6 +172,12 @@ class ServerManager:
 
     def stop(self, target: Target) -> ServerView:
         spec = self.spec(target)
+
+        if analysis_execution_active(self.config.orchestrator_root / "runtime"):
+            raise RuntimeError(
+                f"STOP: analysis execution active; refusing to stop "
+                f"{target.value} server"
+            )
         listener = listener_pid(spec.backend_port)
         if not listener:
             self._pid_path(target).unlink(missing_ok=True)

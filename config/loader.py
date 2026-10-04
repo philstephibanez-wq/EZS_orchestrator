@@ -13,11 +13,30 @@ class RuntimeConfig:
     orchestrator_root: Path
     dev: ServerSpec
     prod: ServerSpec
-    analysis_python: Path
+    dev_analysis_python: Path
+    prod_analysis_python: Path
     analysis_entrypoint: Path
     gpu_slots: int
-    dev_url: str
-    prod_url: str
+    dev_backend_url: str
+    prod_backend_url: str
+
+    def analysis_python_for(self, target: Target) -> Path:
+        return self.dev_analysis_python if target is Target.DEV else self.prod_analysis_python
+
+    def transport_url_for(self, target: Target) -> str:
+        return self.dev_backend_url if target is Target.DEV else self.prod_backend_url
+
+    @property
+    def analysis_python(self) -> Path:
+        return self.prod_analysis_python
+
+    @property
+    def dev_url(self) -> str:
+        return self.dev_backend_url
+
+    @property
+    def prod_url(self) -> str:
+        return self.prod_backend_url
 
 
 def load_runtime_config(path: Path | None = None) -> RuntimeConfig:
@@ -25,7 +44,12 @@ def load_runtime_config(path: Path | None = None) -> RuntimeConfig:
         path = Path(__file__).resolve().parent / "runtime.json"
 
     data = json.loads(path.read_text(encoding="utf-8"))
-    if data.get("schema") != "ezs.orchestrator.config.v2":
+    schema = data.get("schema")
+    if schema not in {
+        "ezs.orchestrator.config.v2",
+        "ezs.orchestrator.config.v3",
+        "ezs.orchestrator.config.v4",
+    }:
         raise ValueError("Unsupported orchestrator config schema")
 
     def server(target: Target) -> ServerSpec:
@@ -40,18 +64,42 @@ def load_runtime_config(path: Path | None = None) -> RuntimeConfig:
             default_env=str(raw["default_env"]),
         )
 
+    dev = server(Target.DEV)
+    prod = server(Target.PROD)
+
     slots = int(data["resources"]["gpu_slots"])
     if slots < 1:
         raise ValueError("gpu_slots must be >= 1")
 
-    transport = data["transport"]
+    analysis = data["analysis"]
+
+    if schema in {"ezs.orchestrator.config.v3", "ezs.orchestrator.config.v4"}:
+        dev_python = Path(data["servers"]["dev"]["analysis_python"])
+        prod_python = Path(data["servers"]["prod"]["analysis_python"])
+    else:
+        prod_python = Path(analysis["python"])
+        dev_python = dev.root / ".venv-py313" / "Scripts" / "python.exe"
+
+    transport = data.get("transport") or {}
+    if schema == "ezs.orchestrator.config.v4":
+        dev_backend_url = str(transport["dev_backend_url"]).rstrip("/")
+        prod_backend_url = str(transport["prod_backend_url"]).rstrip("/")
+    else:
+        dev_backend_url = str(
+            transport.get("dev_backend_url") or f"http://127.0.0.1:{dev.backend_port}"
+        ).rstrip("/")
+        prod_backend_url = str(
+            transport.get("prod_backend_url") or f"http://127.0.0.1:{prod.backend_port}"
+        ).rstrip("/")
+
     return RuntimeConfig(
         orchestrator_root=Path(data["orchestrator_root"]),
-        dev=server(Target.DEV),
-        prod=server(Target.PROD),
-        analysis_python=Path(data["analysis"]["python"]),
-        analysis_entrypoint=Path(data["analysis"]["entrypoint"]),
+        dev=dev,
+        prod=prod,
+        dev_analysis_python=dev_python,
+        prod_analysis_python=prod_python,
+        analysis_entrypoint=Path(analysis["entrypoint"]),
         gpu_slots=slots,
-        dev_url=str(transport["dev_url"]).rstrip("/"),
-        prod_url=str(transport["prod_url"]).rstrip("/"),
+        dev_backend_url=dev_backend_url,
+        prod_backend_url=prod_backend_url,
     )

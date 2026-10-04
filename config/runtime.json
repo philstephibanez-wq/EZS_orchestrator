@@ -1,5 +1,5 @@
 {
-  "schema": "ezs.orchestrator.config.v2",
+  "schema": "ezs.orchestrator.config.v4",
   "orchestrator_root": "H:\\EZS_orchestrator",
   "servers": {
     "dev": {
@@ -10,7 +10,8 @@
         "dev",
         "prod"
       ],
-      "default_env": "dev"
+      "default_env": "dev",
+      "analysis_python": "H:\\EZScore_dev\\.venv-py313\\Scripts\\python.exe"
     },
     "prod": {
       "root": "H:\\EZScore",
@@ -20,18 +21,18 @@
       "allowed_envs": [
         "prod"
       ],
-      "default_env": "prod"
+      "default_env": "prod",
+      "analysis_python": "H:\\EZScore\\.venv-py313\\Scripts\\python.exe"
     }
   },
   "analysis": {
-    "python": "H:\\EZScore\\.venv-py313\\Scripts\\python.exe",
     "entrypoint": "analysis\\worker_entrypoint.py"
   },
   "resources": {
     "gpu_slots": 1
   },
   "transport": {
-    "dev_url": "http://127.0.0.1:8502",
-    "prod_url": "http://127.0.0.1:8501"
+    "dev_backend_url": "http://127.0.0.1:8602",
+    "prod_backend_url": "http://127.0.0.1:8511"
   }
 }
