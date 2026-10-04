@@ -13,11 +13,11 @@ class R39VisualControlCenterContractTest(unittest.TestCase):
         # R3.10 deliberately authorizes only protected PROD operations from the
         # local Control Center; arbitrary deployment/business mutations remain absent.
         for term in (
-            "prod-lifecycle-start",
-            "prod-lifecycle-stop",
-            "prod-lifecycle-restart",
-            "prod-mode-normal",
-            "prod-mode-maintenance",
+            "prod-start",
+            "prod-stop",
+            "prod-restart",
+            "prod-maintenance-on",
+            "prod-maintenance-off",
         ):
             self.assertIn(term, source)
         for forbidden in (
