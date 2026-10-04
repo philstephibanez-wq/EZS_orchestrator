@@ -105,6 +105,15 @@ class CaddyManager:
         public_port = int(spec.public_port)
         upstream_port = self._upstream_port(target)
         admin_port = self._admin_port(target)
+        reverse_proxy = (
+            f"        reverse_proxy 127.0.0.1:{upstream_port} {{\n"
+            "            header_up X-Forwarded-Proto https\n"
+            "            header_up X-Forwarded-Port 443\n"
+            "            header_up X-Forwarded-Host {http.request.host}\n"
+            "        }\n"
+            if target is Target.PROD
+            else f"        reverse_proxy 127.0.0.1:{upstream_port}\n"
+        )
         return (
             "{\n"
             "    auto_https off\n"
@@ -125,7 +134,7 @@ class CaddyManager:
             "        file_server\n"
             "    }\n\n"
             "    handle {\n"
-            f"        reverse_proxy 127.0.0.1:{upstream_port}\n"
+            f"{reverse_proxy}"
             "    }\n"
             "}\n"
         )
