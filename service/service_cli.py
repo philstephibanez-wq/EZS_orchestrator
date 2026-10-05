@@ -6,12 +6,11 @@ import os
 import subprocess
 import sys
 import time
-from pathlib import Path
 
-from config.loader import load_runtime_config
 from contracts.target import Target
 from .runner import PermanentRunner
 from .singleton import ServiceSingletonBusy
+from config.loader import load_runtime_config
 
 
 WINDOWS_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -32,10 +31,16 @@ def runtime_paths():
     )
 
 
-def run_foreground(target: Target, poll_seconds: float) -> int:
+def _target_from_scope(scope: str) -> Target | None:
+    if scope == "all":
+        return None
+    return Target(scope)
+
+
+def run_foreground(scope: str, poll_seconds: float) -> int:
     try:
         return PermanentRunner(
-            target,
+            _target_from_scope(scope),
             poll_seconds=poll_seconds,
         ).run_forever()
     except ServiceSingletonBusy as exc:
@@ -43,7 +48,7 @@ def run_foreground(target: Target, poll_seconds: float) -> int:
         return 3
 
 
-def start(target: Target, poll_seconds: float) -> int:
+def start(scope: str, poll_seconds: float) -> int:
     config, service_dir, meta, heartbeat, stop_file, out_path, err_path = runtime_paths()
     stop_file.unlink(missing_ok=True)
 
@@ -67,7 +72,7 @@ def start(target: Target, poll_seconds: float) -> int:
                 "service.service_cli",
                 "run",
                 "--target",
-                target.value,
+                scope,
                 "--poll-seconds",
                 str(poll_seconds),
             ],
@@ -80,12 +85,11 @@ def start(target: Target, poll_seconds: float) -> int:
         out.close()
         err.close()
 
-    # Wait for the service to publish authoritative metadata.
     deadline = time.time() + 5.0
     while time.time() < deadline:
         if meta.is_file():
             print(
-                f"service_started target={target.value} pid={proc.pid} "
+                f"service_started target={scope} pid={proc.pid} "
                 f"poll={poll_seconds}s"
             )
             return 0
@@ -157,7 +161,12 @@ def main() -> int:
 
     for name in ("start", "run"):
         sp = sub.add_parser(name)
-        sp.add_argument("--target", choices=("dev", "prod"), required=True)
+        sp.add_argument(
+            "--target",
+            choices=("all", "dev", "prod"),
+            required=True,
+            help="all = one permanent service polling DEV and PROD",
+        )
         sp.add_argument("--poll-seconds", type=float, default=2.0)
 
     sub.add_parser("status")
@@ -168,9 +177,9 @@ def main() -> int:
     args = p.parse_args()
 
     if args.command == "start":
-        return start(Target(args.target), args.poll_seconds)
+        return start(args.target, args.poll_seconds)
     if args.command == "run":
-        return run_foreground(Target(args.target), args.poll_seconds)
+        return run_foreground(args.target, args.poll_seconds)
     if args.command == "status":
         return status()
     if args.command == "stop":

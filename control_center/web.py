@@ -145,7 +145,7 @@ class ControlCenter:
                 view = self.prod.set_maintenance(False)
                 return {"ok": view.online, "message": "PROD normal mode restored"}
 
-            if name == "service-start-dev":
+            if name == "service-start-all":
                 service_dir = self.runtime / "service"
                 if (service_dir / "service.json").is_file():
                     return {"ok": True, "message": "Orchestrator service already active"}
@@ -156,7 +156,7 @@ class ControlCenter:
                         "service.service_cli",
                         "start",
                         "--target",
-                        "dev",
+                        "all",
                         "--poll-seconds",
                         "2",
                     ],
@@ -224,7 +224,7 @@ pre{white-space:pre-wrap;word-break:break-word;background:#080d10;border:1px sol
 <main>
 <div id="analysisBanner" class="banner">Etat d'execution en cours de lecture...</div>
 <section class="topgrid">
-<article class="card"><h2>Service permanent</h2><div class="statusrow"><span id="serviceDot" class="dot"></span><span id="serviceState">-</span></div><div class="big" id="serviceTarget">-</div><div class="muted" id="serviceMeta">-</div><div class="actions"><button id="serviceStart" class="primary">Demarrer service DEV</button><button id="serviceStop">Arreter service</button></div></article>
+<article class="card"><h2>Service permanent</h2><div class="statusrow"><span id="serviceDot" class="dot"></span><span id="serviceState">-</span></div><div class="big" id="serviceTarget">-</div><div class="muted" id="serviceMeta">-</div><div class="actions"><button id="serviceStart" class="primary">Demarrer service DEV + PROD</button><button id="serviceStop">Arreter service</button></div></article>
 <article class="card"><h2>GPU / execution</h2><div class="statusrow"><span id="gpuDot" class="dot"></span><span id="gpuState">-</span></div><div class="big">1 slot GPU</div><div class="muted">Singleton machine-wide protege.</div></article>
 <article class="card"><h2>Politique de surete</h2><div class="lock">PROD - exploitation protegee. Seules les operations lifecycle/maintenance sont autorisees.</div><div class="muted" style="margin-top:10px">Code, DB, storage metier, analyse et deploiement arbitraire restent interdits.</div></article>
 </section>
@@ -247,7 +247,7 @@ const p=s.prod,pl=p.lifecycle,pb=pl.backend,pg=pl.gateway,pc=pl.caddy;dot($("pro
 async function refresh(){try{render(await getJSON('/api/status'));await refreshLogs()}catch(e){toast(String(e),false)}}
 async function refreshLogs(){try{const logs=await getJSON('/api/logs');const lines=logs[currentLog]||[];$("logText").textContent=lines.length?lines.join('\n'):"(vide)"}catch(e){$("logText").textContent=String(e)}}
 async function action(name){if(busy)return;busy=true;document.querySelectorAll('button[data-action]').forEach(b=>b.disabled=true);try{const r=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-EZS-Token':TOKEN},body:JSON.stringify({action:name})});const data=await r.json();toast(data.message||data.error||'OK',!!data.ok);await refresh()}catch(e){toast(String(e),false)}finally{busy=false;await refresh()}}
-document.querySelectorAll('button[data-action]').forEach(b=>b.addEventListener('click',()=>action(b.dataset.action)));$("serviceStart").addEventListener('click',()=>action('service-start-dev'));$("serviceStop").addEventListener('click',()=>action('service-stop'));document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));b.classList.add('active');currentLog=b.dataset.log;refreshLogs()}));refresh();setInterval(refresh,3000);
+document.querySelectorAll('button[data-action]').forEach(b=>b.addEventListener('click',()=>action(b.dataset.action)));$("serviceStart").addEventListener('click',()=>action('service-start-all'));$("serviceStop").addEventListener('click',()=>action('service-stop'));document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));b.classList.add('active');currentLog=b.dataset.log;refreshLogs()}));refresh();setInterval(refresh,3000);
 </script>
 </body></html>'''
 
