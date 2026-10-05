@@ -1,15 +1,22 @@
 from __future__ import annotations
 
+import ctypes
 import json
 import os
 import subprocess
+import threading
 import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable, TypeVar
 
 WINDOWS_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+_CACHE_TTL_SECONDS = 1.0
+_CACHE_LOCK = threading.Lock()
+_CACHE: dict[tuple[str, int], tuple[float, object]] = {}
+T = TypeVar("T")
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,34 +27,53 @@ class ProcessInfo:
     command_line: str | None
 
 
-def pid_alive(pid: int | None) -> bool:
-    if not pid or pid <= 0:
-        return False
+def _cached(kind: str, key: int, loader: Callable[[], T]) -> T:
+    now = time.monotonic()
+    cache_key = (kind, int(key))
+    with _CACHE_LOCK:
+        item = _CACHE.get(cache_key)
+        if item and (now - item[0]) <= _CACHE_TTL_SECONDS:
+            return item[1]  # type: ignore[return-value]
+    value = loader()
+    with _CACHE_LOCK:
+        _CACHE[cache_key] = (time.monotonic(), value)
+    return value
+
+
+def clear_process_cache() -> None:
+    with _CACHE_LOCK:
+        _CACHE.clear()
+
+
+def _pid_alive_uncached(pid: int) -> bool:
     if os.name != "nt":
         try:
             os.kill(pid, 0)
             return True
         except OSError:
             return False
-
-    proc = subprocess.run(
-        [
-            "powershell", "-NoProfile", "-Command",
-            f"if (Get-Process -Id {int(pid)} -ErrorAction SilentlyContinue) {{ exit 0 }} else {{ exit 1 }}"
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        creationflags=WINDOWS_NO_WINDOW,
-        check=False,
-    )
-    return proc.returncode == 0
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    try:
+        handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+        if not handle:
+            return False
+        ctypes.windll.kernel32.CloseHandle(handle)
+        return True
+    except Exception:
+        return False
 
 
-def command_line(pid: int) -> str | None:
+def pid_alive(pid: int | None) -> bool:
+    if not pid or pid <= 0:
+        return False
+    return bool(_cached("pid", int(pid), lambda: _pid_alive_uncached(int(pid))))
+
+
+def _command_line_uncached(pid: int) -> str | None:
     if os.name != "nt":
         return None
     script = (
-        f"$p=Get-CimInstance Win32_Process -Filter \"ProcessId = {int(pid)}\" "
+        f'$p=Get-CimInstance Win32_Process -Filter "ProcessId = {int(pid)}" '
         "-ErrorAction SilentlyContinue; if($p){[Console]::Out.Write($p.CommandLine)}"
     )
     proc = subprocess.run(
@@ -59,12 +85,19 @@ def command_line(pid: int) -> str | None:
         errors="replace",
         creationflags=WINDOWS_NO_WINDOW,
         check=False,
+        timeout=3.0,
     )
     value = proc.stdout.strip()
     return value or None
 
 
-def listener_pid(port: int) -> int | None:
+def command_line(pid: int) -> str | None:
+    if pid <= 0:
+        return None
+    return _cached("cmd", int(pid), lambda: _command_line_uncached(int(pid)))
+
+
+def _listener_pid_uncached(port: int) -> int | None:
     if os.name != "nt":
         return None
     script = (
@@ -81,12 +114,19 @@ def listener_pid(port: int) -> int | None:
         errors="ignore",
         creationflags=WINDOWS_NO_WINDOW,
         check=False,
+        timeout=3.0,
     )
     try:
         value = int(proc.stdout.strip())
         return value if value > 0 else None
     except Exception:
         return None
+
+
+def listener_pid(port: int) -> int | None:
+    if port <= 0:
+        return None
+    return _cached("port", int(port), lambda: _listener_pid_uncached(int(port)))
 
 
 def exact_php_server(pid: int, port: int, public_dir: Path) -> bool:
@@ -99,10 +139,10 @@ def exact_php_server(pid: int, port: int, public_dir: Path) -> bool:
     return bind in normalized and root in normalized
 
 
-def http_alive(url: str, timeout: float = 0.8) -> bool:
+def http_alive(url: str, timeout: float = 2.0) -> bool:
     req = urllib.request.Request(
         url.rstrip("/") + "/fr/login",
-        headers={"User-Agent": "EZS-Orchestrator/2"},
+        headers={"User-Agent": "EZS-Orchestrator/3.14"},
         method="GET",
     )
     try:
@@ -121,17 +161,17 @@ def stop_exact(pid: int, port: int, public_dir: Path, timeout: float = 8.0) -> N
             f"for port {port} / docroot {public_dir}"
         )
     subprocess.run(
-        [
-            "powershell", "-NoProfile", "-Command",
-            f"Stop-Process -Id {int(pid)} -Force -ErrorAction Stop"
-        ],
+        ["powershell", "-NoProfile", "-Command", f"Stop-Process -Id {int(pid)} -Force -ErrorAction Stop"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
         creationflags=WINDOWS_NO_WINDOW,
         check=True,
+        timeout=5.0,
     )
+    clear_process_cache()
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        clear_process_cache()
         if not pid_alive(pid):
             return
         time.sleep(0.1)

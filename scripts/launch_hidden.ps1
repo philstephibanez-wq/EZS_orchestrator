@@ -28,7 +28,7 @@ function Test-Port8700 {
 
 $serviceStatus = & $Python -m service.service_cli status 2>&1
 if ($LASTEXITCODE -ne 0 -or ($serviceStatus -join "`n") -notmatch "SERVICE:\s+running") {
-    & $Python -m service.service_cli start --target dev --poll-seconds 2 *> (Join-Path $Logs "service-start.log")
+    & $Python -m service.service_cli start --target all --poll-seconds 2 *> (Join-Path $Logs "service-start.log")
 }
 
 if (-not (Test-Port8700)) {
