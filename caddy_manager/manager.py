@@ -57,6 +57,9 @@ class CaddyManager:
     def _media_root(self, target: Target) -> Path:
         return self._spec(target).root / "var" / "storage" / "stems"
 
+    def _cover_root(self, target: Target) -> Path:
+        return self._spec(target).root / "var" / "storage" / "covers"
+
     @staticmethod
     def _pid_alive(pid: int | None) -> bool:
         if not pid:
@@ -102,18 +105,34 @@ class CaddyManager:
     def _render(self, target: Target) -> str:
         spec = self._spec(target)
         media_root = self._media_root(target).as_posix()
+        cover_root = self._cover_root(target).as_posix()
         public_port = int(spec.public_port)
         upstream_port = self._upstream_port(target)
         admin_port = self._admin_port(target)
-        reverse_proxy = (
-            f"        reverse_proxy 127.0.0.1:{upstream_port} {{\n"
-            "            header_up X-Forwarded-Proto https\n"
-            "            header_up X-Forwarded-Port 443\n"
-            "            header_up X-Forwarded-Host {http.request.host}\n"
-            "        }\n"
-            if target is Target.PROD
-            else f"        reverse_proxy 127.0.0.1:{upstream_port}\n"
-        )
+
+        if target is Target.PROD:
+            reverse_proxy = (
+                f"        reverse_proxy 127.0.0.1:{upstream_port} {{\n"
+                "            header_up X-Forwarded-Proto https\n"
+                "            header_up X-Forwarded-Port 443\n"
+                "            header_up X-Forwarded-Host {http.request.host}\n"
+                "        }\n"
+            )
+            covers_block = ""
+        else:
+            reverse_proxy = f"        reverse_proxy 127.0.0.1:{upstream_port}\n"
+            covers_block = (
+                "    @covers path /uploads/covers/*\n"
+                "    handle @covers {\n"
+                f'        root * "{cover_root}"\n'
+                "        uri strip_prefix /uploads/covers\n"
+                "        header {\n"
+                '            Cache-Control "public, max-age=86400"\n'
+                "        }\n"
+                "        file_server\n"
+                "    }\n\n"
+            )
+
         return (
             "{\n"
             "    auto_https off\n"
@@ -133,6 +152,7 @@ class CaddyManager:
             "        }\n"
             "        file_server\n"
             "    }\n\n"
+            f"{covers_block}"
             "    handle {\n"
             f"{reverse_proxy}"
             "    }\n"
@@ -195,6 +215,9 @@ class CaddyManager:
         media_root = self._media_root(target)
         if not media_root.is_dir():
             raise RuntimeError(f"caddy_media_root_missing:{target.value}:{media_root}")
+
+        if target is Target.DEV:
+            self._cover_root(target).mkdir(parents=True, exist_ok=True)
 
         self._validate_target_isolation(target)
 
