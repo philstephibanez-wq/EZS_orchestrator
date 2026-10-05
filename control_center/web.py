@@ -18,6 +18,7 @@ from caddy_manager.manager import CaddyManager
 from config.loader import load_runtime_config
 from contracts.target import Target
 from control_center.log_tools import LogTools
+from control_center.job_history import JobHistory
 from gateway_manager.manager import GatewayManager
 from prod_lifecycle.manager import ProdLifecycleManager
 from runtime_guard.activity import analysis_execution_active
@@ -61,6 +62,7 @@ class ControlCenter:
         )
         self.transport = JobTransport(TargetRegistry(self.config))
         self.log_tools = LogTools(self.config.orchestrator_root)
+        self.job_history = JobHistory(self.config.orchestrator_root)
         self.action_lock = threading.Lock()
         self.snapshot_lock = threading.Lock()
         self._snapshot_cache: dict | None = None
@@ -233,6 +235,9 @@ class ControlCenter:
 
             raise ValueError(f"unsupported_action:{name}")
 
+    def jobs(self) -> dict:
+        return self.job_history.payload(limit=40)
+
     def logs(self) -> dict:
         root = self.config.orchestrator_root
         return {
@@ -253,7 +258,7 @@ HTML = '''<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>EZS Orchestrator - Control Center R3.14.1</title>
+<title>EZS Orchestrator - Control Center R3.15</title>
 <style>
 :root{color-scheme:dark;--bg:#0b1114;--panel:#111a1f;--panel2:#162229;--line:#26363f;--text:#ecf5f4;--muted:#93a8ad;--accent:#49d1bd;--ok:#5ed38b;--warn:#f2c96d;--bad:#ff7b7b;--prod:#98a5ff}
 *{box-sizing:border-box}body{margin:0;font:14px/1.45 system-ui,Segoe UI,Arial;background:var(--bg);color:var(--text)}
@@ -267,6 +272,7 @@ main{padding:20px;max-width:1500px;margin:auto}.topgrid{display:grid;grid-templa
 .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}button,a.btn{appearance:none;border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:9px;padding:9px 12px;text-decoration:none;cursor:pointer;font-weight:650}
 button.primary,a.primary{background:#173b37;border-color:#27655d}button.danger{background:#371d21;border-color:#6f343c}button.warn{background:#3a3019;border-color:#6e5928}button:disabled{opacity:.45;cursor:not-allowed}
 .queue{margin-top:14px;border-top:1px solid var(--line);padding-top:12px}.queue strong{font-size:19px}.banner{margin-bottom:14px;padding:11px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}.banner.active{border-color:#775a27;background:#251f13}
+.jobs-panel{margin-top:14px}.jobs-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}.jobs-table-wrap{overflow:auto;border:1px solid var(--line);border-radius:10px}.jobs-table{width:100%;border-collapse:collapse;min-width:820px}.jobs-table th,.jobs-table td{padding:9px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}.jobs-table th{color:var(--muted);font-size:12px;background:#0d1519}.jobs-table tr:last-child td{border-bottom:0}.job-state{font-weight:750}.job-state.completed{color:var(--ok)}.job-state.failed{color:var(--bad)}.job-state.running,.job-state.claimed,.job-state.queued{color:var(--warn)}.job-target{font-weight:750}.job-target.dev{color:var(--accent)}.job-target.prod{color:var(--prod)}.jobs-empty{padding:14px;color:var(--muted)}
 .logs{margin-top:14px}.tabs{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 8px}.tab.active{border-color:#397168;background:#17332f}
 pre{white-space:pre-wrap;word-break:break-word;background:#080d10;border:1px solid var(--line);padding:12px;border-radius:10px;max-height:310px;overflow:auto;color:#cbd8da}
 .toast{position:sticky;bottom:14px;margin:14px auto 0;max-width:720px;padding:10px 14px;border-radius:10px;background:#172228;border:1px solid var(--line);display:none}.toast.show{display:block}.toast.ok{border-color:#2b6c49}.toast.bad{border-color:#74383e}
@@ -276,7 +282,7 @@ pre{white-space:pre-wrap;word-break:break-word;background:#080d10;border:1px sol
 </style>
 </head>
 <body>
-<header><div><div class="brand"><b>EZS</b> ORCHESTRATOR</div><div class="sub">Control Center R3.14.1 - local uniquement - 127.0.0.1:8700</div></div><div class="sub" id="updated">-</div></header>
+<header><div><div class="brand"><b>EZS</b> ORCHESTRATOR</div><div class="sub">Control Center R3.15 - local uniquement - 127.0.0.1:8700</div></div><div class="sub" id="updated">-</div></header>
 <main>
 <div id="analysisBanner" class="banner">Etat d'execution en cours de lecture...</div>
 <section class="topgrid">
@@ -287,6 +293,13 @@ pre{white-space:pre-wrap;word-break:break-word;background:#080d10;border:1px sol
 <section class="targets">
 <article class="card target dev"><h2>DEV</h2><div class="statusrow"><span id="devDot" class="dot"></span><strong id="devState">-</strong></div><dl class="kv"><dt>Root</dt><dd id="devRoot">-</dd><dt>APP_ENV</dt><dd id="devEnv">-</dd><dt>Backend</dt><dd id="devBackend">-</dd><dt>Caddy</dt><dd id="devCaddy">-</dd><dt>Transport</dt><dd id="devTransport">-</dd><dt>Python analyse</dt><dd id="devPython">-</dd><dt>Ownership</dt><dd id="devOwnership">-</dd></dl><div class="actions"><button data-action="dev-server-start" class="primary">Demarrer backend</button><button data-action="dev-server-restart">Redemarrer backend</button><button data-action="dev-server-stop" data-destructive="1" class="danger">Arreter backend</button><button data-action="dev-caddy-start">Demarrer Caddy</button><a class="btn primary" href="http://127.0.0.1:8502/fr/catalog" target="_blank" rel="noreferrer">Ouvrir DEV</a></div><div class="queue"><span class="muted">Queue DEV</span><br><strong id="devQueue">-</strong></div></article>
 <article class="card target prod"><h2>PROD - exploitation protegee</h2><div class="statusrow"><span id="prodDot" class="dot"></span><strong id="prodState">-</strong><span id="prodMode" class="mode">-</span></div><dl class="kv"><dt>Root</dt><dd id="prodRoot">-</dd><dt>APP_ENV</dt><dd id="prodEnv">prod</dd><dt>Backend :8511</dt><dd id="prodBackend">-</dd><dt>Gateway :8510</dt><dd id="prodGateway">-</dd><dt>Caddy :8501</dt><dd id="prodCaddy">-</dd><dt>Transport</dt><dd id="prodTransport">-</dd><dt>Python analyse</dt><dd id="prodPython">-</dd><dt>Ownership backend</dt><dd id="prodOwnership">-</dd></dl><div class="actions"><button data-action="prod-start" class="primary">Demarrer PROD</button><button data-action="prod-restart" data-destructive="1">Redemarrer PROD</button><button data-action="prod-stop" data-destructive="1" class="danger">Arreter PROD</button><button data-action="prod-maintenance-off">Mode normal</button><button data-action="prod-maintenance-on" class="warn">Maintenance</button><a class="btn primary" href="https://ezscore.logandplay.com/fr/catalog" target="_blank" rel="noreferrer">Ouvrir PROD</a></div><div class="queue"><span class="muted">Queue PROD</span><br><strong id="prodQueue">-</strong></div></article>
+</section>
+<section class="card jobs-panel">
+<div class="jobs-head"><h2 style="margin:0">Jobs recents</h2><span class="muted" id="jobsMeta">Chargement...</span></div>
+<div class="jobs-table-wrap"><table class="jobs-table">
+<thead><tr><th>Job</th><th>Cible</th><th>Type</th><th>Etat</th><th>Date</th><th>RC</th><th>Erreur</th></tr></thead>
+<tbody id="jobsBody"><tr><td colspan="7" class="jobs-empty">Chargement...</td></tr></tbody>
+</table></div>
 </section>
 <section class="card logs">
 <h2>Logs recents</h2>
@@ -311,6 +324,25 @@ function txt(id,v){$(id).textContent=v??"-"}
 async function getJSON(url){const r=await fetch(url,{cache:"no-store"});if(!r.ok)throw new Error(await r.text());return r.json()}
 function toast(message,ok=true){const el=$("toast");el.textContent=message;el.className="toast show "+(ok?"ok":"bad");setTimeout(()=>{el.className="toast"},4500)}
 function fmtProc(v){return `pid ${v.pid??'-'} - ${v.process_alive?'PROCESS OK':'PROCESS OFF'} - ${v.http_alive?'HTTP OK':'HTTP OFF'}`}
+
+function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\\\"":"&quot;","'":"&#39;"}[c]))}
+function renderJobs(payload){
+  const body=$("jobsBody"), jobs=(payload&&payload.jobs)||[];
+  txt("jobsMeta",payload&&payload.ok?`${payload.count??jobs.length} job(s) · lecture seule`:"Erreur");
+  if(!jobs.length){body.innerHTML='<tr><td colspan="7" class="jobs-empty">Aucun job recent.</td></tr>';return;}
+  body.innerHTML=jobs.map(j=>{
+    const state=String(j.state||'unknown').toLowerCase(), target=String(j.target||'-').toLowerCase();
+    return `<tr><td><strong>#${esc(j.job_id)}</strong></td><td><span class="job-target ${esc(target)}">${esc(target.toUpperCase())}</span></td><td>${esc(j.kind||'-')}</td><td><span class="job-state ${esc(state)}">${esc(state.toUpperCase())}</span></td><td>${esc(j.timestamp||'-')}</td><td>${esc(j.returncode??'-')}</td><td>${j.error?esc(j.error):'-'}</td></tr>`;
+  }).join('');
+}
+let jobsRefreshInFlight=false;
+async function refreshJobs(){
+  if(jobsRefreshInFlight)return;
+  jobsRefreshInFlight=true;
+  try{renderJobs(await getJSON('/api/jobs'))}
+  catch(e){txt("jobsMeta","Erreur de lecture")}
+  finally{jobsRefreshInFlight=false}
+}
 
 function syncActionButtons(){
   document.querySelectorAll('button[data-action]').forEach(b=>{
@@ -446,14 +478,16 @@ document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
 }));
 
 refresh();
+refreshJobs();
 setInterval(refresh,3000);
+setInterval(refreshJobs,3000);
 </script>
 </body></html>'''
 
 
 def make_handler(center: ControlCenter, token: str):
     class Handler(BaseHTTPRequestHandler):
-        server_version = "EZSControlCenter/3.14.1"
+        server_version = "EZSControlCenter/3.15"
 
         def log_message(self, format: str, *args) -> None:
             return
@@ -483,6 +517,9 @@ def make_handler(center: ControlCenter, token: str):
                     self._json(center.snapshot())
                 except Exception as exc:
                     self._json({"ok": False, "error": str(exc)}, 500)
+                return
+            if path == "/api/jobs":
+                self._json(center.jobs())
                 return
             if path == "/api/logs":
                 self._json(center.logs())
@@ -539,7 +576,7 @@ def main() -> int:
     server = ThreadingHTTPServer((HOST, args.port), make_handler(center, token))
     url = f"http://{HOST}:{args.port}/"
     print(f"EZS_ORCHESTRATOR_CONTROL_CENTER {url}", flush=True)
-    print("PROD lifecycle operations enabled under R3.14.1 protected policy", flush=True)
+    print("PROD lifecycle operations enabled under R3.15 protected policy", flush=True)
 
     if not args.no_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
