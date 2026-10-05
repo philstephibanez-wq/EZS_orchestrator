@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import sys
+import threading
+
 import json
 from datetime import datetime, timezone
 from pathlib import Path
 
 from contracts.target import Target
+from runtime_support.atomic_json import atomic_write_json
 
 
 SCHEMA = "ezs.analysis-capability.v1"
@@ -20,6 +24,7 @@ class AnalysisCapabilityPublisher:
 
     def __init__(self, config) -> None:
         self.config = config
+        self._write_lock = threading.Lock()
 
     def _root_for(self, target: Target) -> Path:
         return self.config.dev.root if target is Target.DEV else self.config.prod.root
@@ -57,11 +62,15 @@ class AnalysisCapabilityPublisher:
         }
 
         path = self.path_for(target)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        tmp.replace(path)
+        try:
+            with self._write_lock:
+                atomic_write_json(path, payload)
+        except OSError as exc:
+            print(
+                "CAPABILITY_PUBLISH_WARNING "
+                f"target={target.value} path={path} "
+                f"error={type(exc).__name__}:{exc}",
+                file=sys.stderr,
+                flush=True,
+            )
         return payload

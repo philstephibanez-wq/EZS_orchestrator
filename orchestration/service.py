@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from dataclasses import dataclass
 from typing import Callable
 
@@ -85,6 +87,20 @@ class OrchestrationService:
                     f"selected={selected.job_id};claimed={claimed.job_id}"
                 )
 
+            if on_output is not None:
+                song_title = (
+                    claimed.song.get("title")
+                    or claimed.song.get("name")
+                    or claimed.request.get("title")
+                )
+                on_output(json.dumps({
+                    "event": "job_meta",
+                    "job_id": claimed.job_id,
+                    "kind": claimed.kind,
+                    "song_id": claimed.song_id,
+                    "song_title": song_title,
+                }, ensure_ascii=False))
+
             # Executor performs Planner validation before spawning the subprocess.
             # Any exception here is handled below and converted to target fail.
             result: ExecutionResult = self.executor.run(
@@ -93,7 +109,19 @@ class OrchestrationService:
             )
 
             if result.returncode == 0:
-                self.transport.complete(target, claimed.job_id)
+                try:
+                    self.transport.complete(target, claimed.job_id)
+                except Exception as finalize_exc:
+                    if on_output is not None:
+                        on_output(json.dumps({
+                            "event": "job_finalize_error",
+                            "job_id": claimed.job_id,
+                            "kind": claimed.kind,
+                            "analysis_returncode": 0,
+                            "finalize_status": "error",
+                            "error": f"{type(finalize_exc).__name__}:{finalize_exc}",
+                        }, ensure_ascii=False))
+                    return RunOutcome(target=target, job_id=claimed.job_id, returncode=75)
             else:
                 detail = " | ".join(result.stdout_tail[-6:])
                 error = (

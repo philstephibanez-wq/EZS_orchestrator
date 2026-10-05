@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from capability.publisher import AnalysisCapabilityPublisher
+from runtime_support.atomic_json import atomic_write_json
 from config.loader import load_runtime_config
 from contracts.target import Target
 from transport.jobs import JobTransport
@@ -88,12 +89,16 @@ class PermanentRunner:
             "at": datetime.now(timezone.utc).isoformat(),
             **extra,
         }
-        tmp = self.heartbeat_file.with_suffix(".tmp")
-        tmp.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        tmp.replace(self.heartbeat_file)
+        try:
+            atomic_write_json(self.heartbeat_file, payload)
+        except OSError as exc:
+            print(
+                "HEARTBEAT_WRITE_WARNING "
+                f"path={self.heartbeat_file} "
+                f"error={type(exc).__name__}:{exc}",
+                file=sys.stderr,
+                flush=True,
+            )
 
     def publish(
         self,
@@ -122,53 +127,107 @@ class PermanentRunner:
         m = JOB_ID_RE.search(text) or EVENT_JOB_ID_RE.search(text)
         return int(m.group(1)) if m else None
 
-    def _persist_attempt(
-        self,
-        *,
-        target: Target,
-        attempt_id: str,
-        started_at: str,
-        ended_at: str,
-        returncode: int,
-        stdout: str,
-        stderr: str,
-    ) -> Path:
+    @staticmethod
+    def _queue_job_meta(queued_job: dict | None) -> dict:
+        row = queued_job if isinstance(queued_job, dict) else {}
+        song = row.get("song") if isinstance(row.get("song"), dict) else {}
+        return {
+            "job_id": row.get("job_id"),
+            "kind": row.get("kind"),
+            "song_id": row.get("song_id"),
+            "song_title": row.get("title") or song.get("title"),
+        }
+
+    def _begin_attempt(self, *, target: Target, attempt_id: str, started_at: str, queued_job: dict | None) -> Path:
+        meta = self._queue_job_meta(queued_job)
+        job_id = meta.get("job_id")
+        try:
+            job_id = int(job_id) if job_id is not None else None
+        except (TypeError, ValueError):
+            job_id = None
+        job_segment = str(job_id) if job_id is not None else "_unknown"
+        attempt_dir = self.runtime_root / "jobs" / target.value / job_segment / attempt_id
+        attempt_dir.mkdir(parents=True, exist_ok=True)
+        (attempt_dir / "execution.log").write_text("", encoding="utf-8")
+        (attempt_dir / "result.json").write_text(json.dumps({
+            "schema": "ezs.execution-attempt.v2",
+            "attempt_id": attempt_id,
+            "target": target.value,
+            "job_id": job_id,
+            "kind": meta.get("kind"),
+            "song_id": meta.get("song_id"),
+            "song_title": meta.get("song_title"),
+            "state": "running",
+            "started_at": started_at,
+            "ended_at": None,
+            "analysis_returncode": None,
+            "finalize_status": "pending",
+            "returncode": None,
+            "error": None,
+        }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return attempt_dir
+
+    def _persist_attempt(self, *, target: Target, attempt_dir: Path, attempt_id: str, started_at: str, ended_at: str, returncode: int, stdout: str, stderr: str, queued_job: dict | None) -> Path:
         combined = stdout
         if stderr:
             combined += ("\n" if combined and not combined.endswith("\n") else "")
             combined += "[stderr]\n" + stderr
-
-        job_id = self._extract_job_id(combined)
-        job_segment = str(job_id) if job_id is not None else "_unknown"
-        attempt_dir = (
-            self.runtime_root
-            / "jobs"
-            / target.value
-            / job_segment
-            / attempt_id
-        )
-        attempt_dir.mkdir(parents=True, exist_ok=True)
-
-        (attempt_dir / "execution.log").write_text(
-            combined,
-            encoding="utf-8",
-        )
-        (attempt_dir / "result.json").write_text(
-            json.dumps(
-                {
-                    "schema": "ezs.execution-attempt.v1",
-                    "attempt_id": attempt_id,
-                    "target": target.value,
-                    "job_id": job_id,
-                    "started_at": started_at,
-                    "ended_at": ended_at,
-                    "returncode": returncode,
-                },
-                ensure_ascii=False,
-                indent=2,
-            ) + "\n",
-            encoding="utf-8",
-        )
+        queue_meta = self._queue_job_meta(queued_job)
+        operator_meta = {}
+        finalize_meta = {}
+        for line in combined.splitlines():
+            try:
+                parsed = json.loads(line)
+            except Exception:
+                continue
+            if not isinstance(parsed, dict):
+                continue
+            if parsed.get("event") == "job_meta":
+                operator_meta = parsed
+            elif parsed.get("event") == "job_finalize_error":
+                finalize_meta = parsed
+        job_id = operator_meta.get("job_id", queue_meta.get("job_id"))
+        if job_id is None:
+            job_id = self._extract_job_id(combined)
+        try:
+            job_id = int(job_id) if job_id is not None else None
+        except (TypeError, ValueError):
+            job_id = None
+        kind = operator_meta.get("kind") or queue_meta.get("kind")
+        song_id = operator_meta.get("song_id") if operator_meta.get("song_id") is not None else queue_meta.get("song_id")
+        song_title = operator_meta.get("song_title") or queue_meta.get("song_title")
+        if finalize_meta:
+            state = "finalize_error"
+            analysis_returncode = 0
+            finalize_status = "error"
+            error = str(finalize_meta.get("error") or "complete_callback_failed")[:500]
+        elif returncode == 0:
+            state = "completed"
+            analysis_returncode = 0
+            finalize_status = "ok"
+            error = None
+        else:
+            state = "failed"
+            analysis_returncode = returncode
+            finalize_status = "not_attempted"
+            error = None
+        (attempt_dir / "execution.log").write_text(combined, encoding="utf-8")
+        (attempt_dir / "result.json").write_text(json.dumps({
+            "schema": "ezs.execution-attempt.v2",
+            "attempt_id": attempt_id,
+            "target": target.value,
+            "job_id": job_id,
+            "kind": kind,
+            "song_id": song_id,
+            "song_title": song_title,
+            "state": state,
+            "started_at": started_at,
+            "ended_at": ended_at,
+            "analysis_returncode": analysis_returncode,
+            "finalize_status": finalize_status,
+            "returncode": returncode,
+            "error": error,
+        }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return attempt_dir
 
     def _busy_heartbeat_loop(
@@ -209,62 +268,26 @@ class PermanentRunner:
                         active_target=active_target.value,
                     )
 
-    def run_one_child(
-        self,
-        target: Target,
-        queued_by_target: dict[Target, int],
-    ) -> tuple[int, Path]:
+    def run_one_child(self, target: Target, queued_by_target: dict[Target, int], queued_job: dict | None = None) -> tuple[int, Path]:
         attempt_id = f"{utc_stamp()}-{uuid.uuid4().hex[:8]}"
         started_at = datetime.now(timezone.utc).isoformat()
-
-        cmd = [
-            sys.executable,
-            "-m",
-            "control_center.cli",
-            "run-once",
-            "--target",
-            target.value,
-        ]
-
+        attempt_dir = self._begin_attempt(target=target, attempt_id=attempt_id, started_at=started_at, queued_job=queued_job)
+        cmd = [sys.executable, "-m", "control_center.cli", "run-once", "--target", target.value]
         stop_event = threading.Event()
-        heartbeat_thread = threading.Thread(
-            target=self._busy_heartbeat_loop,
-            args=(stop_event, target, queued_by_target),
-            name="ezs-analysis-capability-heartbeat",
-            daemon=True,
-        )
+        heartbeat_thread = threading.Thread(target=self._busy_heartbeat_loop, args=(stop_event, target, queued_by_target), name="ezs-analysis-capability-heartbeat", daemon=True)
         heartbeat_thread.start()
         try:
-            proc = subprocess.run(
-                cmd,
-                cwd=str(self.config.orchestrator_root),
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                encoding="utf-8",
-                errors="replace",
-            )
+            proc = subprocess.run(cmd, cwd=str(self.config.orchestrator_root), text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8", errors="replace")
         finally:
             stop_event.set()
             heartbeat_thread.join(timeout=max(2.0, self.poll_seconds * 2))
-
         ended_at = datetime.now(timezone.utc).isoformat()
-        attempt_dir = self._persist_attempt(
-            target=target,
-            attempt_id=attempt_id,
-            started_at=started_at,
-            ended_at=ended_at,
-            returncode=proc.returncode,
-            stdout=proc.stdout or "",
-            stderr=proc.stderr or "",
-        )
-
+        attempt_dir = self._persist_attempt(target=target, attempt_dir=attempt_dir, attempt_id=attempt_id, started_at=started_at, ended_at=ended_at, returncode=proc.returncode, stdout=proc.stdout or "", stderr=proc.stderr or "", queued_job=queued_job)
         if proc.stdout:
             print(proc.stdout, end="")
         if proc.stderr:
             print(proc.stderr, end="", file=sys.stderr)
         print(f"attempt_log={attempt_dir}")
-
         return proc.returncode, attempt_dir
 
     def _ordered_targets(self) -> tuple[Target, ...]:
@@ -362,7 +385,8 @@ class PermanentRunner:
                             active_target=selected.value,
                         )
 
-                rc, attempt_dir = self.run_one_child(selected, queue_counts)
+                queued_job = queues.get(selected, [None])[0]
+                rc, attempt_dir = self.run_one_child(selected, queue_counts, queued_job=queued_job)
 
                 self.publish(
                     selected,

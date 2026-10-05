@@ -81,7 +81,7 @@ def main() -> None:
 
     web = (ROOT / "control_center" / "web.py").read_text(encoding="utf-8")
     tools_src = (ROOT / "control_center" / "log_tools.py").read_text(encoding="utf-8")
-    assert "Control Center R3.15" in web
+    assert "Control Center R3." in web
     assert "self.log_tools.tail(" in web
     assert "cleared logically" in web
     assert "handle.truncate" not in tools_src

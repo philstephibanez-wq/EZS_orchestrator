@@ -76,17 +76,20 @@ def _command_line_uncached(pid: int) -> str | None:
         f'$p=Get-CimInstance Win32_Process -Filter "ProcessId = {int(pid)}" '
         "-ErrorAction SilentlyContinue; if($p){[Console]::Out.Write($p.CommandLine)}"
     )
-    proc = subprocess.run(
-        ["powershell", "-NoProfile", "-Command", script],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        creationflags=WINDOWS_NO_WINDOW,
-        check=False,
-        timeout=3.0,
-    )
+    try:
+        proc = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", script],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=WINDOWS_NO_WINDOW,
+            check=False,
+            timeout=3.0,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
     value = proc.stdout.strip()
     return value or None
 
@@ -97,32 +100,48 @@ def command_line(pid: int) -> str | None:
     return _cached("cmd", int(pid), lambda: _command_line_uncached(int(pid)))
 
 
+class _MIB_TCPROW_OWNER_PID(ctypes.Structure):
+    _fields_ = [
+        ("dwState", ctypes.c_ulong),
+        ("dwLocalAddr", ctypes.c_ulong),
+        ("dwLocalPort", ctypes.c_ulong),
+        ("dwRemoteAddr", ctypes.c_ulong),
+        ("dwRemotePort", ctypes.c_ulong),
+        ("dwOwningPid", ctypes.c_ulong),
+    ]
+
+
 def _listener_pid_uncached(port: int) -> int | None:
     if os.name != "nt":
         return None
-    script = (
-        f"$c=Get-NetTCPConnection -LocalPort {int(port)} -State Listen "
-        "-ErrorAction SilentlyContinue | Select-Object -First 1; "
-        "if($c){[Console]::Out.Write($c.OwningProcess)}"
-    )
-    proc = subprocess.run(
-        ["powershell", "-NoProfile", "-Command", script],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
-        encoding="ascii",
-        errors="ignore",
-        creationflags=WINDOWS_NO_WINDOW,
-        check=False,
-        timeout=3.0,
-    )
+
+    AF_INET = 2
+    TCP_TABLE_OWNER_PID_LISTENER = 3
+    ERROR_INSUFFICIENT_BUFFER = 122
+
     try:
-        value = int(proc.stdout.strip())
-        return value if value > 0 else None
+        get_table = ctypes.windll.iphlpapi.GetExtendedTcpTable
+        size = ctypes.c_ulong(0)
+        rc = get_table(None, ctypes.byref(size), False, AF_INET, TCP_TABLE_OWNER_PID_LISTENER, 0)
+        if rc not in (0, ERROR_INSUFFICIENT_BUFFER) or size.value <= 4:
+            return None
+        buffer = ctypes.create_string_buffer(size.value)
+        rc = get_table(buffer, ctypes.byref(size), False, AF_INET, TCP_TABLE_OWNER_PID_LISTENER, 0)
+        if rc != 0:
+            return None
+        count = ctypes.c_ulong.from_buffer_copy(buffer.raw[:4]).value
+        row_size = ctypes.sizeof(_MIB_TCPROW_OWNER_PID)
+        for index in range(int(count)):
+            offset = 4 + index * row_size
+            row = _MIB_TCPROW_OWNER_PID.from_buffer_copy(buffer.raw[offset:offset + row_size])
+            raw_port = int(row.dwLocalPort) & 0xFFFF
+            local_port = ((raw_port & 0xFF) << 8) | ((raw_port >> 8) & 0xFF)
+            if local_port == int(port):
+                pid = int(row.dwOwningPid)
+                return pid if pid > 0 else None
     except Exception:
         return None
-
-
+    return None
 def listener_pid(port: int) -> int | None:
     if port <= 0:
         return None
