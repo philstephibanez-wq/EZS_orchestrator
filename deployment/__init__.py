@@ -1,3 +1,6 @@
-from .manager import DeploymentManager, DeploymentPreflight
+from .manager import DeploymentManager, DeploymentPlan
 
-__all__ = ["DeploymentManager", "DeploymentPreflight"]
+# Backward compatibility with the pre-V1.0 package API.
+DeploymentPreflight = DeploymentPlan
+
+__all__ = ["DeploymentManager", "DeploymentPlan", "DeploymentPreflight"]

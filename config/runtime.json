@@ -23,7 +23,8 @@
         "prod"
       ],
       "default_env": "prod",
-      "analysis_python": "H:\\EZScore\\.venv-py313\\Scripts\\python.exe"
+      "analysis_python": "H:\\EZScore\\.venv-py313\\Scripts\\python.exe",
+      "web_php": "H:\\PHP\\php-8.5-x64\\php.exe"
     }
   },
   "analysis": {
