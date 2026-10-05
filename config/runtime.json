@@ -1,4 +1,4 @@
-{
+﻿{
   "schema": "ezs.orchestrator.config.v4",
   "orchestrator_root": "H:\\EZS_orchestrator",
   "servers": {
@@ -11,7 +11,8 @@
         "prod"
       ],
       "default_env": "dev",
-      "analysis_python": "H:\\EZScore_dev\\.venv-py313\\Scripts\\python.exe"
+      "analysis_python": "H:\\EZScore_dev\\.venv-py313\\Scripts\\python.exe",
+      "web_php": "H:\\PHP\\php-8.5-x64\\php.exe"
     },
     "prod": {
       "root": "H:\\EZScore",

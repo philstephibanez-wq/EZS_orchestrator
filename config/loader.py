@@ -19,6 +19,12 @@ class RuntimeConfig:
     gpu_slots: int
     dev_backend_url: str
     prod_backend_url: str
+    dev_web_php: Path | None
+    prod_web_php: Path | None
+
+    def web_php_for(self, target: Target) -> Path:
+        configured = self.dev_web_php if target is Target.DEV else self.prod_web_php
+        return configured if configured is not None else Path("php")
 
     def analysis_python_for(self, target: Target) -> Path:
         return self.dev_analysis_python if target is Target.DEV else self.prod_analysis_python
@@ -67,6 +73,17 @@ def load_runtime_config(path: Path | None = None) -> RuntimeConfig:
     dev = server(Target.DEV)
     prod = server(Target.PROD)
 
+    dev_web_php = (
+        Path(data["servers"]["dev"]["web_php"])
+        if data["servers"]["dev"].get("web_php")
+        else None
+    )
+    prod_web_php = (
+        Path(data["servers"]["prod"]["web_php"])
+        if data["servers"]["prod"].get("web_php")
+        else None
+    )
+
     slots = int(data["resources"]["gpu_slots"])
     if slots < 1:
         raise ValueError("gpu_slots must be >= 1")
@@ -102,4 +119,6 @@ def load_runtime_config(path: Path | None = None) -> RuntimeConfig:
         gpu_slots=slots,
         dev_backend_url=dev_backend_url,
         prod_backend_url=prod_backend_url,
+        dev_web_php=dev_web_php,
+        prod_web_php=prod_web_php,
     )

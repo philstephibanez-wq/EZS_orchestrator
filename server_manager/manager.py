@@ -130,7 +130,10 @@ class ServerManager:
             })
             return self.view(target, env)
 
-        php = "php"
+        php_path = self.config.web_php_for(target)
+        if php_path.is_absolute() and not php_path.is_file():
+            raise RuntimeError(f"PHP executable missing for {target.value}: {php_path}")
+        php = str(php_path)
         out_path = self.logs / f"{target.value}.out.log"
         err_path = self.logs / f"{target.value}.err.log"
         out = out_path.open("ab")
