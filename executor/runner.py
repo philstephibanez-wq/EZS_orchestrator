@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import tempfile
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -66,6 +67,7 @@ class JobExecutor:
         job: JobEnvelope,
         *,
         on_output: Callable[[str], None] | None = None,
+        on_progress: Callable[[int], None] | None = None,
         timeout: float | None = None,
     ) -> ExecutionResult:
         plan = self.planner.plan(job)
@@ -90,6 +92,15 @@ class JobExecutor:
             str(job_file),
         ]
 
+        raw_progress_path = (getattr(job, "paths", None) or {}).get("progress_file")
+        progress_path = Path(str(raw_progress_path)) if raw_progress_path else None
+        progress_baseline_mtime_ns = None
+        if progress_path is not None:
+            try:
+                progress_baseline_mtime_ns = progress_path.stat().st_mtime_ns
+            except OSError:
+                pass
+
         tail: list[str] = []
         try:
             proc = subprocess.Popen(
@@ -105,6 +116,46 @@ class JobExecutor:
                 creationflags=WINDOWS_NO_WINDOW if os.name == "nt" else 0,
             )
 
+            stop_progress = threading.Event()
+            progress_thread: threading.Thread | None = None
+
+            if on_progress is not None and progress_path is not None:
+                def watch_progress() -> None:
+                    last_percent: int | None = None
+                    while not stop_progress.is_set():
+                        try:
+                            stat = progress_path.stat()
+                            if (
+                                progress_baseline_mtime_ns is not None
+                                and stat.st_mtime_ns == progress_baseline_mtime_ns
+                            ):
+                                stop_progress.wait(0.20)
+                                continue
+
+                            payload = json.loads(progress_path.read_text(encoding="utf-8"))
+                            percent = int(payload.get("percent", 0))
+                            percent = max(0, min(100, percent))
+                            if percent != last_percent:
+                                try:
+                                    on_progress(percent)
+                                except Exception as exc:
+                                    if on_output is not None:
+                                        on_output(
+                                            "progress_callback_error:"
+                                            f"{type(exc).__name__}:{exc}"
+                                        )
+                                last_percent = percent
+                        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                            pass
+                        stop_progress.wait(0.20)
+
+                progress_thread = threading.Thread(
+                    target=watch_progress,
+                    name=f"ezs-progress-{job.job_id}",
+                    daemon=True,
+                )
+                progress_thread.start()
+
             try:
                 if proc.stdout is not None:
                     for line in proc.stdout:
@@ -119,6 +170,10 @@ class JobExecutor:
                 if proc.poll() is None:
                     proc.terminate()
                 raise
+            finally:
+                stop_progress.set()
+                if progress_thread is not None:
+                    progress_thread.join(timeout=1.0)
 
             return ExecutionResult(returncode, tuple(tail))
         finally:

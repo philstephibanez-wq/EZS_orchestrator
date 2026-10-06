@@ -103,9 +103,20 @@ class OrchestrationService:
 
             # Executor performs Planner validation before spawning the subprocess.
             # Any exception here is handled below and converted to target fail.
+            def publish_progress(percent: int) -> None:
+                self.transport.progress(target, claimed.job_id, percent)
+                if on_output is not None:
+                    on_output(json.dumps({
+                        "event": "job_progress",
+                        "job_id": claimed.job_id,
+                        "kind": claimed.kind,
+                        "progress": int(percent),
+                    }, ensure_ascii=False))
+
             result: ExecutionResult = self.executor.run(
                 claimed,
                 on_output=on_output,
+                on_progress=publish_progress,
             )
 
             if result.returncode == 0:
