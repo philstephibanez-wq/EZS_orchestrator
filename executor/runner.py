@@ -20,6 +20,7 @@ WINDOWS_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 class ExecutionResult:
     returncode: int
     stdout_tail: tuple[str, ...]
+    cancelled: bool = False
 
 
 class JobExecutor:
@@ -52,6 +53,29 @@ class JobExecutor:
         return path
 
     @staticmethod
+    def _terminate_process_tree(proc: subprocess.Popen) -> None:
+        if proc.poll() is not None:
+            return
+        if os.name == "nt":
+            completed = subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                creationflags=WINDOWS_NO_WINDOW,
+            )
+            if completed.returncode == 0:
+                return
+        try:
+            proc.terminate()
+            proc.wait(timeout=3)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+    @staticmethod
     def _validate_runtime_files(plan: ExecutionPlan) -> None:
         if not plan.python.is_file():
             raise RuntimeError(
@@ -68,6 +92,7 @@ class JobExecutor:
         *,
         on_output: Callable[[str], None] | None = None,
         on_progress: Callable[[int], None] | None = None,
+        should_cancel: Callable[[], bool] | None = None,
         timeout: float | None = None,
     ) -> ExecutionResult:
         plan = self.planner.plan(job)
@@ -118,6 +143,33 @@ class JobExecutor:
 
             stop_progress = threading.Event()
             progress_thread: threading.Thread | None = None
+            stop_cancel = threading.Event()
+            cancel_thread: threading.Thread | None = None
+            cancellation_seen = threading.Event()
+
+            if should_cancel is not None:
+                def watch_cancel() -> None:
+                    while not stop_cancel.wait(0.25):
+                        try:
+                            if should_cancel():
+                                cancellation_seen.set()
+                                if on_output is not None:
+                                    on_output(f"cancellation_requested:job_id={job.job_id}")
+                                self._terminate_process_tree(proc)
+                                return
+                        except Exception as exc:
+                            if on_output is not None:
+                                on_output(
+                                    "cancellation_callback_error:"
+                                    f"{type(exc).__name__}:{exc}"
+                                )
+
+                cancel_thread = threading.Thread(
+                    target=watch_cancel,
+                    name=f"ezs-cancel-{job.job_id}",
+                    daemon=True,
+                )
+                cancel_thread.start()
 
             if on_progress is not None and progress_path is not None:
                 def watch_progress() -> None:
@@ -168,13 +220,20 @@ class JobExecutor:
                 returncode = int(proc.wait(timeout=timeout))
             except Exception:
                 if proc.poll() is None:
-                    proc.terminate()
+                    self._terminate_process_tree(proc)
                 raise
             finally:
                 stop_progress.set()
+                stop_cancel.set()
                 if progress_thread is not None:
                     progress_thread.join(timeout=1.0)
+                if cancel_thread is not None:
+                    cancel_thread.join(timeout=1.0)
 
-            return ExecutionResult(returncode, tuple(tail))
+            return ExecutionResult(
+                returncode,
+                tuple(tail),
+                cancelled=cancellation_seen.is_set(),
+            )
         finally:
             job_file.unlink(missing_ok=True)

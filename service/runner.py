@@ -184,6 +184,7 @@ class PermanentRunner:
         queue_meta = self._queue_job_meta(queued_job)
         operator_meta = {}
         finalize_meta = {}
+        cancelled_meta = {}
         for line in combined.splitlines():
             try:
                 parsed = json.loads(line)
@@ -195,6 +196,8 @@ class PermanentRunner:
                 operator_meta = parsed
             elif parsed.get("event") == "job_finalize_error":
                 finalize_meta = parsed
+            elif parsed.get("event") == "job_cancelled":
+                cancelled_meta = parsed
         job_id = operator_meta.get("job_id", queue_meta.get("job_id"))
         if job_id is None:
             job_id = self._extract_job_id(combined)
@@ -205,7 +208,12 @@ class PermanentRunner:
         kind = operator_meta.get("kind") or queue_meta.get("kind")
         song_id = operator_meta.get("song_id") if operator_meta.get("song_id") is not None else queue_meta.get("song_id")
         song_title = operator_meta.get("song_title") or queue_meta.get("song_title")
-        if finalize_meta:
+        if cancelled_meta:
+            state = "cancelled"
+            analysis_returncode = 0
+            finalize_status = "cancelled"
+            error = None
+        elif finalize_meta:
             state = "finalize_error"
             analysis_returncode = 0
             finalize_status = "error"

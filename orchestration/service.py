@@ -117,7 +117,24 @@ class OrchestrationService:
                 claimed,
                 on_output=on_output,
                 on_progress=publish_progress,
+                should_cancel=lambda: self.transport.cancel_requested(
+                    target, claimed.job_id
+                ),
             )
+
+            if result.cancelled:
+                self.transport.cancelled(target, claimed.job_id)
+                if on_output is not None:
+                    on_output(json.dumps({
+                        "event": "job_cancelled",
+                        "job_id": claimed.job_id,
+                        "kind": claimed.kind,
+                    }, ensure_ascii=False))
+                return RunOutcome(
+                    target=target,
+                    job_id=claimed.job_id,
+                    returncode=0,
+                )
 
             if result.returncode == 0:
                 try:

@@ -62,6 +62,16 @@ class JobTransport:
         )
         return data
 
+    def status(self, target: Target, job_id: int) -> dict:
+        data = self.registry.endpoint(target).client().get(
+            f"/internal/analysis/desktop/jobs/{job_id}/context"
+        )
+        return data if isinstance(data, dict) else {}
+
+    def cancel_requested(self, target: Target, job_id: int) -> bool:
+        status = str(self.status(target, job_id).get("status") or "").lower()
+        return status in {"cancelling", "cancelled"}
+
     def progress(self, target: Target, job_id: int, percent: int) -> None:
         self.registry.endpoint(target).client().post(
             f"/internal/analysis/desktop/jobs/{job_id}/progress",
@@ -72,6 +82,14 @@ class JobTransport:
         try:
             self.registry.endpoint(target).client().post(
                 f"/internal/analysis/desktop/jobs/{job_id}/complete", {}
+            )
+        finally:
+            self._execution_singleton.release()
+
+    def cancelled(self, target: Target, job_id: int) -> None:
+        try:
+            self.registry.endpoint(target).client().post(
+                f"/internal/analysis/desktop/jobs/{job_id}/cancelled", {}
             )
         finally:
             self._execution_singleton.release()
