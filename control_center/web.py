@@ -135,6 +135,12 @@ class ControlCenter:
                 "analysis_python": str(self.config.analysis_python_for(Target.PROD)),
                 "transport": self.config.transport_url_for(Target.PROD),
             },
+            "lab": {
+                "queue": self._queue(Target.LAB),
+                "analysis_python": str(self.config.analysis_python_for(Target.LAB)),
+                "transport": self.config.transport_url_for(Target.LAB),
+                "root": str(self.config.lab.root) if self.config.lab is not None else None,
+            },
         }
 
     def snapshot(self, force: bool = False) -> dict:
@@ -324,9 +330,9 @@ main{padding:20px;max-width:1600px;margin:auto}.view{display:none}.view.active{d
 
 <section id="view-infrastructure" class="view active">
   <section class="grid3">
-    <article class="card"><h2>Service permanent</h2><div class="statusrow"><span id="serviceDot" class="dot"></span><span id="serviceState">-</span></div><div class="big" id="serviceTarget">-</div><div class="muted" id="serviceMeta">-</div><div class="actions"><button id="serviceStart" class="primary">Démarrer service DEV + PROD</button><button id="serviceStop">Arrêter service</button></div></article>
+    <article class="card"><h2>Service permanent</h2><div class="statusrow"><span id="serviceDot" class="dot"></span><span id="serviceState">-</span></div><div class="big" id="serviceTarget">-</div><div class="muted" id="serviceMeta">-</div><div class="actions"><button id="serviceStart" class="primary">Démarrer service DEV + PROD + LAB</button><button id="serviceStop">Arrêter service</button></div></article>
     <article class="card"><h2>GPU / exécution</h2><div class="statusrow"><span id="gpuDot" class="dot"></span><span id="gpuState">-</span></div><div class="big">1 slot GPU</div><div class="muted">Singleton machine-wide protégé.</div></article>
-    <article class="card"><h2>Politique de sûreté</h2><div class="lock">DEV et PROD restent physiquement isolés. Les actions destructives sont bloquées pendant une analyse.</div><div class="muted" style="margin-top:10px">Les diagnostics n'exportent pas runtime/jobs ni les données métier.</div></article>
+    <article class="card"><h2>Politique de sûreté</h2><div class="lock">DEV, PROD et LAB restent physiquement isolés. Les actions destructives sont bloquées pendant une analyse.</div><div class="muted" style="margin-top:10px">Les diagnostics n'exportent pas runtime/jobs ni les données métier.</div></article>
   </section>
   <section class="grid2" style="margin-top:14px">
     <article class="card target dev"><h2>DEV</h2><div class="statusrow"><span id="devDot" class="dot"></span><strong id="devState">-</strong></div><dl class="kv"><dt>Root</dt><dd id="devRoot">-</dd><dt>APP_ENV</dt><dd id="devEnv">-</dd><dt>Backend</dt><dd id="devBackend">-</dd><dt>Caddy</dt><dd id="devCaddy">-</dd><dt>Transport</dt><dd id="devTransport">-</dd><dt>Python analyse</dt><dd id="devPython">-</dd><dt>Ownership</dt><dd id="devOwnership">-</dd></dl><div class="actions"><button data-action="dev-server-start" class="primary">Démarrer backend</button><button data-action="dev-server-restart">Redémarrer backend</button><button data-action="dev-server-stop" data-destructive="1" class="danger">Arrêter backend</button><button data-action="dev-caddy-start">Démarrer Caddy</button><a class="btn primary" href="http://127.0.0.1:8502/fr/catalog" target="_blank" rel="noreferrer">Ouvrir DEV</a></div></article>
@@ -335,9 +341,10 @@ main{padding:20px;max-width:1600px;margin:auto}.view{display:none}.view.active{d
   </section>
 
 <section id="view-queues" class="view">
-  <section class="grid2">
+  <section class="grid3">
     <article class="card queueCard"><h2>Queue DEV</h2><strong id="devQueueCount">-</strong><div id="devQueueList" class="queueList"></div></article>
     <article class="card queueCard"><h2>Queue PROD</h2><strong id="prodQueueCount">-</strong><div id="prodQueueList" class="queueList"></div></article>
+    <article class="card queueCard"><h2>Queue LAB</h2><strong id="labQueueCount">-</strong><div id="labQueueList" class="queueList"></div><div class="muted" id="labQueueMeta"></div></article>
   </section>
   <section class="card" style="margin-top:14px"><div style="display:flex;justify-content:space-between;gap:12px"><h2>Jobs récents</h2><span class="muted" id="jobsMeta">Chargement…</span></div><div class="tablewrap"><table class="datatable"><thead><tr><th>Job</th><th>Cible</th><th>Chanson</th><th>Type</th><th>État</th><th>Date</th><th>RC analyse</th><th>Finalisation</th><th>Erreur</th></tr></thead><tbody id="jobsBody"><tr><td colspan="9">Chargement…</td></tr></tbody></table></div></section>
 </section>
@@ -460,7 +467,9 @@ function renderStatus(s){
  dot($("gpuDot"),!analysisActive,analysisActive);txt("gpuState",analysisActive?"OCCUPÉ":"LIBRE");
  const svc=s.service||{};dot($("serviceDot"),!!svc.running);txt("serviceState",svc.running?"RUNNING":"STOPPED");txt("serviceTarget",svc.target?String(svc.target).toUpperCase():"-");txt("serviceMeta",`pid=${svc.pid??'-'} · state=${svc.state??'-'} · heartbeat=${svc.heartbeat??'-'}`);$("serviceStart").disabled=busy||!!svc.running;$("serviceStop").disabled=busy||!svc.running;
  const d=s.dev,ds=d.server,dc=d.caddy;const devHealthy=!!(ds.process_alive&&ds.http_alive&&dc.process_alive&&dc.http_alive);devFailures=devHealthy?0:devFailures+1;const devShown=devHealthy||devFailures<3;dot($("devDot"),devShown,!devHealthy);txt("devState",devHealthy?"ONLINE":(devFailures<3?"DEGRADED / CHECKING":"PROCESS / HTTP DOWN"));txt("devRoot",ds.root);txt("devEnv",ds.app_env);txt("devBackend",`:${ds.backend_port} · ${fmtProc(ds)}`);txt("devCaddy",`:${dc.public_port} · ${fmtProc(dc)}`);txt("devTransport",d.transport);txt("devPython",d.analysis_python);txt("devOwnership",ds.ownership);renderQueue("devQueueCount","devQueueList",d.queue);
- const p=s.prod,pl=p.lifecycle,pb=pl.backend,pg=pl.gateway,pc=pl.caddy;const prodHealthy=!!pl.online;prodFailures=prodHealthy?0:prodFailures+1;const prodShown=prodHealthy||prodFailures<3;dot($("prodDot"),prodShown,!prodHealthy);txt("prodState",prodHealthy?"ONLINE":(prodFailures<3?"DEGRADED / CHECKING":"CHAIN INCOMPLETE / DOWN"));txt("prodRoot",pb.root);txt("prodBackend",`:${pb.backend_port} · ${fmtProc(pb)}`);txt("prodGateway",`:${pg.port} · pid ${pg.pid??'-'} · ${pg.process_alive?'PROCESS OK':'PROCESS OFF'} · ${pg.http_alive?'HTTP OK':'HTTP OFF'} · ${pg.protocol??'-'} · ownership=${pg.ownership}`);txt("prodCaddy",`:${pc.public_port} · ${fmtProc(pc)}`);txt("prodTransport",p.transport);txt("prodPython",p.analysis_python);txt("prodOwnership",pb.ownership);renderQueue("prodQueueCount","prodQueueList",p.queue);const mode=$("prodMode");mode.textContent=(pl.mode||"-").toUpperCase();mode.className="mode "+(pl.mode==="maintenance"?"maintenance":"");syncActionButtons();
+ const p=s.prod,pl=p.lifecycle,pb=pl.backend,pg=pl.gateway,pc=pl.caddy;const prodHealthy=!!pl.online;prodFailures=prodHealthy?0:prodFailures+1;const prodShown=prodHealthy||prodFailures<3;dot($("prodDot"),prodShown,!prodHealthy);txt("prodState",prodHealthy?"ONLINE":(prodFailures<3?"DEGRADED / CHECKING":"CHAIN INCOMPLETE / DOWN"));txt("prodRoot",pb.root);txt("prodBackend",`:${pb.backend_port} · ${fmtProc(pb)}`);txt("prodGateway",`:${pg.port} · pid ${pg.pid??'-'} · ${pg.process_alive?'PROCESS OK':'PROCESS OFF'} · ${pg.http_alive?'HTTP OK':'HTTP OFF'} · ${pg.protocol??'-'} · ownership=${pg.ownership}`);txt("prodCaddy",`:${pc.public_port} · ${fmtProc(pc)}`);txt("prodTransport",p.transport);txt("prodPython",p.analysis_python);txt("prodOwnership",pb.ownership);renderQueue("prodQueueCount","prodQueueList",p.queue);const mode=$("prodMode");mode.textContent=(pl.mode||"-").toUpperCase();mode.className="mode "+(pl.mode==="maintenance"?"maintenance":"");
+ const l=s.lab||{};renderQueue("labQueueCount","labQueueList",l.queue);txt("labQueueMeta",`${l.transport??"-"} · ${l.analysis_python??"-"}`);
+ syncActionButtons();
 }
 function renderJobs(payload){
  const jobs=(payload&&payload.jobs)||[];txt("jobsMeta",payload&&payload.ok?`${payload.count??jobs.length} job(s) · lecture seule`:"Erreur");
