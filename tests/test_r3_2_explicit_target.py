@@ -33,7 +33,7 @@ class _FakeExecutor:
         returncode = 0
         stdout_tail = ()
 
-    def run(self, job, on_output=None):
+    def run(self, job, on_output=None, on_progress=None):
         return self.R()
 
 

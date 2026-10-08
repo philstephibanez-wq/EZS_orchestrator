@@ -42,7 +42,7 @@ def status() -> int:
 def queue_status(target: Target | None) -> int:
     config = load_runtime_config()
     transport = JobTransport(TargetRegistry(config))
-    targets = (target,) if target is not None else (Target.DEV, Target.PROD)
+    targets = (target,) if target is not None else (Target.DEV, Target.PROD, Target.LAB)
     failed = False
     for item in targets:
         try:
@@ -110,10 +110,10 @@ def main() -> int:
     sub.add_parser("health")
 
     queue_parser = sub.add_parser("queue")
-    queue_parser.add_argument("--target", choices=("dev", "prod"), default=None)
+    queue_parser.add_argument("--target", choices=("dev", "prod", "lab"), default=None)
 
     run_parser = sub.add_parser("run-once")
-    run_parser.add_argument("--target", choices=("dev", "prod"), required=True)
+    run_parser.add_argument("--target", choices=("dev", "prod", "lab"), required=True)
 
     for name in ("server-start", "server-stop", "server-restart"):
         p = sub.add_parser(name)

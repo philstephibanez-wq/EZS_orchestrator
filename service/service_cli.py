@@ -187,8 +187,8 @@ def main() -> int:
     for name in ("start", "run"):
         sp = sub.add_parser(name)
         sp.add_argument(
-            "--target", choices=("all", "dev", "prod"), required=True,
-            help="all = one permanent service polling DEV and PROD",
+            "--target", choices=("all", "dev", "prod", "lab"), required=True,
+            help="all = one permanent service polling DEV, PROD and LAB",
         )
         sp.add_argument("--poll-seconds", type=float, default=2.0)
     sub.add_parser("status")

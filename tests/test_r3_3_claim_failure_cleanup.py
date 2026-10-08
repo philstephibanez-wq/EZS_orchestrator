@@ -38,7 +38,7 @@ class _Scheduler:
 
 
 class _Executor:
-    def run(self, job, on_output=None):
+    def run(self, job, on_output=None, on_progress=None):
         raise RuntimeError(
             r"Cross-root path forbidden for dev: H:\EZScore\var\storage\lyrics\lyrics.txt"
         )

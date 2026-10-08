@@ -12,13 +12,14 @@ from service.runner import targets_for_scope
 
 
 class R311AnalysisCapabilityTest(unittest.TestCase):
-    def test_all_scope_contains_both_targets(self):
+    def test_all_scope_contains_all_targets(self):
         self.assertEqual(
             targets_for_scope(None),
-            (Target.DEV, Target.PROD),
+            (Target.DEV, Target.PROD, Target.LAB),
         )
         self.assertEqual(targets_for_scope(Target.DEV), (Target.DEV,))
         self.assertEqual(targets_for_scope(Target.PROD), (Target.PROD,))
+        self.assertEqual(targets_for_scope(Target.LAB), (Target.LAB,))
 
     def test_capability_is_target_owned(self):
         with tempfile.TemporaryDirectory() as td:

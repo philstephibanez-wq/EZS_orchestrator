@@ -116,7 +116,7 @@ class JobHistory:
         rows = []
         if not self.jobs_root.is_dir():
             return rows
-        for target in ("dev", "prod"):
+        for target in ("dev", "prod", "lab"):
             tr = self.jobs_root/target
             if not tr.is_dir():
                 continue

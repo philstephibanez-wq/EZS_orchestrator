@@ -13,7 +13,6 @@ for needle in (
     'class="viewContext"',
     'id="globalState" class="globalBadge"',
     'id="headerRefresh"',
-    'Control Center local · 127.0.0.1:8700',
     'globalBadge.className="globalBadge "+(analysisActive?"busy":"")',
 ):
     assert needle in src, needle

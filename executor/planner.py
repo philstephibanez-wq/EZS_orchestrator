@@ -36,20 +36,32 @@ class ExecutionPlanner:
             return False
 
     def root_for(self, target: Target) -> Path:
-        return self.config.dev.root if target is Target.DEV else self.config.prod.root
+        if target is Target.DEV:
+            return self.config.dev.root
+        if target is Target.PROD:
+            return self.config.prod.root
+        lab = getattr(self.config, "lab", None)
+        if target is Target.LAB and lab is not None:
+            return lab.root
+        raise ValueError(f"Unsupported target root: {target!r}")
 
-    def forbidden_root_for(self, target: Target) -> Path:
-        return self.config.prod.root if target is Target.DEV else self.config.dev.root
+    def forbidden_roots_for(self, target: Target) -> tuple[Path, ...]:
+        roots = [self.config.dev.root, self.config.prod.root]
+        lab = getattr(self.config, "lab", None)
+        if lab is not None:
+            roots.append(lab.root)
+        owned = self.root_for(target)
+        return tuple(root for root in roots if self._resolved(root) != self._resolved(owned))
 
     def python_for(self, target: Target) -> Path:
         return self.config.analysis_python_for(target)
 
     def validate_external_path(self, job: JobEnvelope, path: Path) -> None:
-        forbidden = self.forbidden_root_for(job.target)
-        if self._is_under(path, forbidden):
-            raise RuntimeError(
-                f"Cross-root path forbidden for {job.target.value}: {path}"
-            )
+        for forbidden in self.forbidden_roots_for(job.target):
+            if self._is_under(path, forbidden):
+                raise RuntimeError(
+                    f"Cross-root path forbidden for {job.target.value}: {path}"
+                )
 
     def validate_payload_paths(self, job: JobEnvelope, value: Any) -> None:
         if isinstance(value, dict):
@@ -85,13 +97,20 @@ class ExecutionPlanner:
         planner makes architecture contracts deterministic/offline while still
         preserving fail-closed runtime behavior.
         """
-        forbidden = self.forbidden_root_for(target)
+        for forbidden in self.forbidden_roots_for(target):
+            if self._is_under(python_path, forbidden):
+                raise RuntimeError(
+                    f"Cross-root analysis Python forbidden for {target.value}: "
+                    f"{python_path}"
+                )
 
-        if self._is_under(python_path, forbidden):
-            raise RuntimeError(
-                f"Cross-root analysis Python forbidden for {target.value}: "
-                f"{python_path}"
-            )
+        if target is Target.LAB:
+            configured = getattr(self.config, "lab_analysis_python", None)
+            if configured is None or self._resolved(python_path) != self._resolved(configured):
+                raise RuntimeError(
+                    f"LAB analysis Python must match configured executable: {python_path}"
+                )
+            return
 
         if not self._is_under(python_path, root):
             raise RuntimeError(

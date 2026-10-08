@@ -27,7 +27,13 @@ class AnalysisCapabilityPublisher:
         self._write_lock = threading.Lock()
 
     def _root_for(self, target: Target) -> Path:
-        return self.config.dev.root if target is Target.DEV else self.config.prod.root
+        if target is Target.DEV:
+            return self.config.dev.root
+        if target is Target.PROD:
+            return self.config.prod.root
+        if target is Target.LAB and self.config.lab is not None:
+            return self.config.lab.root
+        raise ValueError(f"Unsupported capability target: {target!r}")
 
     def path_for(self, target: Target) -> Path:
         return (

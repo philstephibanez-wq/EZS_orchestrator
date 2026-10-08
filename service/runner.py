@@ -30,14 +30,23 @@ def utc_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
 
 
+def _safe_stream_write(stream, value: str) -> None:
+    if not value:
+        return
+    encoding = getattr(stream, "encoding", None) or "utf-8"
+    safe = value.encode(encoding, errors="backslashreplace").decode(encoding)
+    stream.write(safe)
+    stream.flush()
+
+
 def targets_for_scope(target: Target | None) -> tuple[Target, ...]:
-    return (Target.DEV, Target.PROD) if target is None else (target,)
+    return (Target.DEV, Target.PROD, Target.LAB) if target is None else (target,)
 
 
 class PermanentRunner:
     """Permanent orchestration service.
 
-    target=None means the single machine-wide service serves DEV and PROD.
+    target=None means the single machine-wide service serves DEV, PROD and LAB.
     A concrete target remains supported for focused diagnostics/tests.
 
     The service stays sequential, therefore the existing machine-wide GPU
@@ -284,9 +293,9 @@ class PermanentRunner:
         ended_at = datetime.now(timezone.utc).isoformat()
         attempt_dir = self._persist_attempt(target=target, attempt_dir=attempt_dir, attempt_id=attempt_id, started_at=started_at, ended_at=ended_at, returncode=proc.returncode, stdout=proc.stdout or "", stderr=proc.stderr or "", queued_job=queued_job)
         if proc.stdout:
-            print(proc.stdout, end="")
+            _safe_stream_write(sys.stdout, proc.stdout)
         if proc.stderr:
-            print(proc.stderr, end="", file=sys.stderr)
+            _safe_stream_write(sys.stderr, proc.stderr)
         print(f"attempt_log={attempt_dir}")
         return proc.returncode, attempt_dir
 

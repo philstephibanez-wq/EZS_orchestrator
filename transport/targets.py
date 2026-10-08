@@ -47,12 +47,20 @@ class TargetRegistry:
         if target is Target.DEV:
             root = self.config.dev.root
             override = os.environ.get("EZS_DEV_ANALYSIS_TOKEN")
-        else:
+            token_key = "ANALYSIS_WORKER_TOKEN"
+        elif target is Target.PROD:
             root = self.config.prod.root
             override = os.environ.get("EZS_PROD_ANALYSIS_TOKEN")
+            token_key = "ANALYSIS_WORKER_TOKEN"
+        elif target is Target.LAB and self.config.lab is not None:
+            root = self.config.lab.root
+            override = os.environ.get("EZS_LAB_ANALYSIS_TOKEN")
+            token_key = "EZSTUDIO_ANALYSIS_WORKER_TOKEN"
+        else:
+            raise ValueError(f"Unsupported target endpoint: {target!r}")
 
         url = self.config.transport_url_for(target)
 
         env = read_env_local(root)
-        token = override or env.get("ANALYSIS_WORKER_TOKEN") or ""
+        token = override or env.get(token_key) or ""
         return TargetEndpoint(target, root, url, token)

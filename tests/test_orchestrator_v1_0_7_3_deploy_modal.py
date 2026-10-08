@@ -16,7 +16,8 @@ for needle in (
     'Aucune donnée métier DEV n’est copiée vers PROD.',
     'Déployer vers PROD',
     'function openDeploymentModal(fresh)',
-    'const confirmed=await openDeploymentModal(fresh);if(!confirmed)return;',
+    'const confirmed=await openDeploymentModal(fresh);',
+    'if(!confirmed)return;',
 ):
     assert needle in src, needle
 

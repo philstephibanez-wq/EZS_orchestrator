@@ -1,5 +1,5 @@
 {
-  "schema": "ezs.orchestrator.config.v4",
+  "schema": "ezs.orchestrator.config.v5",
   "orchestrator_root": "H:\\EZS_orchestrator",
   "servers": {
     "dev": {
@@ -25,6 +25,17 @@
       "default_env": "prod",
       "analysis_python": "H:\\EZScore\\.venv-py313\\Scripts\\python.exe",
       "web_php": "H:\\PHP\\php-8.5-x64\\php.exe"
+    },
+    "lab": {
+      "root": "H:\\EZStudio_lab",
+      "backend_port": 8701,
+      "public_port": 8701,
+      "allowed_envs": [
+        "dev"
+      ],
+      "default_env": "dev",
+      "analysis_python": "H:\\Python\\pythoncore-3.14-64\\python.exe",
+      "web_php": "H:\\PHP\\php-8.5-x64\\php.exe"
     }
   },
   "analysis": {
@@ -35,6 +46,7 @@
   },
   "transport": {
     "dev_backend_url": "http://127.0.0.1:8602",
-    "prod_backend_url": "http://127.0.0.1:8511"
+    "prod_backend_url": "http://127.0.0.1:8511",
+    "lab_backend_url": "http://127.0.0.1:8701"
   }
 }
