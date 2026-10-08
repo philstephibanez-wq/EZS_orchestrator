@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 
 from config.loader import load_runtime_config
 from contracts.target import Target
@@ -10,6 +11,21 @@ from prod_lifecycle.manager import ProdLifecycleManager
 from server_manager.manager import ServerManager
 from transport.jobs import JobTransport
 from transport.targets import TargetRegistry
+
+
+R3_20_UTF8_CONSOLE = True
+
+def _configure_utf8_console() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(
+                    encoding="utf-8",
+                    errors="backslashreplace",
+                )
+            except Exception:
+                pass
 
 
 def parse_target(value: str) -> Target:
@@ -104,6 +120,7 @@ def prod_action(action: str) -> int:
 
 
 def main() -> int:
+    _configure_utf8_console()
     parser = argparse.ArgumentParser(prog="EZS_orchestrator")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("status")
