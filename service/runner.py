@@ -18,6 +18,7 @@ from config.loader import load_runtime_config
 from contracts.target import Target
 from transport.jobs import JobTransport
 from transport.targets import TargetRegistry
+from server_manager.manager import ServerManager
 
 from .singleton import ServiceSingleton
 
@@ -70,6 +71,7 @@ class PermanentRunner:
             float(max_backoff_seconds),
         )
         self.transport = JobTransport(TargetRegistry(self.config))
+        self.servers = ServerManager(self.config)
         self.runtime_root = self.config.orchestrator_root / "runtime"
         self.service_dir = self.runtime_root / "service"
         self.service_dir.mkdir(parents=True, exist_ok=True)
@@ -247,6 +249,27 @@ class PermanentRunner:
         }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return attempt_dir
 
+    def _ensure_lab_backend(self) -> None:
+        if Target.LAB not in self.targets or self.config.lab is None:
+            return
+        try:
+            view = self.servers.view(Target.LAB)
+            if view.process_alive and view.http_alive:
+                return
+            self.servers.start(Target.LAB, self.config.lab.default_env)
+            self._last_reachable[Target.LAB] = True
+        except Exception as exc:
+            self._last_reachable[Target.LAB] = False
+            try:
+                self.publish(
+                    Target.LAB,
+                    available=False,
+                    state="lab_backend_down",
+                    error=f"{type(exc).__name__}:{exc}"[:500],
+                )
+            except Exception:
+                pass
+
     def _busy_heartbeat_loop(
         self,
         stop_event: threading.Event,
@@ -254,6 +277,8 @@ class PermanentRunner:
         queued_by_target: dict[Target, int],
     ) -> None:
         while not stop_event.wait(self.poll_seconds):
+            if active_target is Target.LAB:
+                self._ensure_lab_backend()
             self.write_heartbeat(
                 "dispatch",
                 active_target=active_target.value,
@@ -333,6 +358,7 @@ class PermanentRunner:
         try:
             self.write_heartbeat("starting")
             while not self.should_stop():
+                self._ensure_lab_backend()
                 queues: dict[Target, list] = {}
                 queue_counts: dict[Target, int] = {}
                 errors: dict[Target, str] = {}

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 from contracts.target import Target
 from runtime_guard.singleton import ExecutionSingleton
 from .targets import TargetRegistry
@@ -79,10 +81,21 @@ class JobTransport:
         )
 
     def complete(self, target: Target, job_id: int) -> None:
+        last_error: Exception | None = None
         try:
-            self.registry.endpoint(target).client().post(
-                f"/internal/analysis/desktop/jobs/{job_id}/complete", {}
-            )
+            delays = (0.0, 1.0, 2.0, 4.0, 8.0, 15.0, 30.0)
+            for delay in delays:
+                if delay:
+                    time.sleep(delay)
+                try:
+                    self.registry.endpoint(target).client().post(
+                        f"/internal/analysis/desktop/jobs/{job_id}/complete", {}
+                    )
+                    return
+                except Exception as exc:
+                    last_error = exc
+            assert last_error is not None
+            raise last_error
         finally:
             self._execution_singleton.release()
 

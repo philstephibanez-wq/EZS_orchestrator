@@ -82,7 +82,7 @@ class JobHistory:
             state = "failed"
 
         error = result.get("error") or result.get("message") or result.get("failure")
-        if state != "failed":
+        if state not in ("failed", "finalize_error"):
             error = None
 
         timestamp = (

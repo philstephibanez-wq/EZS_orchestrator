@@ -53,7 +53,13 @@ class ServerManager:
         self.logs.mkdir(parents=True, exist_ok=True)
 
     def spec(self, target: Target) -> ServerSpec:
-        return self.config.dev if target is Target.DEV else self.config.prod
+        if target is Target.DEV:
+            return self.config.dev
+        if target is Target.PROD:
+            return self.config.prod
+        if target is Target.LAB and self.config.lab is not None:
+            return self.config.lab
+        raise ValueError(f"Unsupported server target: {target!r}")
 
     def _meta_path(self, target: Target) -> Path:
         return self.runtime / f"{target.value}.json"
