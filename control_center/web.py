@@ -239,8 +239,80 @@ class ControlCenter:
 
             raise ValueError(f"unsupported_action:{name}")
 
+    # R3_21_QUEUE_VISIBILITY
+    @staticmethod
+    def _queued_job_row(target: Target, raw: dict, position: int) -> dict:
+        row = raw if isinstance(raw, dict) else {}
+        song = row.get("song") if isinstance(row.get("song"), dict) else {}
+        raw_job_id = row.get("job_id", row.get("id"))
+        try:
+            job_id = int(raw_job_id) if raw_job_id is not None else None
+        except (TypeError, ValueError):
+            job_id = raw_job_id
+        song_id = row.get("song_id")
+        if song_id is None:
+            song_id = song.get("id")
+        song_title = row.get("title") or row.get("song_title") or song.get("title") or song.get("name")
+        timestamp = row.get("queued_at") or row.get("created_at") or row.get("updated_at") or ""
+        return {
+            "job_id": job_id if job_id is not None else "-",
+            "target": target.value,
+            "song_id": song_id,
+            "song_title": song_title,
+            "kind": row.get("kind") or "-",
+            "state": "waiting",
+            "timestamp": str(timestamp or ""),
+            "analysis_returncode": None,
+            "finalize_status": "waiting",
+            "returncode": None,
+            "error": None,
+            "run": None,
+            "queue_position": int(position),
+            "source": "live_queue",
+        }
+
+    @staticmethod
+    def _job_key(row: dict):
+        target = str(row.get("target") or "").strip().lower()
+        job_id = row.get("job_id")
+        if not target or job_id in (None, "", "-"):
+            return None
+        return target, str(job_id)
+
     def jobs(self) -> dict:
-        return self.job_history.payload(limit=80)
+        history_payload = self.job_history.payload(limit=80)
+        history = list(history_payload.get("jobs") or [])
+        known = {key for row in history if (key := self._job_key(row)) is not None}
+        waiting = []
+        queue_errors = {}
+        for target in (Target.DEV, Target.PROD, Target.LAB):
+            try:
+                queued = self.transport.queue(target)
+            except Exception as exc:
+                queue_errors[target.value] = f"{type(exc).__name__}:{exc}"[:500]
+                continue
+            for position, raw in enumerate(queued, start=1):
+                row = self._queued_job_row(target, raw, position)
+                key = self._job_key(row)
+                if key is not None and key in known:
+                    continue
+                waiting.append(row)
+                if key is not None:
+                    known.add(key)
+        active_states = {"running", "claimed", "cancelling"}
+        active = [r for r in history if str(r.get("state") or "").lower() in active_states]
+        archived = [r for r in history if str(r.get("state") or "").lower() not in active_states]
+        jobs = active + waiting + archived
+        return {
+            "ok": bool(history_payload.get("ok", True)),
+            "count": len(jobs),
+            "jobs": jobs[:100],
+            "running": len(active),
+            "waiting": len(waiting),
+            "history": len(archived),
+            "queue_errors": queue_errors,
+            "execution_policy": "sequential_machine_gpu_singleton",
+        }
 
     def logs(self) -> dict:
         root = self.config.orchestrator_root
@@ -291,7 +363,7 @@ button.primary,a.primary{background:#173b37;border-color:#27655d}button.danger{b
 main{padding:20px;max-width:1600px;margin:auto}.view{display:none}.view.active{display:block}.banner{margin-bottom:14px;padding:11px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}.banner.active{border-color:#775a27;background:#251f13}
 .grid3{display:grid;grid-template-columns:1.15fr 1fr 1fr;gap:14px}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;min-width:0}.card h2{margin:0 0 12px;font-size:14px}.statusrow{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.dot{width:10px;height:10px;border-radius:50%;background:var(--muted)}.dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}.big{font-size:22px;font-weight:780;margin:6px 0}.muted{color:var(--muted)}.lock{padding:8px 10px;background:#151727;border:1px solid #30355f;border-radius:9px;color:#bfc5ff;font-size:12px}.target.dev{border-top:3px solid var(--accent)}.target.prod{border-top:3px solid var(--prod)}
 .kv{display:grid;grid-template-columns:150px minmax(0,1fr);gap:7px 10px;margin:10px 0}.kv dt{color:var(--muted)}.kv dd{margin:0;overflow-wrap:anywhere}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.mode{padding:3px 8px;border-radius:999px;border:1px solid var(--line);font-size:12px}.mode.maintenance{background:#3a3019;border-color:#6e5928;color:var(--warn)}
-.tablewrap{overflow:auto;border:1px solid var(--line);border-radius:10px}.datatable{width:100%;border-collapse:collapse;min-width:880px}.datatable th,.datatable td{padding:9px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}.datatable th{color:var(--muted);font-size:12px;background:#0d1519}.job-state{font-weight:750}.job-state.completed{color:var(--ok)}.job-state.failed{color:var(--bad)}.job-state.finalize_error{color:var(--warn)}.job-state.running,.job-state.claimed,.job-state.queued{color:var(--warn)}.job-target{font-weight:750}.job-target.dev{color:var(--accent)}.job-target.prod{color:var(--prod)}.tabs{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 8px}.tab.active{border-color:#397168;background:#17332f}pre{white-space:pre-wrap;word-break:break-word;background:#080d10;border:1px solid var(--line);padding:12px;border-radius:10px;max-height:360px;overflow:auto;color:#cbd8da}.deployConsole{min-height:180px;max-height:300px;font-family:Consolas,monospace}.deployConsole.running{border-color:#775a27}.deployConsole.completed{border-color:#2b6c49}.deployConsole.failed{border-color:#74383e}
+.tablewrap{overflow:auto;border:1px solid var(--line);border-radius:10px}.datatable{width:100%;border-collapse:collapse;min-width:880px}.datatable th,.datatable td{padding:9px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}.datatable th{color:var(--muted);font-size:12px;background:#0d1519}.job-state{font-weight:750}.job-state.completed{color:var(--ok)}.job-state.failed{color:var(--bad)}.job-state.finalize_error{color:var(--warn)}.job-state.running,.job-state.claimed,.job-state.queued,.job-state.waiting,.job-state.cancelling{color:var(--warn)}.job-target{font-weight:750}.job-target.dev{color:var(--accent)}.job-target.prod{color:var(--prod)}.tabs{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 8px}.tab.active{border-color:#397168;background:#17332f}pre{white-space:pre-wrap;word-break:break-word;background:#080d10;border:1px solid var(--line);padding:12px;border-radius:10px;max-height:360px;overflow:auto;color:#cbd8da}.deployConsole{min-height:180px;max-height:300px;font-family:Consolas,monospace}.deployConsole.running{border-color:#775a27}.deployConsole.completed{border-color:#2b6c49}.deployConsole.failed{border-color:#74383e}
 .queueCard strong{font-size:20px}.queueList{display:grid;gap:6px;margin-top:10px}.queueRow{padding:8px 9px;border:1px solid var(--line);border-radius:8px;background:#0d1519}.deployDecision{font-size:24px;font-weight:850}.deployDecision.ok{color:var(--ok)}.deployDecision.bad{color:var(--bad)}.deployDecision.idle{color:var(--muted)}.checks{display:grid;gap:7px}.check{padding:8px 10px;border:1px solid var(--line);border-radius:8px}.check.ok{border-color:#2b6c49}.check.bad{border-color:#74383e;background:#2a1518}.sensitive{color:var(--warn);font-weight:750}.history{display:grid;gap:7px}.history button{text-align:left;width:100%}.toast{position:fixed;right:18px;bottom:18px;max-width:720px;padding:10px 14px;border-radius:10px;background:#172228;border:1px solid var(--line);display:none;z-index:20}.toast.show{display:block}.toast.ok{border-color:#2b6c49}.toast.bad{border-color:#74383e}
 .modalBackdrop{position:fixed;inset:0;z-index:80;display:none;align-items:center;justify-content:center;padding:24px;background:rgba(0,0,0,.62);backdrop-filter:blur(3px)}.modalBackdrop.show{display:flex}.modal{width:min(720px,calc(100vw - 40px));max-height:calc(100vh - 48px);overflow:auto;border:1px solid #35505a;border-radius:14px;background:#0f191e;box-shadow:0 24px 70px rgba(0,0,0,.55)}.modalHead{padding:18px 20px;border-bottom:1px solid var(--line)}.modalHead h3{margin:0 0 4px;font-size:20px}.modalBody{padding:18px 20px;display:grid;gap:16px}.modalSummary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.modalStat{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:#0c1519}.modalStat b{display:block;font-size:18px;margin-top:3px}.modalSteps{display:grid;gap:8px;margin:0;padding:0;list-style:none}.modalSteps li{padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:#0c1519}.modalWarn{padding:11px 12px;border:1px solid #775a27;border-radius:9px;background:#251f13;color:var(--warn)}.modalFoot{display:flex;justify-content:flex-end;gap:10px;padding:16px 20px;border-top:1px solid var(--line)}@media(max-width:700px){.modalSummary{grid-template-columns:1fr}.modal{width:calc(100vw - 20px)}}@media(max-width:1000px){.grid3,.grid2{grid-template-columns:1fr}.shell{grid-template-columns:var(--sideCollapsed) 1fr}.navLabel,.brandText{display:none}.kv{grid-template-columns:120px minmax(0,1fr)}.appHeaderName{display:none}.viewContext{border-left:0;padding-left:0}.headerRight{gap:6px}.topMeta{display:none}}
 </style>
@@ -472,8 +544,9 @@ function renderStatus(s){
  syncActionButtons();
 }
 function renderJobs(payload){
- const jobs=(payload&&payload.jobs)||[];txt("jobsMeta",payload&&payload.ok?`${payload.count??jobs.length} job(s) · lecture seule`:"Erreur");
- $("jobsBody").innerHTML=jobs.length?jobs.map(j=>{const state=String(j.state||"unknown").toLowerCase(),target=String(j.target||"-").toLowerCase();const job=(j.job_id&&j.job_id!=="-")?`#${esc(j.job_id)}`:"-";const song=j.song_title?`${esc(j.song_title)}${j.song_id?` (#${esc(j.song_id)})`:""}`:(j.song_id?`#${esc(j.song_id)}`:"-");return `<tr><td><strong>${job}</strong></td><td><span class="job-target ${esc(target)}">${esc(target.toUpperCase())}</span></td><td>${song}</td><td>${esc(j.kind||"-")}</td><td><span class="job-state ${esc(state)}">${esc(state.toUpperCase())}</span></td><td>${esc(j.timestamp||"-")}</td><td>${esc(j.analysis_returncode??"-")}</td><td>${esc(j.finalize_status||"-")}</td><td>${j.error?esc(j.error):"-"}</td></tr>`}).join(""):'<tr><td colspan="9">Aucun job récent.</td></tr>';
+ const jobs=(payload&&payload.jobs)||[],running=payload?.running??0,waiting=payload?.waiting??0;
+ txt("jobsMeta",payload&&payload.ok?`${payload.count??jobs.length} job(s) · ${running} running · ${waiting} waiting · exécution séquentielle`:"Erreur");
+ $("jobsBody").innerHTML=jobs.length?jobs.map(j=>{const state=String(j.state||"unknown").toLowerCase(),target=String(j.target||"-").toLowerCase();const job=(j.job_id&&j.job_id!=="-")?`#${esc(j.job_id)}`:"-";const song=j.song_title?`${esc(j.song_title)}${j.song_id?` (#${esc(j.song_id)})`:""}`:(j.song_id?`#${esc(j.song_id)}`:"-");const date=j.timestamp||((state==="waiting"&&j.queue_position)?`position ${j.queue_position}`:"-");return `<tr><td><strong>${job}</strong></td><td><span class="job-target ${esc(target)}">${esc(target.toUpperCase())}</span></td><td>${song}</td><td>${esc(j.kind||"-")}</td><td><span class="job-state ${esc(state)}">${esc(state.toUpperCase())}</span></td><td>${esc(date)}</td><td>${esc(j.analysis_returncode??"-")}</td><td>${esc(j.finalize_status||"-")}</td><td>${j.error?esc(j.error):"-"}</td></tr>`}).join(""):'<tr><td colspan="9">Aucun job récent.</td></tr>';
 }
 async function refreshJobs(){if(jobsRefreshInFlight)return;jobsRefreshInFlight=true;try{renderJobs(await getJSON("/api/jobs"))}catch(e){txt("jobsMeta","Erreur de lecture")}finally{jobsRefreshInFlight=false}}
 async function refreshLogs(){
