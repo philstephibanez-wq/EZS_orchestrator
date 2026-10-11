@@ -29,7 +29,7 @@
     "lab": {
       "root": "H:\\EZStudio_lab",
       "backend_port": 8701,
-      "public_port": 8701,
+      "public_port": 8702,
       "allowed_envs": [
         "dev"
       ],

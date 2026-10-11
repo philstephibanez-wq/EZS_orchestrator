@@ -30,7 +30,13 @@ class CaddyManager:
         self.caddy_exe = Path(caddy_exe)
 
     def _spec(self, target: Target):
-        return self.config.dev if target is Target.DEV else self.config.prod
+        if target is Target.DEV:
+            return self.config.dev
+        if target is Target.PROD:
+            return self.config.prod
+        if target is Target.LAB and self.config.lab is not None:
+            return self.config.lab
+        raise ValueError(f"Unsupported Caddy target: {target!r}")
 
     def _runtime_dir(self, target: Target) -> Path:
         return self.config.orchestrator_root / "runtime" / "caddy" / target.value
@@ -48,7 +54,13 @@ class CaddyManager:
         return self._runtime_dir(target) / "caddy.err.log"
 
     def _admin_port(self, target: Target) -> int:
-        return 2019 if target is Target.DEV else 2020
+        if target is Target.DEV:
+            return 2019
+        if target is Target.PROD:
+            return 2020
+        if target is Target.LAB:
+            return 2021
+        raise ValueError(f"Unsupported Caddy target: {target!r}")
 
     def _upstream_port(self, target: Target) -> int:
         spec = self._spec(target)
@@ -66,13 +78,11 @@ class CaddyManager:
             return False
         try:
             import ctypes
-            process_query_limited_information = 0x1000
-            handle = ctypes.windll.kernel32.OpenProcess(
-                process_query_limited_information, False, int(pid)
-            )
-            if not handle:
+            q = 0x1000
+            h = ctypes.windll.kernel32.OpenProcess(q, False, int(pid))
+            if not h:
                 return False
-            ctypes.windll.kernel32.CloseHandle(handle)
+            ctypes.windll.kernel32.CloseHandle(h)
             return True
         except Exception:
             return False
@@ -97,18 +107,28 @@ class CaddyManager:
             "config_path": str(self._config_path(target)),
             "started_at": datetime.now(timezone.utc).isoformat(),
         }
-        self._metadata_path(target).write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        self._metadata_path(target).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def _render(self, target: Target) -> str:
         spec = self._spec(target)
-        media_root = self._media_root(target).as_posix()
-        cover_root = self._cover_root(target).as_posix()
         public_port = int(spec.public_port)
         upstream_port = self._upstream_port(target)
         admin_port = self._admin_port(target)
+
+        if target is Target.LAB:
+            return (
+                "{\n"
+                "    auto_https off\n"
+                f"    admin 127.0.0.1:{admin_port}\n"
+                "}\n\n"
+                f":{public_port} {{\n"
+                "    bind 0.0.0.0\n"
+                f"    reverse_proxy 127.0.0.1:{upstream_port}\n"
+                "}\n"
+            )
+
+        media_root = self._media_root(target).as_posix()
+        cover_root = self._cover_root(target).as_posix()
 
         if target is Target.PROD:
             reverse_proxy = (
@@ -184,27 +204,32 @@ class CaddyManager:
 
     def _validate_target_isolation(self, target: Target) -> None:
         spec = self._spec(target)
-        media_root = self._media_root(target)
-        dev_root = self.config.dev.root.resolve()
-        prod_root = self.config.prod.root.resolve()
-        resolved_media = media_root.resolve()
-
         if target is Target.DEV:
-            if resolved_media == prod_root or prod_root in resolved_media.parents:
-                raise RuntimeError("caddy_cross_root_refused:dev->prod")
             if int(spec.public_port) == int(self.config.prod.public_port):
                 raise RuntimeError("caddy_cross_port_refused:dev->prod")
-        else:
-            if resolved_media == dev_root or dev_root in resolved_media.parents:
-                raise RuntimeError("caddy_cross_root_refused:prod->dev")
+            if self.config.lab is not None and int(spec.public_port) == int(self.config.lab.public_port):
+                raise RuntimeError("caddy_cross_port_refused:dev->lab")
+            return
+        if target is Target.PROD:
             if int(spec.public_port) == int(self.config.dev.public_port):
                 raise RuntimeError("caddy_cross_port_refused:prod->dev")
+            if self.config.lab is not None and int(spec.public_port) == int(self.config.lab.public_port):
+                raise RuntimeError("caddy_cross_port_refused:prod->lab")
+            return
+        if target is Target.LAB:
+            if self.config.lab is None:
+                raise RuntimeError("caddy_lab_missing")
+            if int(spec.public_port) in {int(self.config.dev.public_port), int(self.config.prod.public_port)}:
+                raise RuntimeError("caddy_lab_cross_port_refused")
+            if int(spec.backend_port) in {int(self.config.dev.backend_port), int(self.config.prod.backend_port)}:
+                raise RuntimeError("caddy_lab_cross_backend_refused")
+            return
+        raise ValueError(f"Unsupported Caddy target: {target!r}")
 
     def start(self, target: Target) -> CaddyView:
         current = self.view(target)
         if current.process_alive:
             return current
-
         if not self.caddy_exe.is_file():
             raise RuntimeError(f"caddy_executable_missing:{self.caddy_exe}")
 
@@ -212,21 +237,19 @@ class CaddyManager:
         runtime_dir = self._runtime_dir(target)
         runtime_dir.mkdir(parents=True, exist_ok=True)
 
-        media_root = self._media_root(target)
-        if not media_root.is_dir():
-            raise RuntimeError(f"caddy_media_root_missing:{target.value}:{media_root}")
-
-        if target is Target.DEV:
-            self._cover_root(target).mkdir(parents=True, exist_ok=True)
+        if target is not Target.LAB:
+            media_root = self._media_root(target)
+            if not media_root.is_dir():
+                raise RuntimeError(f"caddy_media_root_missing:{target.value}:{media_root}")
+            if target is Target.DEV:
+                self._cover_root(target).mkdir(parents=True, exist_ok=True)
 
         self._validate_target_isolation(target)
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             if sock.connect_ex(("127.0.0.1", int(spec.public_port))) == 0:
-                raise RuntimeError(
-                    f"caddy_public_port_in_use:{target.value}:{spec.public_port}"
-                )
+                raise RuntimeError(f"caddy_public_port_in_use:{target.value}:{spec.public_port}")
         finally:
             sock.close()
 
@@ -234,14 +257,7 @@ class CaddyManager:
         config_path.write_text(self._render(target), encoding="utf-8")
 
         validate = subprocess.run(
-            [
-                str(self.caddy_exe),
-                "validate",
-                "--config",
-                str(config_path),
-                "--adapter",
-                "caddyfile",
-            ],
+            [str(self.caddy_exe), "validate", "--config", str(config_path), "--adapter", "caddyfile"],
             cwd=str(self.config.orchestrator_root),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -249,22 +265,12 @@ class CaddyManager:
             check=False,
         )
         if validate.returncode != 0:
-            raise RuntimeError(
-                "caddy_validate_failed:"
-                + validate.stdout.replace("\r", " ").replace("\n", " ")[:800]
-            )
+            raise RuntimeError("caddy_validate_failed:" + validate.stdout.replace("\r"," ").replace("\n"," ")[:800])
 
         out = self._out_log(target).open("a", encoding="utf-8", errors="replace")
         err = self._err_log(target).open("a", encoding="utf-8", errors="replace")
         proc = subprocess.Popen(
-            [
-                str(self.caddy_exe),
-                "run",
-                "--config",
-                str(config_path),
-                "--adapter",
-                "caddyfile",
-            ],
+            [str(self.caddy_exe), "run", "--config", str(config_path), "--adapter", "caddyfile"],
             cwd=str(self.config.orchestrator_root),
             stdout=out,
             stderr=err,
@@ -281,12 +287,9 @@ class CaddyManager:
             if self._http_alive(target):
                 return self.view(target)
             time.sleep(0.2)
-
         if proc.poll() is None:
             proc.terminate()
-        raise RuntimeError(
-            f"caddy_start_failed:{target.value}:see {self._err_log(target)}"
-        )
+        raise RuntimeError(f"caddy_start_failed:{target.value}:see {self._err_log(target)}")
 
     def stop(self, target: Target) -> CaddyView:
         current = self.view(target)
@@ -297,12 +300,7 @@ class CaddyManager:
             raise RuntimeError(f"caddy_executable_missing:{self.caddy_exe}")
 
         stopped = subprocess.run(
-            [
-                str(self.caddy_exe),
-                "stop",
-                "--address",
-                f"127.0.0.1:{self._admin_port(target)}",
-            ],
+            [str(self.caddy_exe), "stop", "--address", f"127.0.0.1:{self._admin_port(target)}"],
             cwd=str(self.config.orchestrator_root),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -310,10 +308,7 @@ class CaddyManager:
             check=False,
         )
         if stopped.returncode != 0:
-            raise RuntimeError(
-                "caddy_stop_failed:"
-                + stopped.stdout.replace("\r", " ").replace("\n", " ")[:800]
-            )
+            raise RuntimeError("caddy_stop_failed:" + stopped.stdout.replace("\r"," ").replace("\n"," ")[:800])
 
         deadline = time.time() + 5.0
         while time.time() < deadline:

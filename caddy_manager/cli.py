@@ -12,7 +12,7 @@ def main() -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("status", "start"):
         p = sub.add_parser(name)
-        p.add_argument("--target", choices=("dev", "prod"), required=True)
+        p.add_argument("--target", choices=("dev", "prod", "lab"), required=True)
 
     args = parser.parse_args()
     target = Target(args.target)
