@@ -26,6 +26,12 @@ class JobTransport:
         data = endpoint.client().get("/internal/analysis/desktop/jobs/queue")
         return list((data or {}).get("jobs") or [])
 
+    def distributed_workers(self, target: Target) -> list[dict]:
+        data = self.registry.endpoint(target).client().get(
+            "/internal/analysis/desktop/distributed/workers",
+            timeout=3.0,
+        )
+        return list((data or {}).get("workers") or [])
     def hello(self, target: Target, payload: dict) -> dict:
         return self.registry.endpoint(target).client().post(
             "/internal/analysis/desktop/hello", payload

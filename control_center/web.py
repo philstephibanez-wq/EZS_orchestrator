@@ -110,12 +110,25 @@ class ControlCenter:
         except Exception as exc:
             return {"ok": False, "count": None, "jobs": [], "error": str(exc)}
 
+    def _distributed_workers(self) -> dict:
+        try:
+            workers = self.transport.distributed_workers(Target.LAB)
+            return {"ok": True, "count": len(workers), "workers": workers}
+        except Exception as exc:
+            return {
+                "ok": False,
+                "count": None,
+                "workers": [],
+                "error": f"{type(exc).__name__}:{exc}"[:500],
+            }
     def _snapshot_uncached(self) -> dict:
         clear_process_cache()
         started = time.monotonic()
         dev = self.servers.view(Target.DEV)
         prod = self.prod.view()
         dev_caddy = self.caddy.view(Target.DEV)
+        lab = self.servers.view(Target.LAB)
+        lab_caddy = self.caddy.view(Target.LAB)
         elapsed_ms = round((time.monotonic() - started) * 1000.0, 1)
         return {
             "at": datetime.now(timezone.utc).isoformat(),
@@ -136,7 +149,10 @@ class ControlCenter:
                 "transport": self.config.transport_url_for(Target.PROD),
             },
             "lab": {
+                "server": asdict(lab),
+                "caddy": asdict(lab_caddy),
                 "queue": self._queue(Target.LAB),
+                "workers": self._distributed_workers(),
                 "analysis_python": str(self.config.analysis_python_for(Target.LAB)),
                 "transport": self.config.transport_url_for(Target.LAB),
                 "root": str(self.config.lab.root) if self.config.lab is not None else None,
@@ -182,6 +198,22 @@ class ControlCenter:
                 self._invalidate_snapshot()
                 return {"ok": True, "message": f"DEV Caddy active pid={view.pid}"}
 
+            if name == "lab-server-start":
+                view = self.servers.start(Target.LAB)
+                self._invalidate_snapshot()
+                return {"ok": True, "message": f"LAB backend active pid={view.pid}"}
+            if name == "lab-server-stop":
+                view = self.servers.stop(Target.LAB)
+                self._invalidate_snapshot()
+                return {"ok": True, "message": "LAB backend stopped" if not view.process_alive else "LAB backend still active"}
+            if name == "lab-server-restart":
+                view = self.servers.restart(Target.LAB)
+                self._invalidate_snapshot()
+                return {"ok": True, "message": f"LAB backend restarted pid={view.pid}"}
+            if name == "lab-caddy-start":
+                view = self.caddy.start(Target.LAB)
+                self._invalidate_snapshot()
+                return {"ok": True, "message": f"LAB Caddy active pid={view.pid}"}
             if name == "prod-start":
                 view = self.prod.start("normal")
                 self._invalidate_snapshot()
@@ -326,6 +358,8 @@ class ControlCenter:
             "prod_server_error": self.log_tools.tail(root / "logs" / "servers" / "prod.err.log"),
             "prod_gateway_error": self.log_tools.tail(root / "logs" / "gateway" / "prod.err.log"),
             "prod_caddy_error": self.log_tools.tail(root / "runtime" / "caddy" / "prod" / "caddy.err.log"),
+            "lab_server_error": self.log_tools.tail(root / "logs" / "servers" / "lab.err.log"),
+            "lab_caddy_error": self.log_tools.tail(root / "runtime" / "caddy" / "lab" / "caddy.err.log"),
         }
 
     def deployment_plan(self) -> dict:
@@ -361,7 +395,7 @@ button.primary,a.primary{background:#173b37;border-color:#27655d}button.danger{b
 .nav{display:grid;gap:6px;margin-top:8px}.nav button{width:100%;display:flex;align-items:center;gap:11px;text-align:left;background:transparent;border-color:transparent;padding:10px}.nav button.active{background:#17332f;border-color:#2e5d57}.ico{width:28px;text-align:center;font-size:18px;flex:0 0 28px}.navLabel,.brandText{transition:opacity .12s ease}.collapsed .navLabel,.collapsed .brandText{opacity:0;pointer-events:none}.collapsed .brand{justify-content:center;padding-left:0;padding-right:0}
 .collapseRow{display:flex;justify-content:flex-end;padding:0 4px 4px}.collapseBtn{min-width:42px;padding:6px 9px;font-size:17px;line-height:1;font-weight:900;background:#0d1519;border-color:#36505b;color:var(--text)}.collapsed .collapseRow{justify-content:center}.collapsed .collapseBtn{min-width:42px}.content{min-width:0}.topbar{position:sticky;top:0;z-index:30;height:68px;width:100%;display:flex;align-items:center;justify-content:space-between;gap:22px;padding:0 20px;border-bottom:1px solid #35505a;background:#0b1418;box-shadow:0 4px 18px rgba(0,0,0,.28)}.headerLeft{display:flex;align-items:center;gap:16px;min-width:0}.appHeader{display:flex;align-items:center;gap:10px;min-width:0}.appHeaderMark{width:32px;height:32px;flex:0 0 32px;border-radius:8px;background:#173b37;display:grid;place-items:center;color:var(--accent);font-weight:850}.appHeaderName{font-weight:850;letter-spacing:.03em;white-space:nowrap}.appHeaderName b{color:var(--accent)}.viewContext{padding-left:16px;border-left:1px solid var(--line);min-width:0}.topTitle{font-size:17px;font-weight:800;white-space:nowrap}.topSubtitle{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:520px}.headerRight{display:flex;align-items:center;gap:10px}.globalBadge{padding:6px 10px;border-radius:999px;border:1px solid #2b6c49;background:#11251c;color:var(--ok);font-size:12px;font-weight:750;white-space:nowrap}.globalBadge.busy{border-color:#775a27;background:#251f13;color:var(--warn)}.topMeta{color:var(--muted);font-size:12px;text-align:right;white-space:nowrap}.headerRefresh{padding:7px 10px}
 main{padding:20px;max-width:1600px;margin:auto}.view{display:none}.view.active{display:block}.banner{margin-bottom:14px;padding:11px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}.banner.active{border-color:#775a27;background:#251f13}
-.grid3{display:grid;grid-template-columns:1.15fr 1fr 1fr;gap:14px}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;min-width:0}.card h2{margin:0 0 12px;font-size:14px}.statusrow{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.dot{width:10px;height:10px;border-radius:50%;background:var(--muted)}.dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}.big{font-size:22px;font-weight:780;margin:6px 0}.muted{color:var(--muted)}.lock{padding:8px 10px;background:#151727;border:1px solid #30355f;border-radius:9px;color:#bfc5ff;font-size:12px}.target.dev{border-top:3px solid var(--accent)}.target.prod{border-top:3px solid var(--prod)}
+.grid3{display:grid;grid-template-columns:1.15fr 1fr 1fr;gap:14px}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;min-width:0}.card h2{margin:0 0 12px;font-size:14px}.statusrow{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.dot{width:10px;height:10px;border-radius:50%;background:var(--muted)}.dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}.big{font-size:22px;font-weight:780;margin:6px 0}.muted{color:var(--muted)}.lock{padding:8px 10px;background:#151727;border:1px solid #30355f;border-radius:9px;color:#bfc5ff;font-size:12px}.target.dev{border-top:3px solid var(--accent)}.target.prod{border-top:3px solid var(--prod)}.target.lab{border-top:3px solid var(--warn)}.assistantNode{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:8px;background:#0c1519}.assistantNode strong{display:block;margin-bottom:4px}.assistantMeta{display:grid;grid-template-columns:120px minmax(0,1fr);gap:4px 8px;font-size:12px}.assistantMeta span:nth-child(odd){color:var(--muted)}
 .kv{display:grid;grid-template-columns:150px minmax(0,1fr);gap:7px 10px;margin:10px 0}.kv dt{color:var(--muted)}.kv dd{margin:0;overflow-wrap:anywhere}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.mode{padding:3px 8px;border-radius:999px;border:1px solid var(--line);font-size:12px}.mode.maintenance{background:#3a3019;border-color:#6e5928;color:var(--warn)}
 .tablewrap{overflow:auto;border:1px solid var(--line);border-radius:10px}.datatable{width:100%;border-collapse:collapse;min-width:880px}.datatable th,.datatable td{padding:9px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}.datatable th{color:var(--muted);font-size:12px;background:#0d1519}.job-state{font-weight:750}.job-state.completed{color:var(--ok)}.job-state.failed{color:var(--bad)}.job-state.finalize_error{color:var(--warn)}.job-state.running,.job-state.claimed,.job-state.queued,.job-state.waiting,.job-state.cancelling{color:var(--warn)}.job-target{font-weight:750}.job-target.dev{color:var(--accent)}.job-target.prod{color:var(--prod)}.tabs{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 8px}.tab.active{border-color:#397168;background:#17332f}pre{white-space:pre-wrap;word-break:break-word;background:#080d10;border:1px solid var(--line);padding:12px;border-radius:10px;max-height:360px;overflow:auto;color:#cbd8da}.deployConsole{min-height:180px;max-height:300px;font-family:Consolas,monospace}.deployConsole.running{border-color:#775a27}.deployConsole.completed{border-color:#2b6c49}.deployConsole.failed{border-color:#74383e}
 .queueCard strong{font-size:20px}.queueList{display:grid;gap:6px;margin-top:10px}.queueRow{padding:8px 9px;border:1px solid var(--line);border-radius:8px;background:#0d1519}.deployDecision{font-size:24px;font-weight:850}.deployDecision.ok{color:var(--ok)}.deployDecision.bad{color:var(--bad)}.deployDecision.idle{color:var(--muted)}.checks{display:grid;gap:7px}.check{padding:8px 10px;border:1px solid var(--line);border-radius:8px}.check.ok{border-color:#2b6c49}.check.bad{border-color:#74383e;background:#2a1518}.sensitive{color:var(--warn);font-weight:750}.history{display:grid;gap:7px}.history button{text-align:left;width:100%}.toast{position:fixed;right:18px;bottom:18px;max-width:720px;padding:10px 14px;border-radius:10px;background:#172228;border:1px solid var(--line);display:none;z-index:20}.toast.show{display:block}.toast.ok{border-color:#2b6c49}.toast.bad{border-color:#74383e}
@@ -410,6 +444,34 @@ main{padding:20px;max-width:1600px;margin:auto}.view{display:none}.view.active{d
     <article class="card target dev"><h2>DEV</h2><div class="statusrow"><span id="devDot" class="dot"></span><strong id="devState">-</strong></div><dl class="kv"><dt>Root</dt><dd id="devRoot">-</dd><dt>APP_ENV</dt><dd id="devEnv">-</dd><dt>Backend</dt><dd id="devBackend">-</dd><dt>Caddy</dt><dd id="devCaddy">-</dd><dt>Transport</dt><dd id="devTransport">-</dd><dt>Python analyse</dt><dd id="devPython">-</dd><dt>Ownership</dt><dd id="devOwnership">-</dd></dl><div class="actions"><button data-action="dev-server-start" class="primary">Démarrer backend</button><button data-action="dev-server-restart">Redémarrer backend</button><button data-action="dev-server-stop" data-destructive="1" class="danger">Arrêter backend</button><button data-action="dev-caddy-start">Démarrer Caddy</button><a class="btn primary" href="http://127.0.0.1:8502/fr/catalog" target="_blank" rel="noreferrer">Ouvrir DEV</a></div></article>
     <article class="card target prod"><h2>PROD · exploitation protégée</h2><div class="statusrow"><span id="prodDot" class="dot"></span><strong id="prodState">-</strong><span id="prodMode" class="mode">-</span></div><dl class="kv"><dt>Root</dt><dd id="prodRoot">-</dd><dt>APP_ENV</dt><dd>prod</dd><dt>Backend :8511</dt><dd id="prodBackend">-</dd><dt>Gateway :8510</dt><dd id="prodGateway">-</dd><dt>Caddy :8501</dt><dd id="prodCaddy">-</dd><dt>Transport</dt><dd id="prodTransport">-</dd><dt>Python analyse</dt><dd id="prodPython">-</dd><dt>Ownership backend</dt><dd id="prodOwnership">-</dd></dl><div class="actions"><button data-action="prod-start" class="primary">Démarrer PROD</button><button data-action="prod-restart" data-destructive="1">Redémarrer PROD</button><button data-action="prod-stop" data-destructive="1" class="danger">Arrêter PROD</button><button data-action="prod-maintenance-off">Mode normal</button><button data-action="prod-maintenance-on" class="warn">Maintenance</button><a class="btn primary" href="https://ezscore.logandplay.com/fr/catalog" target="_blank" rel="noreferrer">Ouvrir PROD</a></div></article>
   </section>
+  <section class="grid2" style="margin-top:14px">
+    <article class="card target lab">
+      <h2>LAB · expérimentation isolée</h2>
+      <div class="statusrow"><span id="labDot" class="dot"></span><strong id="labState">-</strong></div>
+      <dl class="kv">
+        <dt>Root</dt><dd id="labRoot">-</dd>
+        <dt>APP_ENV</dt><dd id="labEnv">-</dd>
+        <dt>Backend</dt><dd id="labBackend">-</dd>
+        <dt>Caddy LAN</dt><dd id="labCaddy">-</dd>
+        <dt>Transport interne</dt><dd id="labTransport">-</dd>
+        <dt>Python analyse</dt><dd id="labPython">-</dd>
+        <dt>Ownership</dt><dd id="labOwnership">-</dd>
+      </dl>
+      <div class="actions">
+        <button data-action="lab-server-start" class="primary">Démarrer backend</button>
+        <button data-action="lab-server-restart">Redémarrer backend</button>
+        <button data-action="lab-server-stop" data-destructive="1" class="danger">Arrêter backend</button>
+        <button data-action="lab-caddy-start">Démarrer Caddy LAB</button>
+        <a class="btn primary" href="http://127.0.0.1:8701/" target="_blank" rel="noreferrer">Ouvrir LAB</a>
+      </div>
+    </article>
+    <article class="card target lab">
+      <h2>EZStudioLab_assistant · nœuds distribués</h2>
+      <div class="statusrow"><span id="assistantDot" class="dot"></span><strong id="assistantState">-</strong></div>
+      <div class="muted" id="assistantMeta" style="margin-top:6px">Inventaire en lecture seule.</div>
+      <div id="assistantWorkers"></div>
+    </article>
+  </section>
   </section>
 
 <section id="view-queues" class="view">
@@ -426,7 +488,7 @@ main{padding:20px;max-width:1600px;margin:auto}.view{display:none}.view.active{d
     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
       <div><h2 style="margin-bottom:4px">Logs</h2><div class="muted">Infrastructure, Control Center et déploiements</div></div>
     </div>
-<div class="actions"><button id="clearLogs" class="danger">Clear logs</button><button id="exportLogs" class="primary">Export logs ZIP</button></div><div class="tabs"><button class="tab active" data-log="service">Service</button><button class="tab" data-log="service_error">Service erreurs</button><button class="tab" data-log="control_center">Control Center</button><button class="tab" data-log="control_center_error">Control Center erreurs</button><button class="tab" data-log="dev_server_error">Backend DEV</button><button class="tab" data-log="dev_caddy_error">Caddy DEV</button><button class="tab" data-log="prod_server_error">Backend PROD</button><button class="tab" data-log="prod_gateway_error">Gateway PROD</button><button class="tab" data-log="prod_caddy_error">Caddy PROD</button><button class="tab" data-log="deployments">Déploiements</button></div><pre id="logText">Chargement…</pre></section>
+<div class="actions"><button id="clearLogs" class="danger">Clear logs</button><button id="exportLogs" class="primary">Export logs ZIP</button></div><div class="tabs"><button class="tab active" data-log="service">Service</button><button class="tab" data-log="service_error">Service erreurs</button><button class="tab" data-log="control_center">Control Center</button><button class="tab" data-log="control_center_error">Control Center erreurs</button><button class="tab" data-log="dev_server_error">Backend DEV</button><button class="tab" data-log="dev_caddy_error">Caddy DEV</button><button class="tab" data-log="prod_server_error">Backend PROD</button><button class="tab" data-log="prod_gateway_error">Gateway PROD</button><button class="tab" data-log="prod_caddy_error">Caddy PROD</button><button class="tab" data-log="lab_server_error">Backend LAB</button><button class="tab" data-log="lab_caddy_error">Caddy LAB</button><button class="tab" data-log="deployments">Déploiements</button></div><pre id="logText">Chargement…</pre></section>
 
   </section>
 </section>
@@ -494,7 +556,7 @@ main{padding:20px;max-width:1600px;margin:auto}.view{display:none}.view.active{d
 <script>
 const TOKEN="__TOKEN__";
 let currentLog="service",busy=false,analysisActive=false,refreshInFlight=false,jobsRefreshInFlight=false,currentView="infrastructure",deployData=null;
-let devFailures=0,prodFailures=0;
+let devFailures=0,prodFailures=0,labFailures=0;
 const $=id=>document.getElementById(id);
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 function txt(id,v){const e=$(id);if(e)e.textContent=v??"-"}
@@ -530,6 +592,20 @@ function syncActionButtons(){
  document.querySelectorAll('button[data-action]').forEach(b=>{const destructive=b.dataset.destructive==="1";b.disabled=busy||(destructive&&analysisActive)});
  if(deployData)$("deployApply").disabled=busy||analysisActive||!deployData.ok;
 }
+function renderAssistantWorkers(payload){
+ const workers=(payload&&payload.workers)||[];
+ const online=workers.filter(w=>!!w.online);
+ dot($("assistantDot"),online.length>0,workers.length>0&&online.length===0);
+ txt("assistantState",online.length>0?`${online.length} ONLINE`:workers.length?`${workers.length} STALE`:"AUCUN NŒUD");
+ txt("assistantMeta",payload&&payload.ok?`${workers.length} nœud(s) enregistré(s) · inventaire read-only`:`Inventaire indisponible · ${payload?.error??"-"}`);
+ const el=$("assistantWorkers");
+ el.innerHTML=workers.length?workers.map(w=>{
+   const c=w.capabilities||{},g=(c.gpus||[])[0]||{};
+   const gpu=g.name||"GPU non déclaré";
+   const vram=g.vram_total_mb??c.max_vram_mb??"-";
+   return `<div class="assistantNode"><strong>${esc(w.worker_id||"-")} · ${w.online?"ONLINE":"STALE"}</strong><div class="assistantMeta"><span>État</span><span>${esc(w.state||"-")}</span><span>GPU</span><span>${esc(gpu)}</span><span>VRAM</span><span>${esc(vram)} MB</span><span>CUDA</span><span>${c.cuda_available?"oui":"non"}</span><span>Heartbeat</span><span>${esc(w.last_seen_at||"-")}</span></div></div>`;
+ }).join(""):'<div class="muted" style="margin-top:10px">Aucun assistant distribué enregistré.</div>';
+}
 function renderStatus(s){
  analysisActive=!!s.analysis_active;
  txt("updated",`${s.at} · snapshot ${s.snapshot_ms??'-'} ms`);
@@ -540,7 +616,7 @@ function renderStatus(s){
  const svc=s.service||{};dot($("serviceDot"),!!svc.running);txt("serviceState",svc.running?"RUNNING":"STOPPED");txt("serviceTarget",svc.target?String(svc.target).toUpperCase():"-");txt("serviceMeta",`pid=${svc.pid??'-'} · state=${svc.state??'-'} · heartbeat=${svc.heartbeat??'-'}`);$("serviceStart").disabled=busy||!!svc.running;$("serviceStop").disabled=busy||!svc.running;
  const d=s.dev,ds=d.server,dc=d.caddy;const devHealthy=!!(ds.process_alive&&ds.http_alive&&dc.process_alive&&dc.http_alive);devFailures=devHealthy?0:devFailures+1;const devShown=devHealthy||devFailures<3;dot($("devDot"),devShown,!devHealthy);txt("devState",devHealthy?"ONLINE":(devFailures<3?"DEGRADED / CHECKING":"PROCESS / HTTP DOWN"));txt("devRoot",ds.root);txt("devEnv",ds.app_env);txt("devBackend",`:${ds.backend_port} · ${fmtProc(ds)}`);txt("devCaddy",`:${dc.public_port} · ${fmtProc(dc)}`);txt("devTransport",d.transport);txt("devPython",d.analysis_python);txt("devOwnership",ds.ownership);renderQueue("devQueueCount","devQueueList",d.queue);
  const p=s.prod,pl=p.lifecycle,pb=pl.backend,pg=pl.gateway,pc=pl.caddy;const prodHealthy=!!pl.online;prodFailures=prodHealthy?0:prodFailures+1;const prodShown=prodHealthy||prodFailures<3;dot($("prodDot"),prodShown,!prodHealthy);txt("prodState",prodHealthy?"ONLINE":(prodFailures<3?"DEGRADED / CHECKING":"CHAIN INCOMPLETE / DOWN"));txt("prodRoot",pb.root);txt("prodBackend",`:${pb.backend_port} · ${fmtProc(pb)}`);txt("prodGateway",`:${pg.port} · pid ${pg.pid??'-'} · ${pg.process_alive?'PROCESS OK':'PROCESS OFF'} · ${pg.http_alive?'HTTP OK':'HTTP OFF'} · ${pg.protocol??'-'} · ownership=${pg.ownership}`);txt("prodCaddy",`:${pc.public_port} · ${fmtProc(pc)}`);txt("prodTransport",p.transport);txt("prodPython",p.analysis_python);txt("prodOwnership",pb.ownership);renderQueue("prodQueueCount","prodQueueList",p.queue);const mode=$("prodMode");mode.textContent=(pl.mode||"-").toUpperCase();mode.className="mode "+(pl.mode==="maintenance"?"maintenance":"");
- const l=s.lab||{};renderQueue("labQueueCount","labQueueList",l.queue);txt("labQueueMeta",`${l.transport??"-"} · ${l.analysis_python??"-"}`);
+ const l=s.lab||{},ls=l.server||{},lc=l.caddy||{};const labHealthy=!!(ls.process_alive&&ls.http_alive&&lc.process_alive&&lc.http_alive);labFailures=labHealthy?0:labFailures+1;const labShown=labHealthy||labFailures<3;dot($("labDot"),labShown,!labHealthy);txt("labState",labHealthy?"ONLINE":(labFailures<3?"DEGRADED / CHECKING":"PROCESS / HTTP DOWN"));txt("labRoot",ls.root??l.root);txt("labEnv",ls.app_env);txt("labBackend",`:${ls.backend_port??8701} · ${fmtProc(ls)}`);txt("labCaddy",`:${lc.public_port??8702} · ${fmtProc(lc)}`);txt("labTransport",l.transport);txt("labPython",l.analysis_python);txt("labOwnership",ls.ownership);renderQueue("labQueueCount","labQueueList",l.queue);txt("labQueueMeta",`${l.transport??"-"} · ${l.analysis_python??"-"}`);renderAssistantWorkers(l.workers||{});
  syncActionButtons();
 }
 function renderJobs(payload){
