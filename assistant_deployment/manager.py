@@ -15,7 +15,7 @@ DEFAULT_LAB_ROOT = Path(r"H:\EZStudio_lab")
 DEFAULT_SOURCE = DEFAULT_LAB_ROOT / "EZStudioLab_assistant"
 DEFAULT_NODE = "steph@192.168.1.81"
 DEFAULT_REMOTE_ROOT = r"C:\EZStudioLab_assistant"
-DEFAULT_REMOTE_HOST_REPO = r"C:\EZStudio_lab"
+DEFAULT_REMOTE_HOST_REPO = r"C:\EZStudioLab_assistant\runtime"
 
 
 @dataclass(frozen=True)
@@ -155,17 +155,45 @@ def deploy(plan: DeployPlan) -> dict:
     remote_archive_name = f"EZStudioLab_assistant-{short}.zip"
 
     with tempfile.TemporaryDirectory(prefix="ezs-assistant-deploy-") as tmp:
-        archive = Path(tmp) / remote_archive_name
+        tmp_root = Path(tmp)
+        assistant_archive = tmp_root / "assistant-source.zip"
+        bundle_root = tmp_root / "bundle"
+        archive = tmp_root / remote_archive_name
+
         completed = subprocess.run(
-            ["git", "archive", "--format=zip", f"--output={archive}", "HEAD"],
+            ["git", "archive", "--format=zip", f"--output={assistant_archive}", "HEAD"],
             cwd=str(source),
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
         )
-        if completed.returncode != 0 or not archive.is_file():
+        if completed.returncode != 0 or not assistant_archive.is_file():
             raise RuntimeError(f"assistant_archive_failed:{completed.stderr.strip()}")
+
+        import zipfile
+        with zipfile.ZipFile(assistant_archive, "r") as src_zip:
+            src_zip.extractall(bundle_root)
+
+        lab_root = Path(r"H:\EZStudio_lab")
+        runtime_files = (
+            Path("python/ezstudio/__init__.py"),
+            Path("python/ezstudio/distributed/__init__.py"),
+            Path("python/ezstudio/distributed/capabilities.py"),
+            Path("python/ezstudio/distributed/model_resolver.py"),
+            Path("python/ezstudio/distributed/worker_protocol.py"),
+        )
+        for relative in runtime_files:
+            source_file = lab_root / relative
+            if not source_file.is_file():
+                raise RuntimeError(f"assistant_runtime_dependency_missing:{source_file}")
+            target_file = bundle_root / "runtime" / relative
+            target_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_file, target_file)
+
+        shutil.make_archive(str(archive.with_suffix("")), "zip", root_dir=bundle_root)
+        if not archive.is_file():
+            raise RuntimeError("assistant_bundle_archive_failed")
 
         copied = subprocess.run(
             ["scp", str(archive), f"{plan.node}:{remote_archive_name}"],

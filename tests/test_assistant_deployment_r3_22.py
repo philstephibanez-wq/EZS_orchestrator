@@ -23,12 +23,16 @@ class AssistantDeploymentR322Contract(unittest.TestCase):
 
     def test_xps_is_deployment_target_not_dev_clone(self):
         self.assertIn(r'C:\EZStudioLab_assistant', MANAGER)
-        self.assertIn(r'C:\EZStudio_lab', MANAGER)
+        self.assertIn(r'C:\EZStudioLab_assistant\runtime', MANAGER)
         self.assertIn('["git", "archive", "--format=zip"', MANAGER)
         self.assertIn('["scp", str(archive)', MANAGER)
         self.assertIn('["ssh", plan.node, "powershell"', MANAGER)
         self.assertNotIn("git clone", MANAGER)
         self.assertNotIn("git pull", MANAGER)
+        self.assertIn("runtime_files = (", MANAGER)
+        self.assertIn('Path("python/ezstudio/distributed/capabilities.py")', MANAGER)
+        self.assertIn('Path("python/ezstudio/distributed/model_resolver.py")', MANAGER)
+        self.assertIn('Path("python/ezstudio/distributed/worker_protocol.py")', MANAGER)
 
     def test_atomic_install_and_rollback_slot(self):
         self.assertIn(".__new", MANAGER)
