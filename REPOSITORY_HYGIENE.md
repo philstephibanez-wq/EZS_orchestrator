@@ -38,3 +38,14 @@ En conséquence :
 Tout assistant, agent, script ou automatisation intervenant sur ce dépôt doit respecter cette règle par défaut.
 
 **Si un fichier n'est pas clairement un composant durable du produit, il doit être créé dans `H:\temp`, pas dans le dépôt.**
+
+## VERSIONING DES LIVRAISONS
+
+Le fichier `VERSION` fait partie des composants durables du produit et doit être versionné intentionnellement.
+
+- Toute livraison poussée doit incrémenter `VERSION`.
+- `release` : `MAJOR.MINOR.PATCH`.
+- `fix` : suffixe lettre minuscule sur la release courante (`1.5.0a`, `1.5.0b`, ...).
+- Le SHA Git est une révision technique séparée et ne remplace jamais la version humaine.
+- Un commit destiné au push qui ne met pas à jour `VERSION` est non conforme.
+
