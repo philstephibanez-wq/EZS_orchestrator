@@ -207,43 +207,64 @@ def _build_bundle(plan: DeployPlan, destination: Path) -> None:
 
 
 def _remote_deployed_commit(plan: DeployPlan) -> tuple[bool, str | None, str | None]:
-    script = f"""$path = '{plan.remote_root}\DEPLOYED_COMMIT.txt'
-if (Test-Path -LiteralPath $path -PathType Leaf) {{
-    (Get-Content -LiteralPath $path -Raw).Trim()
-    exit 0
-}}
-exit 3
-"""
-    encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
-    completed = subprocess.run(
-        [
-            "ssh",
-            plan.node,
-            "powershell",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-EncodedCommand",
-            encoded,
-        ],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=8,
+    script = (
+        "$ErrorActionPreference = 'Stop'\n"
+        f"$path = '{plan.remote_root}\\DEPLOYED_COMMIT.txt'\n"
+        "if (Test-Path -LiteralPath $path -PathType Leaf) {\n"
+        "    Write-Output ((Get-Content -LiteralPath $path -Raw).Trim())\n"
+        "    exit 0\n"
+        "}\n"
+        "exit 3\n"
     )
+    encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
+    try:
+        completed = subprocess.run(
+            [
+                "ssh",
+                plan.node,
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-EncodedCommand",
+                encoded,
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        return False, None, "ssh_timeout"
+    except OSError as exc:
+        return False, None, f"{type(exc).__name__}:{exc}"[:500]
+
     if completed.returncode == 0:
         rows = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
-        value = rows[-1] if rows else ""
-        return True, value or None, None
+        commit = next(
+            (
+                row
+                for row in reversed(rows)
+                if len(row) == 40
+                and all(ch in "0123456789abcdefABCDEF" for ch in row)
+            ),
+            None,
+        )
+        if commit is None:
+            return False, None, "remote_commit_output_invalid"
+        return True, commit.lower(), None
+
     if completed.returncode == 3:
         return True, None, None
-    return False, None, (
+
+    error = (
         completed.stderr.strip()
         or completed.stdout.strip()
         or f"ssh_rc={completed.returncode}"
-    )[:500]
-
+    )
+    return False, None, error[:500]
 
 def deployment_status(plan: DeployPlan) -> dict:
     reachable, deployed_commit, error = _remote_deployed_commit(plan)

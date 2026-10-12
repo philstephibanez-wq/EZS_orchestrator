@@ -46,5 +46,12 @@ class R323AssistantDeploymentUiContract(unittest.TestCase):
         self.assertNotIn("setInterval(refreshAssistantDeployment,3000)", WEB)
 
 
+    def test_remote_status_is_timeout_safe(self):
+        self.assertIn("timeout=30", MANAGER)
+        self.assertIn("except subprocess.TimeoutExpired", MANAGER)
+        self.assertIn('"ssh_timeout"', MANAGER)
+        self.assertIn('"remote_commit_output_invalid"', MANAGER)
+
+
 if __name__ == "__main__":
     unittest.main()
