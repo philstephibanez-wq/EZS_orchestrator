@@ -63,7 +63,7 @@ $version.ForeColor = [System.Drawing.Color]::FromArgb(145, 166, 172)
 $body.Controls.Add($version)
 
 $status = New-Object System.Windows.Forms.Label
-$status.Text = "Démarrage du Control Center…"
+$status.Text = "Démarrage de l’Orchestrator…"
 $status.AutoSize = $false
 $status.Width = 440
 $status.Height = 26
@@ -93,7 +93,7 @@ $timer.Interval = 120
 $timer.Add_Tick({
     if (Test-Path -LiteralPath $ReadyFile) {
         $progress.Value = 100
-        $status.Text = "Control Center prêt"
+        $status.Text = "Orchestrator prêt"
         $timer.Stop()
 
         $closeTimer = New-Object System.Windows.Forms.Timer
@@ -107,7 +107,7 @@ $timer.Add_Tick({
     }
 
     if (Test-Path -LiteralPath $FailureFile) {
-        $status.Text = "Échec du démarrage — voir control-center-error.log"
+        $status.Text = "Échec du démarrage — voir Orchestrator erreurs"
         $status.ForeColor = [System.Drawing.Color]::FromArgb(255, 123, 123)
         $progress.Value = 100
 
@@ -123,7 +123,7 @@ $timer.Add_Tick({
     }
 
     # Visible deterministic progress while the launcher validates the service
-    # and the Control Center listener. It deliberately stops at 92% until
+    # and the Orchestrator listener. It deliberately stops at 92% until
     # ReadyFile confirms the listener is really ours.
     if ($progressValue -lt 92) {
         if ($progressValue -lt 35) {
@@ -146,7 +146,7 @@ $timer.Add_Tick({
         $status.Text = "Démarrage plus long que prévu…"
     }
     elseif ($progressValue -ge 70) {
-        $status.Text = "Vérification du Control Center…"
+        $status.Text = "Vérification de l’Orchestrator…"
     }
     elseif ($progressValue -ge 35) {
         $status.Text = "Initialisation des services…"

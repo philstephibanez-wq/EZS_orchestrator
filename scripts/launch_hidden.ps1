@@ -99,26 +99,28 @@ function Stop-ExistingControlCenter {
         }
     }
 
-    throw "Ancien Control Center EZS arrêté mais le port 8700 reste occupé."
+    throw "Ancien Orchestrator EZS arrêté mais le port 8700 reste occupé."
 }
 
 try {
     # 1. Ensure the permanent service is running.
     $serviceStatus = & $Python -m service.service_cli status 2>&1
     if ($LASTEXITCODE -ne 0 -or ($serviceStatus -join "`n") -notmatch "SERVICE:\s+running") {
-        & $Python -m service.service_cli start --target all --poll-seconds 2 *> (Join-Path $Logs "service-start.log")
-        if ($LASTEXITCODE -ne 0) {
+        $serviceStartOutput = & $Python -m service.service_cli start --target all --poll-seconds 2 2>&1
+        $serviceStartExitCode = $LASTEXITCODE
+        $serviceStartOutput | Set-Content -LiteralPath (Join-Path $Logs "service-start.log") -Encoding utf8
+        if ($serviceStartExitCode -ne 0) {
             throw "Impossible de démarrer le service permanent EZS."
         }
     }
 
-    # 2. launch.bat means: run the currently installed Control Center.
+    # 2. launch.bat means: run the currently installed Orchestrator.
     #    Restart our own listener, but never kill an unrelated process on 8700.
     Stop-ExistingControlCenter
 
-    # 3. Start the current Control Center implementation.
+    # 3. Start the current Orchestrator implementation.
     if (-not (Test-Path $StartScript)) {
-        throw "Script de démarrage Control Center introuvable: $StartScript"
+        throw "Script de démarrage Orchestrator introuvable: $StartScript"
     }
 
     Start-Process powershell.exe `
@@ -138,13 +140,13 @@ try {
     }
 
     if (-not (Test-Port8700)) {
-        throw "Le Control Center EZS n'a pas ouvert le port 8700."
+        throw "L'Orchestrator EZS n'a pas ouvert le port 8700."
     }
 
     # 5. Verify that the newly listening process is ours.
     $newPid = Get-Port8700Owner
     if (-not (Test-EzsControlCenterProcess -ProcessId $newPid)) {
-        throw "Le port 8700 s'est ouvert, mais le listener n'est pas le Control Center EZS attendu (PID=$newPid)."
+        throw "Le port 8700 s'est ouvert, mais le listener n'est pas l'Orchestrator EZS attendu (PID=$newPid)."
     }
 
     Set-Content -LiteralPath $ReadyFile -Value ([DateTime]::UtcNow.ToString("o")) -Encoding ascii

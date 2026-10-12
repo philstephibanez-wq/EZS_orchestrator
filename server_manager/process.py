@@ -158,9 +158,10 @@ def exact_php_server(pid: int, port: int, public_dir: Path) -> bool:
     return bind in normalized and root in normalized
 
 
-def http_alive(url: str, timeout: float = 2.0) -> bool:
+def http_alive(url: str, timeout: float = 2.0, path: str = "/fr/login") -> bool:
+    probe_path = path if path.startswith("/") else "/" + path
     req = urllib.request.Request(
-        url.rstrip("/") + "/fr/login",
+        url.rstrip("/") + probe_path,
         headers={"User-Agent": "EZS-Orchestrator/3.14"},
         method="GET",
     )

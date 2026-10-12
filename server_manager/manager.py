@@ -95,6 +95,8 @@ class ServerManager:
         else:
             ownership = "foreign"
 
+        health_path = "/internal/analysis/desktop/jobs/queue" if target is Target.LAB else "/fr/login"
+
         return ServerView(
             target=target,
             root=str(spec.root),
@@ -104,7 +106,10 @@ class ServerManager:
             gateway_port=spec.gateway_port,
             pid=pid,
             process_alive=alive,
-            http_alive=http_alive(f"http://127.0.0.1:{spec.backend_port}") if alive else False,
+            http_alive=(
+                http_alive(f"http://127.0.0.1:{spec.backend_port}", path=health_path)
+                if alive else False
+            ),
             ownership=ownership,
         )
 

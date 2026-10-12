@@ -6,6 +6,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 WEB = (ROOT / "control_center" / "web.py").read_text(encoding="utf-8")
 TERMS = (ROOT / "docs" / "UI_TERMINOLOGY.md").read_text(encoding="utf-8")
+SPLASH = (ROOT / "scripts" / "show_splash.ps1").read_text(encoding="utf-8-sig")
+LAUNCHER = (ROOT / "scripts" / "launch_hidden.ps1").read_text(encoding="utf-8-sig")
+STARTER = (ROOT / "scripts" / "start_control_center.ps1").read_text(encoding="utf-8-sig")
 
 
 class R327UiTerminologyContract(unittest.TestCase):
@@ -61,7 +64,6 @@ class R327UiTerminologyContract(unittest.TestCase):
         self.assertIn('"HORS LIGNE"', WEB)
 
     def test_internal_contracts_are_not_renamed(self):
-        # Internal payload/API identifiers remain stable.
         self.assertIn('d.server', WEB)
         self.assertIn('pl.backend', WEB)
         self.assertIn('pl.gateway', WEB)
@@ -73,6 +75,16 @@ class R327UiTerminologyContract(unittest.TestCase):
         self.assertIn("Termes interdits dans les libellés UI", TERMS)
         self.assertIn("| Application de supervision sur 127.0.0.1:8700 | Orchestrator |", TERMS)
         self.assertIn("| Serveur applicatif DEV / PROD / LAB | Serveur |", TERMS)
+
+    def test_launcher_and_splash_visible_wording_is_orchestrator(self):
+        for text in (SPLASH, LAUNCHER, STARTER):
+            self.assertNotIn("Control Center", text)
+        self.assertIn("Démarrage de l’Orchestrator…", SPLASH)
+        self.assertIn("Orchestrator prêt", SPLASH)
+        self.assertIn("Vérification de l’Orchestrator…", SPLASH)
+        self.assertIn("[EZS] Orchestrator: http://127.0.0.1:$Port/", STARTER)
+        self.assertIn("Ancien Orchestrator EZS arrêté", LAUNCHER)
+        self.assertIn("Script de démarrage Orchestrator introuvable", LAUNCHER)
 
 
 if __name__ == "__main__":
