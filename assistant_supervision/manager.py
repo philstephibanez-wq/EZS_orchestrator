@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import subprocess
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 
 DEFAULT_NODE = "steph@192.168.1.81"
@@ -59,7 +61,12 @@ class AssistantSupervisor:
     def _encoded(script: str) -> str:
         return base64.b64encode(script.encode("utf-16le")).decode("ascii")
 
-    def _run_ps(self, script: str, timeout: int = 15) -> subprocess.CompletedProcess[str]:
+    def _run_ps(
+        self,
+        script: str,
+        timeout: int = 15,
+        stdin_text: str | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [
                 "ssh",
@@ -72,12 +79,32 @@ class AssistantSupervisor:
                 "-EncodedCommand",
                 self._encoded(script),
             ],
+            input=stdin_text,
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
             timeout=timeout,
         )
+
+    def _configured_token(self) -> str:
+        runtime = str(os.getenv("EZSTUDIO_ANALYSIS_WORKER_TOKEN") or "").strip()
+        if runtime:
+            return runtime
+        env_path = Path(r"H:\EZStudio_lab\.env.local")
+        if not env_path.is_file():
+            raise RuntimeError("assistant_analysis_token_env_missing")
+        for raw in env_path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            if key.strip() != "EZSTUDIO_ANALYSIS_WORKER_TOKEN":
+                continue
+            value = value.strip().strip('"').strip("'").strip()
+            if value:
+                return value
+        raise RuntimeError("assistant_analysis_token_missing")
 
     def status(self, force: bool = False) -> dict:
         with self._lock:
@@ -166,6 +193,127 @@ if (Test-Path -LiteralPath $commitPath -PathType Leaf) {{
             stderr_log=self.log_root + r"\assistant.err.log",
             error=error,
         ).as_dict()
+
+    def start(self) -> dict:
+        token = self._configured_token()
+        script = f"""$ErrorActionPreference = 'Stop'
+$root = '{self.remote_root}'
+$app = Join-Path $root 'app\\main.py'
+$statusWindow = Join-Path $root 'app\\status_window.pyw'
+$hostRepo = Join-Path $root 'runtime'
+$logs = Join-Path $root 'logs'
+$stdoutPath = Join-Path $logs 'assistant.out.log'
+$stderrPath = Join-Path $logs 'assistant.err.log'
+if (-not (Test-Path -LiteralPath $app -PathType Leaf)) {{ throw 'assistant_app_missing' }}
+if (-not (Test-Path -LiteralPath $statusWindow -PathType Leaf)) {{ throw 'assistant_status_window_missing' }}
+$matches = @(
+    Get-CimInstance Win32_Process | Where-Object {{
+        $_.CommandLine -and
+        $_.CommandLine -like '*EZStudioLab_assistant*app*main.py*' -and
+        $_.CommandLine -like '*distributed-watch*'
+    }}
+)
+if ($matches.Count -gt 1) {{ throw "assistant_duplicate_processes:$($matches.Count)" }}
+$token = [Console]::In.ReadLine()
+if ([string]::IsNullOrWhiteSpace($token)) {{ throw 'assistant_token_stdin_missing' }}
+if ($matches.Count -eq 0) {{
+    $python = (Get-Command python -ErrorAction Stop).Source
+    New-Item -ItemType Directory -Path $logs -Force | Out-Null
+    $env:EZSTUDIOLAB_ASSISTANT_TOKEN = $token
+    $env:EZSTUDIOLAB_ASSISTANT_BASE_URL = 'http://EZSTUDIO-MAIN:8702'
+    $env:EZSTUDIOLAB_ASSISTANT_NODE_ID = 'EZStudioLab_assistant-EZSTUDIO-XPS'
+    $env:EZSTUDIOLAB_HOST_REPO = $hostRepo
+    $env:EZSTUDIO_SHARED_MODEL_ROOT = '\\\\EZSTUDIO-MAIN\\EZModels'
+    $env:EZSTUDIOLAB_ASSISTANT_MODEL_CACHE = (Join-Path $root 'models')
+    $env:EZSTUDIOLAB_ASSISTANT_STATUS_FILE = (Join-Path $logs 'assistant.status.json')
+    $env:PYTHONPATH = (Join-Path $hostRepo 'python')
+    $p = Start-Process -FilePath $python -ArgumentList @(
+        $app,'distributed-watch','--poll-seconds','5','--limit','100'
+    ) -WorkingDirectory $root -WindowStyle Hidden -PassThru `
+      -RedirectStandardOutput $stdoutPath `
+      -RedirectStandardError $stderrPath
+    Start-Sleep -Milliseconds 900
+    if ($p.HasExited) {{ throw "assistant_start_exited:$($p.ExitCode)" }}
+}}
+$taskName = 'EZStudioLab Assistant Status'
+$existingStatusTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+if ($null -ne $existingStatusTask) {{
+    Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+}}
+$pythonw = (Get-Command pythonw.exe -ErrorAction Stop).Source
+$action = New-ScheduledTaskAction `
+    -Execute $pythonw `
+    -Argument ('"' + $statusWindow + '" --root "' + $root + '"')
+$principal = New-ScheduledTaskPrincipal `
+    -UserId $env:USERNAME `
+    -LogonType Interactive `
+    -RunLevel Limited
+Register-ScheduledTask `
+    -TaskName $taskName `
+    -Action $action `
+    -Principal $principal `
+    -Description 'Fenêtre locale de statut EZStudioLab Assistant' `
+    -Force | Out-Null
+Start-ScheduledTask -TaskName $taskName
+"""
+        completed = self._run_ps(script, timeout=25, stdin_text=token + "\n")
+        if completed.returncode != 0:
+            error = completed.stderr.strip() or completed.stdout.strip() or f"ssh_rc={completed.returncode}"
+            raise RuntimeError(f"assistant_start_failed:{error[:500]}")
+        self._status_cache = None
+        status = self.status(force=True)
+        if not status.get("process_running") or int(status.get("process_count") or 0) != 1:
+            raise RuntimeError("assistant_start_not_singleton")
+        return {
+            "ok": True,
+            "schema": "ezs.assistant-supervision.start.v1",
+            "state": status.get("state"),
+            "process_count": status.get("process_count"),
+            "deployed_commit": status.get("deployed_commit"),
+        }
+
+    def stop(self) -> dict:
+        script = f"""$ErrorActionPreference = 'Stop'
+$root = '{self.remote_root}'
+$statusPath = Join-Path $root 'logs\\assistant.status.json'
+$matches = @(
+    Get-CimInstance Win32_Process | Where-Object {{
+        $_.CommandLine -and
+        $_.CommandLine -like '*EZStudioLab_assistant*app*main.py*' -and
+        $_.CommandLine -like '*distributed-watch*'
+    }}
+)
+foreach ($proc in $matches) {{
+    Stop-Process -Id ([int]$proc.ProcessId) -Force -ErrorAction Stop
+}}
+$payload = [ordered]@{{
+    schema='ezstudio.assistant-local-status.v1'
+    state='STOPPED'
+    activity='Assistant arrêté par Orchestrator'
+    at_epoch=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()/1000.0
+    at=[DateTime]::UtcNow.ToString('o')
+}}
+New-Item -ItemType Directory -Path (Split-Path $statusPath) -Force | Out-Null
+$tmp = $statusPath + '.tmp'
+$payload | ConvertTo-Json -Compress | Set-Content -LiteralPath $tmp -Encoding utf8
+Move-Item -LiteralPath $tmp -Destination $statusPath -Force
+"""
+        completed = self._run_ps(script, timeout=20)
+        if completed.returncode != 0:
+            error = completed.stderr.strip() or completed.stdout.strip() or f"ssh_rc={completed.returncode}"
+            raise RuntimeError(f"assistant_stop_failed:{error[:500]}")
+        self._status_cache = None
+        status = self.status(force=True)
+        if status.get("process_running"):
+            raise RuntimeError("assistant_stop_process_still_running")
+        return {
+            "ok": True,
+            "schema": "ezs.assistant-supervision.stop.v1",
+            "state": "STOPPED",
+            "process_count": 0,
+            "deployed_commit": status.get("deployed_commit"),
+        }
 
     def tail(self, stream: str, lines: int = 250) -> dict:
         if stream not in {"stdout", "stderr"}:

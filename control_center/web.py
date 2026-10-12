@@ -700,6 +700,18 @@ class ControlCenter:
     def assistant_logs(self, stream: str) -> dict:
         return self.assistant_supervision.tail(stream)
 
+    def assistant_start(self) -> dict:
+        with self.action_lock:
+            result = self.assistant_supervision.start()
+            self._invalidate_snapshot()
+            return result
+
+    def assistant_stop(self) -> dict:
+        with self.action_lock:
+            result = self.assistant_supervision.stop()
+            self._invalidate_snapshot()
+            return result
+
     def assistant_deployment_status(self) -> dict:
         try:
             return get_assistant_deployment_status(build_assistant_deploy_plan())
@@ -860,7 +872,9 @@ main{padding:20px;max-width:1600px;margin:auto}.view{display:none}.view.active{d
         <dt>Processus assistant XPS</dt><dd id="assistantRuntimeState">-</dd>
       </dl>
       <div class="actions">
-        <button id="assistantDeploy" class="primary">Déployer assistant → XPS</button>
+        <button id="assistantStart" class="primary">Démarrer assistant</button>
+        <button id="assistantStop" class="danger">Arrêter assistant</button>
+        <button id="assistantDeploy">Déployer assistant → XPS</button>
       </div>
       <div id="assistantWorkers"></div>
     </article>
@@ -1003,11 +1017,15 @@ async function refreshAssistantDeployment(){
  }
 }
 
-let assistantSupervisionRefreshInFlight=false;
+let assistantSupervisionData=null,assistantSupervisionRefreshInFlight=false;
 function renderAssistantSupervision(payload){
- const state=payload?.state||"ERROR";
+ assistantSupervisionData=payload||{};
+ const state=assistantSupervisionData.state||"ERROR";
  const labels={STOPPED:"ARRÊTÉ",ONLINE:"EN LIGNE",BUSY:"OCCUPÉ",STALE:"PÉRIMÉ",ERROR:"ERREUR"};
  txt("assistantRuntimeState",labels[state]||state);
+ const running=!!assistantSupervisionData.process_running;
+ if($("assistantStart"))$("assistantStart").disabled=busy||running;
+ if($("assistantStop"))$("assistantStop").disabled=busy||!running;
 }
 async function refreshAssistantSupervision(){
  if(assistantSupervisionRefreshInFlight)return;
@@ -1118,6 +1136,26 @@ async function refreshLogs(){
 }
 async function refresh(){if(refreshInFlight)return;refreshInFlight=true;try{renderStatus(await getJSON("/api/status"));if(currentView==="logs")await refreshLogs()}catch(e){toast(String(e),false)}finally{refreshInFlight=false}}
 async function action(name){if(busy)return;busy=true;syncActionButtons();try{const r=await protectedFetch("/api/action",{method:"POST",headers:{"Content-Type":"application/json","X-EZS-Token":TOKEN},body:JSON.stringify({action:name})});const d=await r.json();toast(d.message||d.error||"OK",!!d.ok)}catch(e){toast(String(e),false)}finally{busy=false;await refresh()}}
+async function assistantRuntimeAction(path,successMessage){
+ if(busy)return;
+ busy=true;
+ syncActionButtons();
+ try{
+  const r=await protectedFetch(path,{method:"POST",headers:{"X-EZS-Token":TOKEN}});
+  const data=await r.json();
+  if(!r.ok)throw new Error(data.message||data.error||JSON.stringify(data));
+  toast(successMessage,true);
+ }catch(e){
+  toast(String(e),false);
+ }finally{
+  busy=false;
+  await refreshAssistantSupervision();
+  await refresh();
+  syncActionButtons();
+ }
+}
+$("assistantStart").addEventListener("click",()=>assistantRuntimeAction("/api/assistant/supervision/start","Assistant XPS démarré"));
+$("assistantStop").addEventListener("click",()=>assistantRuntimeAction("/api/assistant/supervision/stop","Assistant XPS arrêté"));
 $("assistantDeploy").addEventListener("click",async()=>{
  if(busy)return;
  if(!confirm("Déployer la version validée de EZStudioLab_assistant vers le XPS ?"))return;
@@ -1475,6 +1513,20 @@ def make_handler(center: ControlCenter, token: str):
                         {"ok": False, "error": str(exc)},
                         400,
                     )
+                return
+
+            if path == "/api/assistant/supervision/start":
+                try:
+                    self._json(center.assistant_start())
+                except Exception as exc:
+                    self._json({"ok": False, "message": str(exc)}, 500)
+                return
+
+            if path == "/api/assistant/supervision/stop":
+                try:
+                    self._json(center.assistant_stop())
+                except Exception as exc:
+                    self._json({"ok": False, "message": str(exc)}, 500)
                 return
 
             if path == "/api/assistant/deployment/apply":
