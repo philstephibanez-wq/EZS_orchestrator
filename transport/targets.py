@@ -62,5 +62,11 @@ class TargetRegistry:
         url = self.config.transport_url_for(target)
 
         env = read_env_local(root)
-        token = override or env.get(token_key) or ""
+        if target is Target.LAB:
+            # LAB .env.local is the canonical credential source on MAIN.
+            # An inherited EZS_LAB_ANALYSIS_TOKEN may be stale when the
+            # Control Center is restarted from an old shell/session.
+            token = env.get(token_key) or override or ""
+        else:
+            token = override or env.get(token_key) or ""
         return TargetEndpoint(target, root, url, token)
