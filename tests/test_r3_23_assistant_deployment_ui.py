@@ -42,9 +42,9 @@ class R323AssistantDeploymentUiContract(unittest.TestCase):
         self.assertNotIn("distributed-watch", MANAGER)
 
     def test_no_three_second_ssh_poll(self):
-        self.assertIn("refreshAssistantDeployment();setInterval(refresh,3000)", WEB)
+        self.assertIn("refreshAssistantDeployment()", WEB)
+        self.assertIn("setInterval(refresh,3000)", WEB)
         self.assertNotIn("setInterval(refreshAssistantDeployment,3000)", WEB)
-
 
     def test_remote_status_is_timeout_safe(self):
         self.assertIn("timeout=30", MANAGER)

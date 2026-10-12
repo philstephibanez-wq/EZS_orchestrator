@@ -21,6 +21,7 @@ from control_center.job_history import JobHistory
 from control_center.log_tools import LogTools
 from deployment.manager import DeploymentManager
 from assistant_deployment.manager import build_plan as build_assistant_deploy_plan, deploy as deploy_assistant_node, deployment_status as get_assistant_deployment_status
+from assistant_supervision.manager import AssistantSupervisor
 from gateway_manager.manager import GatewayManager
 from prod_lifecycle.manager import ProdLifecycleManager
 from runtime_guard.activity import analysis_execution_active
@@ -58,6 +59,7 @@ class ControlCenter:
         self.log_tools = LogTools(self.config.orchestrator_root)
         self.job_history = JobHistory(self.config.orchestrator_root)
         self.deployment = DeploymentManager(self.config, self.prod)
+        self.assistant_supervision = AssistantSupervisor()
         self.action_lock = threading.Lock()
         self.snapshot_lock = threading.Lock()
         self._snapshot_cache: dict | None = None
@@ -363,6 +365,35 @@ class ControlCenter:
             "lab_caddy_error": self.log_tools.tail(root / "runtime" / "caddy" / "lab" / "caddy.err.log"),
         }
 
+    def assistant_supervision_status(self) -> dict:
+        remote = self.assistant_supervision.status()
+        workers_payload = self._distributed_workers()
+        workers = workers_payload.get("workers") if workers_payload.get("ok") else []
+        workers = workers if isinstance(workers, list) else []
+        online = [w for w in workers if isinstance(w, dict) and w.get("online")]
+        states = {str(w.get("state") or "").lower() for w in online}
+
+        if not remote.get("ok"):
+            state = "ERROR"
+        elif online and states.intersection({"running", "busy", "claimed", "processing"}):
+            state = "BUSY"
+        elif online:
+            state = "ONLINE"
+        elif remote.get("process_running"):
+            state = "STALE"
+        else:
+            state = "STOPPED"
+
+        return {
+            **remote,
+            "state": state,
+            "inventory_online": len(online),
+            "inventory_count": len(workers),
+        }
+
+    def assistant_logs(self, stream: str) -> dict:
+        return self.assistant_supervision.tail(stream)
+
     def assistant_deployment_status(self) -> dict:
         try:
             return get_assistant_deployment_status(build_assistant_deploy_plan())
@@ -496,6 +527,7 @@ main{padding:20px;max-width:1600px;margin:auto}.view{display:none}.view.active{d
         <dt>Source LAB</dt><dd id="assistantSourceCommit">-</dd>
         <dt>Version XPS</dt><dd id="assistantDeployedCommit">-</dd>
         <dt>Déploiement</dt><dd id="assistantDeployState">-</dd>
+        <dt>Runtime XPS</dt><dd id="assistantRuntimeState">-</dd>
       </dl>
       <div class="actions">
         <button id="assistantDeploy" class="primary">Déployer assistant</button>
@@ -519,7 +551,7 @@ main{padding:20px;max-width:1600px;margin:auto}.view{display:none}.view.active{d
     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
       <div><h2 style="margin-bottom:4px">Logs</h2><div class="muted">Infrastructure, Control Center et déploiements</div></div>
     </div>
-<div class="actions"><button id="clearLogs" class="danger">Clear logs</button><button id="exportLogs" class="primary">Export logs ZIP</button></div><div class="tabs"><button class="tab active" data-log="service">Service</button><button class="tab" data-log="service_error">Service erreurs</button><button class="tab" data-log="control_center">Control Center</button><button class="tab" data-log="control_center_error">Control Center erreurs</button><button class="tab" data-log="dev_server_error">Backend DEV</button><button class="tab" data-log="dev_caddy_error">Caddy DEV</button><button class="tab" data-log="prod_server_error">Backend PROD</button><button class="tab" data-log="prod_gateway_error">Gateway PROD</button><button class="tab" data-log="prod_caddy_error">Caddy PROD</button><button class="tab" data-log="lab_server_error">Backend LAB</button><button class="tab" data-log="lab_caddy_error">Caddy LAB</button><button class="tab" data-log="deployments">Déploiements</button></div><pre id="logText">Chargement…</pre></section>
+<div class="actions"><button id="clearLogs" class="danger">Clear logs</button><button id="exportLogs" class="primary">Export logs ZIP</button></div><div class="tabs"><button class="tab active" data-log="service">Service</button><button class="tab" data-log="service_error">Service erreurs</button><button class="tab" data-log="control_center">Control Center</button><button class="tab" data-log="control_center_error">Control Center erreurs</button><button class="tab" data-log="dev_server_error">Backend DEV</button><button class="tab" data-log="dev_caddy_error">Caddy DEV</button><button class="tab" data-log="prod_server_error">Backend PROD</button><button class="tab" data-log="prod_gateway_error">Gateway PROD</button><button class="tab" data-log="prod_caddy_error">Caddy PROD</button><button class="tab" data-log="lab_server_error">Backend LAB</button><button class="tab" data-log="lab_caddy_error">Caddy LAB</button><button class="tab" data-log="assistant_xps">Assistant XPS</button><button class="tab" data-log="assistant_xps_error">Assistant XPS erreurs</button><button class="tab" data-log="deployments">Déploiements</button></div><pre id="logText">Chargement…</pre></section>
 
   </section>
 </section>
@@ -647,6 +679,24 @@ async function refreshAssistantDeployment(){
  }
 }
 
+let assistantSupervisionRefreshInFlight=false;
+function renderAssistantSupervision(payload){
+ const state=payload?.state||"ERROR";
+ const labels={STOPPED:"STOPPED",ONLINE:"ONLINE",BUSY:"BUSY",STALE:"STALE",ERROR:"ERROR"};
+ txt("assistantRuntimeState",labels[state]||state);
+}
+async function refreshAssistantSupervision(){
+ if(assistantSupervisionRefreshInFlight)return;
+ assistantSupervisionRefreshInFlight=true;
+ try{
+  renderAssistantSupervision(await getJSON("/api/assistant/supervision/status"));
+ }catch(e){
+  renderAssistantSupervision({ok:false,state:"ERROR",error:String(e)});
+ }finally{
+  assistantSupervisionRefreshInFlight=false;
+ }
+}
+
 function renderAssistantWorkers(payload){
  const workers=(payload&&payload.workers)||[];
  const online=workers.filter(w=>!!w.online);
@@ -682,6 +732,13 @@ function renderJobs(payload){
 async function refreshJobs(){if(jobsRefreshInFlight)return;jobsRefreshInFlight=true;try{renderJobs(await getJSON("/api/jobs"))}catch(e){txt("jobsMeta","Erreur de lecture")}finally{jobsRefreshInFlight=false}}
 async function refreshLogs(){
  try{
+  if(currentLog==="assistant_xps"||currentLog==="assistant_xps_error"){
+   const stream=currentLog==="assistant_xps"?"stdout":"stderr";
+   const payload=await getJSON(`/api/assistant/logs?stream=${stream}`);
+   const lines=payload.lines||[];
+   $("logText").textContent=lines.length?lines.join("\n"):"(vide)";
+   return;
+  }
   if(currentLog==="deployments"){
    const history=await getJSON("/api/deployment/history");
    const items=history.items||[];
@@ -899,8 +956,8 @@ $("deployApply").addEventListener("click",async()=>{
  }
 });
 
-$("headerRefresh").addEventListener("click",async()=>{await refresh();await refreshJobs();await refreshAssistantDeployment();if(currentView==="deployment")await refreshDeployment()});
-refresh();refreshJobs();refreshAssistantDeployment();setInterval(refresh,3000);setInterval(refreshJobs,3000);
+$("headerRefresh").addEventListener("click",async()=>{await refresh();await refreshJobs();await refreshAssistantDeployment();await refreshAssistantSupervision();if(currentView==="deployment")await refreshDeployment()});
+refresh();refreshJobs();refreshAssistantDeployment();refreshAssistantSupervision();setInterval(refresh,3000);setInterval(refreshJobs,3000);setInterval(refreshAssistantSupervision,10000);
 </script>
 </body></html>'''
 
@@ -944,6 +1001,18 @@ def make_handler(center: ControlCenter, token: str):
                 return
             if path == "/api/logs":
                 self._json(center.logs())
+                return
+            if path == "/api/assistant/supervision/status":
+                self._json(center.assistant_supervision_status())
+                return
+            if path == "/api/assistant/logs":
+                try:
+                    stream = str((parse_qs(parsed.query).get("stream") or ["stdout"])[0])
+                    self._json(center.assistant_logs(stream))
+                except ValueError as exc:
+                    self._json({"ok": False, "error": str(exc)}, 400)
+                except Exception as exc:
+                    self._json({"ok": False, "error": str(exc)}, 500)
                 return
             if path == "/api/assistant/deployment/status":
                 self._json(center.assistant_deployment_status())
