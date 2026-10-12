@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import secrets
 import subprocess
 import sys
@@ -17,8 +18,10 @@ from urllib.parse import parse_qs, urlparse
 from caddy_manager.manager import CaddyManager
 from config.loader import load_runtime_config
 from contracts.target import Target
+from control_center.incidents import IncidentStore
 from control_center.job_history import JobHistory
 from control_center.log_tools import LogTools
+from control_center.singleton import ControlCenterSingleton, ControlCenterSingletonBusy
 from deployment.manager import DeploymentManager
 from assistant_deployment.manager import build_plan as build_assistant_deploy_plan, deploy as deploy_assistant_node, deployment_status as get_assistant_deployment_status
 from assistant_supervision.manager import AssistantSupervisor
@@ -26,7 +29,8 @@ from gateway_manager.manager import GatewayManager
 from prod_lifecycle.manager import ProdLifecycleManager
 from runtime_guard.activity import analysis_execution_active
 from server_manager.manager import ServerManager
-from server_manager.process import clear_process_cache, pid_alive
+from server_manager.process import clear_process_cache, command_line, executable_path, pid_alive, process_metrics
+from service.lab_circuit import LabCircuitBreaker
 from transport.jobs import JobTransport
 from transport.targets import TargetRegistry
 
@@ -57,6 +61,8 @@ class ControlCenter:
         )
         self.transport = JobTransport(TargetRegistry(self.config))
         self.log_tools = LogTools(self.config.orchestrator_root)
+        self.incidents = IncidentStore(self.config.orchestrator_root / "runtime")
+        self.lab_circuit = LabCircuitBreaker(self.config.orchestrator_root / "runtime")
         self.job_history = JobHistory(self.config.orchestrator_root)
         self.deployment = DeploymentManager(self.config, self.prod)
         self.assistant_supervision = AssistantSupervisor()
@@ -77,26 +83,43 @@ class ControlCenter:
         heartbeat = _read_json(service_dir / "heartbeat.json")
         if not meta:
             return {
-                "running": False, "pid": None, "target": None,
-                "poll_seconds": None, "state": "stopped",
+                "running": False,
+                "pid": None,
+                "target": None,
+                "poll_seconds": None,
+                "state": "stopped",
                 "heartbeat": heartbeat.get("at"),
             }
-
         try:
             pid = int(meta.get("pid") or 0)
         except Exception:
             pid = 0
-
         clear_process_cache()
         if pid <= 0 or not pid_alive(pid):
             meta_path.unlink(missing_ok=True)
             stop_path.unlink(missing_ok=True)
             return {
-                "running": False, "pid": None, "target": None,
-                "poll_seconds": None, "state": "stopped",
+                "running": False,
+                "pid": None,
+                "target": None,
+                "poll_seconds": None,
+                "state": "stopped",
                 "heartbeat": heartbeat.get("at"),
             }
-
+        exe = executable_path(pid)
+        cmd = command_line(pid)
+        expected = False
+        if exe and cmd:
+            try:
+                expected = (
+                    Path(exe).resolve()
+                    == Path(sys.executable).resolve()
+                    and "-m service.service_cli run"
+                    in cmd.lower()
+                )
+            except Exception:
+                expected = False
+        metrics = process_metrics(pid)
         return {
             "running": True,
             "pid": pid,
@@ -104,6 +127,11 @@ class ControlCenter:
             "poll_seconds": meta.get("poll_seconds"),
             "state": heartbeat.get("state", "unknown"),
             "heartbeat": heartbeat.get("at"),
+            "ownership": "owned" if expected else "foreign",
+            "executable_path": exe,
+            "command_line": cmd,
+            "cpu_percent": metrics.get("cpu_percent"),
+            "ram_mb": metrics.get("ram_mb"),
         }
 
     def _queue(self, target: Target) -> dict:
@@ -153,62 +181,166 @@ class ControlCenter:
         return mapping.get(source, "control_center_error")
 
     def _safety_status(self, snapshot: dict) -> dict:
-        # Read-only synthesis: never starts/stops/kills a process.
         issues: list[dict] = []
         service = snapshot.get("service") or {}
+        if (
+            service.get("running")
+            and service.get("ownership") == "foreign"
+        ):
+            issues.append({
+                "severity": "critical",
+                "code": "foreign_process",
+                "source": "service",
+                "message": (
+                    "Service permanent: identité processus "
+                    f"inattendue (pid={service.get('pid')})."
+                ),
+                "log_key": "service_error",
+            })
         if service.get("running"):
-            age = self._heartbeat_age_seconds(service.get("heartbeat"))
+            age = self._heartbeat_age_seconds(
+                service.get("heartbeat")
+            )
             if age is None or age > 15.0:
                 issues.append({
                     "severity": "error",
                     "code": "heartbeat_stale",
                     "source": "service",
-                    "message": f"Service permanent sans heartbeat récent ({age if age is not None else 'inconnu'} s).",
+                    "message": (
+                        "Service permanent sans heartbeat récent "
+                        f"({age if age is not None else 'inconnu'} s)."
+                    ),
+                    "log_key": "service_error",
                 })
 
-        server_rows = (
-            ("DEV", ((snapshot.get("dev") or {}).get("server") or {})),
-            ("PROD", ((((snapshot.get("prod") or {}).get("lifecycle") or {}).get("backend")) or {})),
-            ("LAB", ((snapshot.get("lab") or {}).get("server") or {})),
+        rows = (
+            (
+                "DEV serveur",
+                ((snapshot.get("dev") or {}).get("server") or {}),
+                "dev_server_error",
+            ),
+            (
+                "DEV Caddy",
+                ((snapshot.get("dev") or {}).get("caddy") or {}),
+                "dev_caddy_error",
+            ),
+            (
+                "PROD serveur",
+                (
+                    (((snapshot.get("prod") or {}).get(
+                        "lifecycle"
+                    ) or {}).get("backend")) or {}
+                ),
+                "prod_server_error",
+            ),
+            (
+                "PROD passerelle",
+                (
+                    (((snapshot.get("prod") or {}).get(
+                        "lifecycle"
+                    ) or {}).get("gateway")) or {}
+                ),
+                "prod_gateway_error",
+            ),
+            (
+                "PROD Caddy",
+                (
+                    (((snapshot.get("prod") or {}).get(
+                        "lifecycle"
+                    ) or {}).get("caddy")) or {}
+                ),
+                "prod_caddy_error",
+            ),
+            (
+                "LAB serveur",
+                ((snapshot.get("lab") or {}).get("server") or {}),
+                "lab_server_error",
+            ),
+            (
+                "LAB Caddy",
+                ((snapshot.get("lab") or {}).get("caddy") or {}),
+                "lab_caddy_error",
+            ),
         )
-        for label, row in server_rows:
+        for label, row, log_key in rows:
             ownership = str(row.get("ownership") or "").lower()
             alive = bool(row.get("process_alive"))
             http_ok = bool(row.get("http_alive"))
             if ownership == "foreign":
                 issues.append({
-                    "severity": "error",
+                    "severity": "critical",
                     "code": "foreign_process",
                     "source": label.lower(),
-                    "message": f"{label}: processus étranger sur le port géré (pid={row.get('pid')}).",
+                    "message": (
+                        f"{label}: processus étranger sur le "
+                        f"port géré (pid={row.get('pid')})."
+                    ),
+                    "log_key": log_key,
                 })
             elif ownership == "orphan_exact":
                 issues.append({
                     "severity": "warning",
                     "code": "orphan_exact",
                     "source": label.lower(),
-                    "message": f"{label}: processus exact reconnu mais non rattaché à son PID enregistré.",
+                    "message": (
+                        f"{label}: processus exact reconnu "
+                        "mais non rattaché."
+                    ),
+                    "log_key": log_key,
                 })
             if alive and not http_ok:
                 issues.append({
                     "severity": "error",
                     "code": "http_unreachable",
                     "source": label.lower(),
-                    "message": f"{label}: processus actif mais serveur HTTP indisponible (pid={row.get('pid')}).",
+                    "message": (
+                        f"{label}: processus actif mais HTTP "
+                        f"indisponible (pid={row.get('pid')})."
+                    ),
+                    "log_key": log_key,
                 })
 
-        for label, queue in (
-            ("DEV", ((snapshot.get("dev") or {}).get("queue") or {})),
-            ("PROD", ((snapshot.get("prod") or {}).get("queue") or {})),
-            ("LAB", ((snapshot.get("lab") or {}).get("queue") or {})),
+        for label, queue, log_key in (
+            (
+                "DEV",
+                ((snapshot.get("dev") or {}).get("queue") or {}),
+                "dev_server_error",
+            ),
+            (
+                "PROD",
+                ((snapshot.get("prod") or {}).get("queue") or {}),
+                "prod_server_error",
+            ),
+            (
+                "LAB",
+                ((snapshot.get("lab") or {}).get("queue") or {}),
+                "lab_server_error",
+            ),
         ):
             if queue.get("ok") is False:
                 issues.append({
                     "severity": "error",
                     "code": "queue_error",
                     "source": label.lower(),
-                    "message": f"{label}: erreur de lecture de queue — {queue.get('error') or 'erreur inconnue'}.",
+                    "message": (
+                        f"{label}: erreur de lecture de queue — "
+                        f"{queue.get('error') or 'erreur inconnue'}."
+                    ),
+                    "log_key": log_key,
                 })
+
+        circuit = self.lab_circuit.snapshot()
+        if circuit.get("state") == "open":
+            issues.append({
+                "severity": "critical",
+                "code": "lab_circuit_open",
+                "source": "lab",
+                "message": (
+                    "LAB: circuit breaker ouvert après "
+                    f"{circuit.get('failures')} échecs de relance."
+                ),
+                "log_key": "lab_server_error",
+            })
 
         for item in self.log_tools.error_alerts():
             source = str(item.get("source") or "")
@@ -216,17 +348,44 @@ class ControlCenter:
                 "severity": "error",
                 "code": "log_error",
                 "source": source,
-                "message": str(item.get("line") or "Erreur journalisée")[:500],
+                "message": str(
+                    item.get("line") or "Erreur journalisée"
+                )[:500],
                 "log_key": self._log_key_for_source(source),
             })
 
-        errors = sum(1 for item in issues if item.get("severity") == "error")
-        warnings = sum(1 for item in issues if item.get("severity") == "warning")
+        incidents = self.incidents.sync(issues)
+        critical = sum(
+            1
+            for item in issues
+            if str(item.get("severity") or "").lower()
+            == "critical"
+        )
+        errors = sum(
+            1
+            for item in issues
+            if str(item.get("severity") or "").lower()
+            == "error"
+        )
+        warnings = sum(
+            1
+            for item in issues
+            if str(item.get("severity") or "").lower()
+            == "warning"
+        )
         return {
-            "state": "ERROR" if errors else "WARNING" if warnings else "OK",
+            "state": (
+                "ERROR"
+                if critical or errors
+                else "WARNING"
+                if warnings
+                else "OK"
+            ),
+            "critical": critical,
             "errors": errors,
             "warnings": warnings,
             "issues": issues[:30],
+            "incidents": incidents[:30],
         }
 
     def _snapshot_uncached(self) -> dict:
@@ -237,33 +396,64 @@ class ControlCenter:
         dev_caddy = self.caddy.view(Target.DEV)
         lab = self.servers.view(Target.LAB)
         lab_caddy = self.caddy.view(Target.LAB)
-        elapsed_ms = round((time.monotonic() - started) * 1000.0, 1)
+        elapsed_ms = round(
+            (time.monotonic() - started) * 1000.0,
+            1,
+        )
+        metrics = process_metrics(os.getpid())
         data = {
             "at": datetime.now(timezone.utc).isoformat(),
             "snapshot_ms": elapsed_ms,
-            "analysis_active": bool(analysis_execution_active(self.runtime)),
+            "analysis_active": bool(
+                analysis_execution_active(self.runtime)
+            ),
+            "control_center": {
+                "pid": os.getpid(),
+                "executable_path": executable_path(
+                    os.getpid()
+                ),
+                "command_line": command_line(os.getpid()),
+                "cpu_percent": metrics.get("cpu_percent"),
+                "ram_mb": metrics.get("ram_mb"),
+            },
             "service": self._service_status(),
             "dev": {
                 "server": asdict(dev),
                 "caddy": asdict(dev_caddy),
                 "queue": self._queue(Target.DEV),
-                "analysis_python": str(self.config.analysis_python_for(Target.DEV)),
-                "transport": self.config.transport_url_for(Target.DEV),
+                "analysis_python": str(
+                    self.config.analysis_python_for(Target.DEV)
+                ),
+                "transport": self.config.transport_url_for(
+                    Target.DEV
+                ),
             },
             "prod": {
                 "lifecycle": prod.as_dict(),
                 "queue": self._queue(Target.PROD),
-                "analysis_python": str(self.config.analysis_python_for(Target.PROD)),
-                "transport": self.config.transport_url_for(Target.PROD),
+                "analysis_python": str(
+                    self.config.analysis_python_for(Target.PROD)
+                ),
+                "transport": self.config.transport_url_for(
+                    Target.PROD
+                ),
             },
             "lab": {
                 "server": asdict(lab),
                 "caddy": asdict(lab_caddy),
                 "queue": self._queue(Target.LAB),
                 "workers": self._distributed_workers(),
-                "analysis_python": str(self.config.analysis_python_for(Target.LAB)),
-                "transport": self.config.transport_url_for(Target.LAB),
-                "root": str(self.config.lab.root) if self.config.lab is not None else None,
+                "analysis_python": str(
+                    self.config.analysis_python_for(Target.LAB)
+                ),
+                "transport": self.config.transport_url_for(
+                    Target.LAB
+                ),
+                "root": (
+                    str(self.config.lab.root)
+                    if self.config.lab is not None
+                    else None
+                ),
             },
         }
         data["safety"] = self._safety_status(data)
@@ -308,6 +498,14 @@ class ControlCenter:
                 self._invalidate_snapshot()
                 return {"ok": True, "message": f"DEV Caddy active pid={view.pid}"}
 
+            if name == "lab-server-adopt":
+                view = self.servers.adopt(Target.LAB)
+                self._invalidate_snapshot()
+                return {"ok": True, "message": f"Serveur LAB réadopté pid={view.pid}"}
+            if name == "lab-circuit-reset":
+                self.lab_circuit.reset()
+                self._invalidate_snapshot()
+                return {"ok": True, "message": "Protection LAB réinitialisée"}
             if name == "lab-server-start":
                 view = self.servers.start(Target.LAB)
                 self._invalidate_snapshot()
@@ -524,6 +722,12 @@ class ControlCenter:
             self._invalidate_snapshot()
             return result
 
+    def acknowledge_incident(self, incident_id: str) -> dict:
+        return {
+            "ok": True,
+            "incident": self.incidents.acknowledge(incident_id),
+        }
+
     def deployment_plan(self) -> dict:
         return self.deployment.plan(fetch=True).as_dict()
 
@@ -567,6 +771,7 @@ main{padding:20px;max-width:1600px;margin:auto}.view{display:none}.view.active{d
 .safetyBanner strong{display:block}.safetyBanner .detail{margin-top:3px;color:var(--muted);font-size:12px;max-width:980px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .safetyBanner.error strong{color:var(--bad)}.safetyBanner.warning strong{color:var(--warn)}
 .safetyBanner button{display:none;white-space:nowrap}.safetyBanner.error button,.safetyBanner.warning button{display:inline-block}
+.incidentPanel{margin:0 0 14px;border:1px solid var(--line);border-radius:10px;background:#0d1519;padding:10px 12px}.incidentList{display:grid;gap:6px}.incidentRow{display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;border:1px solid var(--line);border-radius:8px;padding:8px 10px}.incidentLevel{font-weight:800}.incidentLevel.CRITICAL,.incidentLevel.ERROR{color:var(--bad)}.incidentLevel.WARNING{color:var(--warn)}.incidentLevel.INFO{color:var(--accent)}
 
 </style>
 </head>
@@ -609,6 +814,8 @@ main{padding:20px;max-width:1600px;margin:auto}.view{display:none}.view.active{d
   <button id="safetyLogs" type="button">Voir logs</button>
 </div>
 
+<div id="incidentPanel" class="incidentPanel"><strong>Incidents opérationnels</strong><span id="incidentCount" class="muted" style="margin-left:10px">0 actif</span><div id="incidentList" class="incidentList" style="margin-top:8px"><div class="muted">(aucun)</div></div></div>
+
 <section id="view-infrastructure" class="view active">
   <section class="grid3">
     <article class="card"><h2>Service permanent</h2><div class="statusrow"><span id="serviceDot" class="dot"></span><span id="serviceState">-</span></div><div class="big" id="serviceTarget">-</div><div class="muted" id="serviceMeta">-</div><div class="actions"><button id="serviceStart" class="primary">Démarrer service DEV + PROD + LAB</button><button id="serviceStop">Arrêter service</button></div></article>
@@ -634,6 +841,8 @@ main{padding:20px;max-width:1600px;margin:auto}.view{display:none}.view.active{d
       </dl>
       <div class="actions">
         <button data-action="lab-server-start" class="primary">Démarrer serveur</button>
+        <button data-action="lab-server-adopt">Réadopter serveur</button>
+        <button data-action="lab-circuit-reset">Reset protection LAB</button>
         <button data-action="lab-server-restart">Redémarrer serveur</button>
         <button data-action="lab-server-stop" data-destructive="1" class="danger">Arrêter serveur</button>
         <button data-action="lab-caddy-start">Démarrer Caddy LAB</button>
@@ -747,8 +956,9 @@ function txt(id,v){const e=$(id);if(e)e.textContent=v??"-"}
 function dot(el,ok,warn=false){el.className="dot "+(ok?"ok":warn?"warn":"bad")}
 function toast(message,ok=true){const el=$("toast");el.textContent=message;el.className="toast show "+(ok?"ok":"bad");setTimeout(()=>el.className="toast",4500)}
 async function getJSON(url){const r=await fetch(url,{cache:"no-store"});const data=await r.json();if(!r.ok)throw new Error(data.error||data.message||JSON.stringify(data));return data}
-function fmtProc(v){return `pid ${v.pid??'-'} · ${v.process_alive?'PROCESSUS OK':'PROCESSUS ARRÊTÉ'} · ${v.http_alive?'HTTP OK':'HTTP KO'}`}
-function fmtOwnership(v){const x=String(v??"-").toLowerCase();return x==="owned"?"géré":x==="orphan_exact"?"orphelin reconnu":x==="orphan"?"orphelin":v??"-"}
+function fmtMetric(v){return `CPU ${v?.cpu_percent==null?'-':v.cpu_percent+'%'} · RAM ${v?.ram_mb==null?'-':v.ram_mb+' MB'}`}
+function fmtProc(v){return `pid ${v.pid??'-'} · ${v.process_alive?'PROCESSUS OK':'PROCESSUS ARRÊTÉ'} · ${v.http_alive?'HTTP OK':'HTTP KO'} · ${fmtMetric(v)}`}
+function fmtOwnership(v){const x=String(v??"-").toLowerCase();return x==="owned"?"géré":x==="adopted"?"réadopté":x==="orphan_exact"?"orphelin reconnu":x==="orphan"?"orphelin":v??"-"}
 function fmtWorkerState(v){const x=String(v??"-").toLowerCase();const labels={idle:"DISPONIBLE",online:"EN LIGNE",running:"OCCUPÉ",busy:"OCCUPÉ",claimed:"OCCUPÉ",processing:"OCCUPÉ",stale:"PÉRIMÉ",stopped:"ARRÊTÉ",error:"ERREUR"};return labels[x]||String(v??"-").toUpperCase()}
 
 function setView(name){
@@ -834,6 +1044,9 @@ function renderAssistantWorkers(payload){
    return `<div class="assistantNode"><strong>${esc(w.worker_id||"-")} · ${w.online?"EN LIGNE":"PÉRIMÉ"}</strong><div class="assistantMeta"><span>État</span><span>${esc(fmtWorkerState(w.state))}</span><span>GPU</span><span>${esc(gpu)}</span><span>VRAM</span><span>${esc(vram)} MB</span><span>CUDA</span><span>${c.cuda_available?"oui":"non"}</span><span>Heartbeat</span><span>${esc(w.last_seen_at||"-")}</span></div></div>`;
  }).join(""):'<div class="muted" style="margin-top:10px">Aucun assistant distribué enregistré.</div>';
 }
+function openIncidentLog(key){setView("logs");const tab=document.querySelector(`.tab[data-log="${key}"]`);if(tab)tab.click();else refreshLogs()}
+async function acknowledgeIncident(id){try{const r=await fetch("/api/incidents/ack",{method:"POST",headers:{"Content-Type":"application/json","X-EZS-Token":TOKEN},body:JSON.stringify({incident_id:id})});const d=await r.json();if(!r.ok)throw new Error(d.error||d.message||JSON.stringify(d));toast("Incident acquitté",true);await refresh()}catch(e){toast(String(e),false)}}
+function renderIncidents(items){const rows=Array.isArray(items)?items:[];txt("incidentCount",`${rows.length} actif${rows.length===1?"":"s"}`);const el=$("incidentList");if(!el)return;el.innerHTML=rows.length?rows.map(i=>`<div class="incidentRow"><span class="incidentLevel ${esc(i.severity||"ERROR")}">${esc(i.severity||"ERROR")}</span><div><strong>${esc(i.code||"incident")}</strong> · ${esc(i.message||"")}<div class="muted">${esc(i.source||"-")} · ${i.acknowledged_at?"ACQUITTÉ":"NON ACQUITTÉ"}</div></div><div>${i.log_key?`<button data-incident-log="${esc(i.log_key)}">Logs</button>`:""} ${i.acknowledged_at?"✓":`<button data-incident-ack="${esc(i.id)}">Acquitter</button>`}</div></div>`).join(""):'<div class="muted">(aucun incident actif)</div>';el.querySelectorAll("[data-incident-ack]").forEach(b=>b.addEventListener("click",()=>acknowledgeIncident(b.dataset.incidentAck)));el.querySelectorAll("[data-incident-log]").forEach(b=>b.addEventListener("click",()=>openIncidentLog(b.dataset.incidentLog)))}
 function renderSafety(payload){
  const safety=payload||{state:"ERROR",errors:1,warnings:0,issues:[{message:"État de supervision indisponible."}]};
  const state=String(safety.state||"ERROR").toUpperCase();
@@ -844,18 +1057,19 @@ function renderSafety(payload){
  txt("safetyDetail",issues.length?issues.slice(0,3).map(x=>x.message||x.code||"anomalie").join(" · "):"Aucune anomalie processus/queue et aucune erreur actionable depuis la dernière purge.");
  const btn=$("safetyLogs");
  if(btn)btn.dataset.log=(issues.find(x=>x.log_key)||{}).log_key||"control_center_error";
+ renderIncidents(safety.incidents||[]);
  return state;
 }
 
 function renderStatus(s){
  analysisActive=!!s.analysis_active;
  const safetyState=renderSafety(s.safety);
- txt("updated",`${s.at} · snapshot ${s.snapshot_ms??'-'} ms`);
+ txt("updated",`${s.at} · snapshot ${s.snapshot_ms??'-'} ms · CC ${fmtMetric(s.control_center||{})}`);
  txt("globalState",safetyState==="ERROR"?"ERREUR":safetyState==="WARNING"?"ANOMALIE":analysisActive?"ANALYSE ACTIVE":"Système disponible");
  const globalBadge=$("globalState");globalBadge.className="globalBadge "+(safetyState==="ERROR"?"bad":safetyState==="WARNING"?"warn":analysisActive?"busy":"");
  const banner=$("analysisBanner");banner.textContent=analysisActive?"ANALYSE ACTIVE — stop/restart et déploiement bloqués":"Aucune analyse active";banner.className="banner "+(analysisActive?"active":"");
  dot($("gpuDot"),!analysisActive,analysisActive);txt("gpuState",analysisActive?"OCCUPÉ":"LIBRE");
- const svc=s.service||{};dot($("serviceDot"),!!svc.running);txt("serviceState",svc.running?"ACTIF":"ARRÊTÉ");txt("serviceTarget",svc.target?String(svc.target).toUpperCase():"-");txt("serviceMeta",`pid=${svc.pid??'-'} · state=${svc.state??'-'} · heartbeat=${svc.heartbeat??'-'}`);$("serviceStart").disabled=busy||!!svc.running;$("serviceStop").disabled=busy||!svc.running;
+ const svc=s.service||{};dot($("serviceDot"),!!svc.running);txt("serviceState",svc.running?"ACTIF":"ARRÊTÉ");txt("serviceTarget",svc.target?String(svc.target).toUpperCase():"-");txt("serviceMeta",`pid=${svc.pid??'-'} · state=${svc.state??'-'} · heartbeat=${svc.heartbeat??'-'} · ${fmtMetric(svc)}`);$("serviceStart").disabled=busy||!!svc.running;$("serviceStop").disabled=busy||!svc.running;
  const d=s.dev,ds=d.server,dc=d.caddy;const devHealthy=!!(ds.process_alive&&ds.http_alive&&dc.process_alive&&dc.http_alive);devFailures=devHealthy?0:devFailures+1;const devShown=devHealthy||devFailures<3;dot($("devDot"),devShown,!devHealthy);txt("devState",devHealthy?"EN LIGNE":(devFailures<3?"VÉRIFICATION":"HORS LIGNE"));txt("devRoot",ds.root);txt("devEnv",ds.app_env);txt("devBackend",`:${ds.backend_port} · ${fmtProc(ds)}`);txt("devCaddy",`:${dc.public_port} · ${fmtProc(dc)}`);txt("devTransport",d.transport);txt("devPython",d.analysis_python);txt("devOwnership",fmtOwnership(ds.ownership));renderQueue("devQueueCount","devQueueList",d.queue);
  const p=s.prod,pl=p.lifecycle,pb=pl.backend,pg=pl.gateway,pc=pl.caddy;const prodHealthy=!!pl.online;prodFailures=prodHealthy?0:prodFailures+1;const prodShown=prodHealthy||prodFailures<3;dot($("prodDot"),prodShown,!prodHealthy);txt("prodState",prodHealthy?"EN LIGNE":(prodFailures<3?"VÉRIFICATION":"CHAÎNE INCOMPLÈTE"));txt("prodRoot",pb.root);txt("prodBackend",`:${pb.backend_port} · ${fmtProc(pb)}`);txt("prodGateway",`:${pg.port} · pid ${pg.pid??'-'} · ${pg.process_alive?'PROCESSUS OK':'PROCESSUS ARRÊTÉ'} · ${pg.http_alive?'HTTP OK':'HTTP KO'} · ${pg.protocol??'-'} · propriété=${fmtOwnership(pg.ownership)}`);txt("prodCaddy",`:${pc.public_port} · ${fmtProc(pc)}`);txt("prodTransport",p.transport);txt("prodPython",p.analysis_python);txt("prodOwnership",fmtOwnership(pb.ownership));renderQueue("prodQueueCount","prodQueueList",p.queue);const mode=$("prodMode");mode.textContent=pl.mode==="maintenance"?"MAINTENANCE":pl.mode==="normal"?"NORMAL":String(pl.mode||"-").toUpperCase();mode.className="mode "+(pl.mode==="maintenance"?"maintenance":"");
  const l=s.lab||{},ls=l.server||{},lc=l.caddy||{};const labHealthy=!!(ls.process_alive&&ls.http_alive&&lc.process_alive&&lc.http_alive);labFailures=labHealthy?0:labFailures+1;const labShown=labHealthy||labFailures<3;dot($("labDot"),labShown,!labHealthy);txt("labState",labHealthy?"EN LIGNE":(labFailures<3?"VÉRIFICATION":"HORS LIGNE"));txt("labRoot",ls.root??l.root);txt("labEnv",ls.app_env);txt("labBackend",`:${ls.backend_port??8701} · ${fmtProc(ls)}`);txt("labCaddy",`:${lc.public_port??8702} · ${fmtProc(lc)}`);txt("labTransport",l.transport);txt("labPython",l.analysis_python);txt("labOwnership",fmtOwnership(ls.ownership));renderQueue("labQueueCount","labQueueList",l.queue);txt("labQueueMeta",`${l.transport??"-"} · ${l.analysis_python??"-"}`);renderAssistantWorkers(l.workers||{});
@@ -1201,6 +1415,32 @@ def make_handler(center: ControlCenter, token: str):
                     self._json({"ok": False, "error": str(exc)}, 500)
                 return
 
+            if path == "/api/incidents/ack":
+                try:
+                    length = min(
+                        int(self.headers.get("Content-Length", "0")),
+                        4096,
+                    )
+                    payload = json.loads(
+                        self.rfile.read(length).decode("utf-8")
+                    )
+                    self._json(
+                        center.acknowledge_incident(
+                            str(payload.get("incident_id") or "")
+                        )
+                    )
+                except KeyError as exc:
+                    self._json(
+                        {"ok": False, "error": str(exc)},
+                        404,
+                    )
+                except Exception as exc:
+                    self._json(
+                        {"ok": False, "error": str(exc)},
+                        400,
+                    )
+                return
+
             if path == "/api/assistant/deployment/apply":
                 try:
                     self._json(center.assistant_deployment_apply())
@@ -1238,31 +1478,61 @@ def make_handler(center: ControlCenter, token: str):
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(prog="EZS Orchestrator V1.0")
+    parser = argparse.ArgumentParser(
+        prog="EZS Orchestrator V1.0"
+    )
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--no-browser", action="store_true")
     args = parser.parse_args()
     if not (1024 <= args.port <= 65535):
-        raise SystemExit("port must be between 1024 and 65535")
+        raise SystemExit(
+            "port must be between 1024 and 65535"
+        )
 
-    center = ControlCenter()
-    token = secrets.token_urlsafe(24)
-    server = ThreadingHTTPServer((HOST, args.port), make_handler(center, token))
-    url = f"http://{HOST}:{args.port}/"
-    print(f"EZS_ORCHESTRATOR_V1_0 {url}", flush=True)
-    print("Views: Infrastructure | Queues & Jobs | Deployment", flush=True)
-
-    if not args.no_browser:
-        threading.Timer(0.6, lambda: webbrowser.open(url)).start()
-
+    config = load_runtime_config()
+    singleton = ControlCenterSingleton(
+        config.orchestrator_root / "runtime"
+    )
     try:
-        server.serve_forever(poll_interval=0.5)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.server_close()
-    return 0
+        singleton.acquire(args.port)
+    except ControlCenterSingletonBusy as exc:
+        print(
+            f"CONTROL_CENTER_ALREADY_RUNNING: {exc}",
+            file=sys.stderr,
+        )
+        return 3
 
+    server = None
+    try:
+        center = ControlCenter()
+        token = secrets.token_urlsafe(24)
+        server = ThreadingHTTPServer(
+            (HOST, args.port),
+            make_handler(center, token),
+        )
+        url = f"http://{HOST}:{args.port}/"
+        print(
+            f"EZS_ORCHESTRATOR_V1_0 {url}",
+            flush=True,
+        )
+        print(
+            "Views: Infrastructure | Queues & Jobs | Deployment",
+            flush=True,
+        )
+        if not args.no_browser:
+            threading.Timer(
+                0.6,
+                lambda: webbrowser.open(url),
+            ).start()
+        try:
+            server.serve_forever(poll_interval=0.5)
+        except KeyboardInterrupt:
+            pass
+        return 0
+    finally:
+        if server is not None:
+            server.server_close()
+        singleton.release()
 
 if __name__ == "__main__":
     raise SystemExit(main())

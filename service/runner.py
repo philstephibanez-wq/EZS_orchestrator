@@ -20,6 +20,7 @@ from transport.jobs import JobTransport
 from transport.targets import TargetRegistry
 from server_manager.manager import ServerManager
 
+from .lab_circuit import LabCircuitBreaker
 from .singleton import ServiceSingleton
 
 
@@ -73,6 +74,11 @@ class PermanentRunner:
         self.transport = JobTransport(TargetRegistry(self.config))
         self.servers = ServerManager(self.config)
         self.runtime_root = self.config.orchestrator_root / "runtime"
+        self.lab_circuit = LabCircuitBreaker(
+            self.runtime_root,
+            threshold=3,
+            cooldown_seconds=60.0,
+        )
         self.service_dir = self.runtime_root / "service"
         self.service_dir.mkdir(parents=True, exist_ok=True)
         self.stop_file = self.service_dir / "stop.request"
@@ -81,7 +87,9 @@ class PermanentRunner:
         self.publisher = AnalysisCapabilityPublisher(self.config)
         self._stop = False
         self._cursor = 0
-        self._last_reachable = {target: False for target in self.targets}
+        self._last_reachable = {
+            target: False for target in self.targets
+        }
 
     def request_stop(self, *_args) -> None:
         self._stop = True
@@ -250,21 +258,52 @@ class PermanentRunner:
         return attempt_dir
 
     def _ensure_lab_backend(self) -> None:
-        if Target.LAB not in self.targets or self.config.lab is None:
+        if (
+            Target.LAB not in self.targets
+            or self.config.lab is None
+        ):
             return
         try:
             view = self.servers.view(Target.LAB)
             if view.process_alive and view.http_alive:
+                self.lab_circuit.record_success()
                 return
-            self.servers.start(Target.LAB, self.config.lab.default_env)
+            allowed, circuit = self.lab_circuit.can_attempt()
+            if not allowed:
+                self._last_reachable[Target.LAB] = False
+                try:
+                    self.publish(
+                        Target.LAB,
+                        available=False,
+                        state="lab_backend_circuit_open",
+                        error=(
+                            "circuit_open_until="
+                            f"{circuit.get('open_until_epoch')}"
+                        ),
+                    )
+                except Exception:
+                    pass
+                return
+            self.servers.start(
+                Target.LAB,
+                self.config.lab.default_env,
+            )
+            self.lab_circuit.record_success()
             self._last_reachable[Target.LAB] = True
         except Exception as exc:
             self._last_reachable[Target.LAB] = False
+            circuit = self.lab_circuit.record_failure(
+                f"{type(exc).__name__}:{exc}"
+            )
             try:
                 self.publish(
                     Target.LAB,
                     available=False,
-                    state="lab_backend_down",
+                    state=(
+                        "lab_backend_circuit_open"
+                        if circuit.get("state") == "open"
+                        else "lab_backend_down"
+                    ),
                     error=f"{type(exc).__name__}:{exc}"[:500],
                 )
             except Exception:

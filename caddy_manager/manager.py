@@ -11,6 +11,7 @@ from pathlib import Path
 
 from config.loader import RuntimeConfig
 from contracts.target import Target
+from server_manager.process import command_line, exact_process, executable_path, listener_pid, process_metrics
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +23,11 @@ class CaddyView:
     pid: int | None
     process_alive: bool
     http_alive: bool
+    ownership: str = "stopped"
+    executable_path: str | None = None
+    command_line: str | None = None
+    cpu_percent: float | None = None
+    ram_mb: float | None = None
 
 
 class CaddyManager:
@@ -96,7 +102,13 @@ class CaddyManager:
         except Exception:
             return {}
 
-    def _write_metadata(self, target: Target, pid: int) -> None:
+    def _write_metadata(
+        self,
+        target: Target,
+        pid: int,
+        *,
+        adopted: bool = False,
+    ) -> None:
         payload = {
             "schema": "ezs.caddy-process.v1",
             "target": target.value,
@@ -106,8 +118,12 @@ class CaddyManager:
             "media_root": str(self._media_root(target)),
             "config_path": str(self._config_path(target)),
             "started_at": datetime.now(timezone.utc).isoformat(),
+            "adopted": bool(adopted),
         }
-        self._metadata_path(target).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        self._metadata_path(target).write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
     def _render(self, target: Target) -> str:
         spec = self._spec(target)
@@ -188,10 +204,37 @@ class CaddyManager:
             code = getattr(exc, "code", None)
             return isinstance(code, int) and 100 <= code < 600
 
+    def _expected_owned(self, target: Target, pid: int) -> bool:
+        return exact_process(
+            pid,
+            self.caddy_exe,
+            (
+                "run",
+                "--config",
+                str(self._config_path(target)),
+                "--adapter",
+                "caddyfile",
+            ),
+        )
+
     def view(self, target: Target) -> CaddyView:
         meta = self._read_metadata(target)
-        pid = int(meta.get("pid", 0) or 0) or None
+        stored = int(meta.get("pid", 0) or 0) or None
+        listener = listener_pid(int(self._spec(target).public_port))
+        pid = listener or stored
         alive = self._pid_alive(pid)
+        if not pid:
+            ownership = "stopped"
+        elif self._expected_owned(target, pid):
+            if stored != pid:
+                ownership = "orphan_exact"
+            elif bool(meta.get("adopted")):
+                ownership = "adopted"
+            else:
+                ownership = "owned"
+        else:
+            ownership = "foreign"
+        metrics = process_metrics(pid)
         return CaddyView(
             target=target,
             public_port=int(self._spec(target).public_port),
@@ -200,7 +243,26 @@ class CaddyManager:
             pid=pid,
             process_alive=alive,
             http_alive=self._http_alive(target) if alive else False,
+            ownership=ownership,
+            executable_path=executable_path(pid),
+            command_line=command_line(pid) if pid else None,
+            cpu_percent=metrics.get("cpu_percent"),
+            ram_mb=metrics.get("ram_mb"),
         )
+
+    def adopt(self, target: Target) -> CaddyView:
+        listener = listener_pid(int(self._spec(target).public_port))
+        if not listener:
+            raise RuntimeError(
+                f"caddy_adopt_refused:no_listener:{target.value}"
+            )
+        if not self._expected_owned(target, listener):
+            raise RuntimeError(
+                f"caddy_adopt_refused:foreign_process:"
+                f"{target.value}:pid={listener}"
+            )
+        self._write_metadata(target, listener, adopted=True)
+        return self.view(target)
 
     def _validate_target_isolation(self, target: Target) -> None:
         spec = self._spec(target)
@@ -229,35 +291,58 @@ class CaddyManager:
     def start(self, target: Target) -> CaddyView:
         current = self.view(target)
         if current.process_alive:
-            return current
+            if current.ownership == "orphan_exact":
+                return self.adopt(target)
+            if current.ownership in {"owned", "adopted"}:
+                return current
+            raise RuntimeError(
+                f"caddy_start_refused:foreign_process:"
+                f"{target.value}:pid={current.pid}"
+            )
         if not self.caddy_exe.is_file():
-            raise RuntimeError(f"caddy_executable_missing:{self.caddy_exe}")
-
+            raise RuntimeError(
+                f"caddy_executable_missing:{self.caddy_exe}"
+            )
         spec = self._spec(target)
         runtime_dir = self._runtime_dir(target)
         runtime_dir.mkdir(parents=True, exist_ok=True)
-
         if target is not Target.LAB:
             media_root = self._media_root(target)
             if not media_root.is_dir():
-                raise RuntimeError(f"caddy_media_root_missing:{target.value}:{media_root}")
+                raise RuntimeError(
+                    f"caddy_media_root_missing:{target.value}:{media_root}"
+                )
             if target is Target.DEV:
-                self._cover_root(target).mkdir(parents=True, exist_ok=True)
-
+                self._cover_root(target).mkdir(
+                    parents=True,
+                    exist_ok=True,
+                )
         self._validate_target_isolation(target)
-
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
-            if sock.connect_ex(("127.0.0.1", int(spec.public_port))) == 0:
-                raise RuntimeError(f"caddy_public_port_in_use:{target.value}:{spec.public_port}")
+            if sock.connect_ex(
+                ("127.0.0.1", int(spec.public_port))
+            ) == 0:
+                raise RuntimeError(
+                    f"caddy_public_port_in_use:"
+                    f"{target.value}:{spec.public_port}"
+                )
         finally:
             sock.close()
-
         config_path = self._config_path(target)
-        config_path.write_text(self._render(target), encoding="utf-8")
-
+        config_path.write_text(
+            self._render(target),
+            encoding="utf-8",
+        )
         validate = subprocess.run(
-            [str(self.caddy_exe), "validate", "--config", str(config_path), "--adapter", "caddyfile"],
+            [
+                str(self.caddy_exe),
+                "validate",
+                "--config",
+                str(config_path),
+                "--adapter",
+                "caddyfile",
+            ],
             cwd=str(self.config.orchestrator_root),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -265,21 +350,42 @@ class CaddyManager:
             check=False,
         )
         if validate.returncode != 0:
-            raise RuntimeError("caddy_validate_failed:" + validate.stdout.replace("\r"," ").replace("\n"," ")[:800])
-
-        out = self._out_log(target).open("a", encoding="utf-8", errors="replace")
-        err = self._err_log(target).open("a", encoding="utf-8", errors="replace")
+            raise RuntimeError(
+                "caddy_validate_failed:"
+                + validate.stdout.replace("\r", " ")
+                .replace("\n", " ")[:800]
+            )
+        out = self._out_log(target).open(
+            "a",
+            encoding="utf-8",
+            errors="replace",
+        )
+        err = self._err_log(target).open(
+            "a",
+            encoding="utf-8",
+            errors="replace",
+        )
         proc = subprocess.Popen(
-            [str(self.caddy_exe), "run", "--config", str(config_path), "--adapter", "caddyfile"],
+            [
+                str(self.caddy_exe),
+                "run",
+                "--config",
+                str(config_path),
+                "--adapter",
+                "caddyfile",
+            ],
             cwd=str(self.config.orchestrator_root),
             stdout=out,
             stderr=err,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            creationflags=getattr(
+                subprocess,
+                "CREATE_NO_WINDOW",
+                0,
+            ),
         )
         out.close()
         err.close()
         self._write_metadata(target, proc.pid)
-
         deadline = time.time() + 8.0
         while time.time() < deadline:
             if proc.poll() is not None:
@@ -289,18 +395,36 @@ class CaddyManager:
             time.sleep(0.2)
         if proc.poll() is None:
             proc.terminate()
-        raise RuntimeError(f"caddy_start_failed:{target.value}:see {self._err_log(target)}")
+        raise RuntimeError(
+            f"caddy_start_failed:{target.value}:"
+            f"see {self._err_log(target)}"
+        )
 
     def stop(self, target: Target) -> CaddyView:
         current = self.view(target)
         if not current.process_alive:
             self._metadata_path(target).unlink(missing_ok=True)
             return self.view(target)
+        if current.ownership not in {
+            "owned",
+            "adopted",
+            "orphan_exact",
+        }:
+            raise RuntimeError(
+                f"caddy_stop_refused:foreign_process:"
+                f"{target.value}:pid={current.pid}"
+            )
         if not self.caddy_exe.is_file():
-            raise RuntimeError(f"caddy_executable_missing:{self.caddy_exe}")
-
+            raise RuntimeError(
+                f"caddy_executable_missing:{self.caddy_exe}"
+            )
         stopped = subprocess.run(
-            [str(self.caddy_exe), "stop", "--address", f"127.0.0.1:{self._admin_port(target)}"],
+            [
+                str(self.caddy_exe),
+                "stop",
+                "--address",
+                f"127.0.0.1:{self._admin_port(target)}",
+            ],
             cwd=str(self.config.orchestrator_root),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -308,15 +432,20 @@ class CaddyManager:
             check=False,
         )
         if stopped.returncode != 0:
-            raise RuntimeError("caddy_stop_failed:" + stopped.stdout.replace("\r"," ").replace("\n"," ")[:800])
-
+            raise RuntimeError(
+                "caddy_stop_failed:"
+                + stopped.stdout.replace("\r", " ")
+                .replace("\n", " ")[:800]
+            )
         deadline = time.time() + 5.0
         while time.time() < deadline:
             if not self._pid_alive(current.pid):
                 break
             time.sleep(0.1)
         if self._pid_alive(current.pid):
-            raise RuntimeError(f"caddy_stop_timeout:{target.value}:pid={current.pid}")
+            raise RuntimeError(
+                f"caddy_stop_timeout:{target.value}:pid={current.pid}"
+            )
         self._metadata_path(target).unlink(missing_ok=True)
         return self.view(target)
 

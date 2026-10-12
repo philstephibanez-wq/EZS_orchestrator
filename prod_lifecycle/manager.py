@@ -71,10 +71,10 @@ class ProdLifecycleManager:
         online = bool(
             backend.process_alive
             and backend.http_alive
-            and backend.ownership in {"owned", "orphan_exact"}
+            and backend.ownership in {"owned", "adopted", "orphan_exact"}
             and gateway.process_alive
             and gateway.http_alive
-            and gateway.ownership in {"owned", "orphan_exact"}
+            and gateway.ownership in {"owned", "adopted", "orphan_exact"}
             and caddy.process_alive
             and caddy.http_alive
         )
@@ -99,7 +99,7 @@ class ProdLifecycleManager:
         requested_mode = current.mode
 
         # Keep the public edge alive in maintenance while Symfony restarts.
-        if current.gateway.process_alive and current.gateway.ownership in {"owned", "orphan_exact"}:
+        if current.gateway.process_alive and current.gateway.ownership in {"owned", "adopted", "orphan_exact"}:
             self.gateway.set_maintenance(True)
         else:
             self.gateway.start(maintenance=True)
@@ -123,7 +123,7 @@ class ProdLifecycleManager:
         self._assert_topology()
         self._guard_destructive("stop")
         gateway_view = self.gateway.view()
-        if gateway_view.process_alive and gateway_view.ownership in {"owned", "orphan_exact"}:
+        if gateway_view.process_alive and gateway_view.ownership in {"owned", "adopted", "orphan_exact"}:
             self.gateway.set_maintenance(True)
         self.caddy.stop(Target.PROD)
         self.gateway.stop()

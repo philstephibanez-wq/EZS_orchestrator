@@ -13,7 +13,7 @@ from pathlib import Path
 
 from config.loader import RuntimeConfig
 from contracts.target import Target
-from server_manager.process import command_line, listener_pid, pid_alive
+from server_manager.process import command_line, executable_path, listener_pid, pid_alive, process_metrics
 
 PROTOCOL = "ezscore.online-gateway.v3"
 
@@ -31,6 +31,10 @@ class GatewayView:
     backend_host: str | None
     backend_port: int | None
     ownership: str
+    executable_path: str | None = None
+    command_line: str | None = None
+    cpu_percent: float | None = None
+    ram_mb: float | None = None
 
 
 class GatewayManager:
@@ -83,6 +87,17 @@ class GatewayManager:
     def _owned(self, pid: int | None) -> bool:
         if not pid or not pid_alive(pid):
             return False
+        actual_exe = executable_path(pid)
+        if not actual_exe:
+            return False
+        try:
+            if (
+                Path(actual_exe).resolve()
+                != Path(sys.executable).resolve()
+            ):
+                return False
+        except Exception:
+            return False
         cmd = (command_line(pid) or "").lower().replace("/", "\\")
         root = str(self.root.resolve()).lower().replace("/", "\\")
         return (
@@ -126,13 +141,35 @@ class GatewayManager:
         owned = self._owned(pid)
         payload = self._status_payload() if alive else None
         protocol = str(payload.get("protocol")) if payload else None
-        http_ok = bool(payload and payload.get("ok") and protocol == PROTOCOL)
+        http_ok = bool(
+            payload
+            and payload.get("ok")
+            and protocol == PROTOCOL
+        )
+        try:
+            meta = (
+                json.loads(
+                    self.metadata_path.read_text(
+                        encoding="utf-8"
+                    )
+                )
+                if self.metadata_path.is_file()
+                else {}
+            )
+        except Exception:
+            meta = {}
         if not pid:
             ownership = "stopped"
         elif owned:
-            ownership = "owned" if stored == pid else "orphan_exact"
+            if stored != pid:
+                ownership = "orphan_exact"
+            elif bool(meta.get("adopted")):
+                ownership = "adopted"
+            else:
+                ownership = "owned"
         else:
             ownership = "foreign"
+        metrics = process_metrics(pid)
         return GatewayView(
             target=Target.PROD,
             root=self.root,
@@ -141,29 +178,91 @@ class GatewayManager:
             process_alive=alive,
             http_alive=http_ok,
             protocol=protocol,
-            maintenance=bool(payload.get("maintenance")) if payload else None,
-            backend_host=str(payload.get("backend_host")) if payload else None,
-            backend_port=int(payload.get("backend_port")) if payload and payload.get("backend_port") else None,
+            maintenance=(
+                bool(payload.get("maintenance"))
+                if payload
+                else None
+            ),
+            backend_host=(
+                str(payload.get("backend_host"))
+                if payload
+                else None
+            ),
+            backend_port=(
+                int(payload.get("backend_port"))
+                if payload and payload.get("backend_port")
+                else None
+            ),
             ownership=ownership,
+            executable_path=executable_path(pid),
+            command_line=command_line(pid) if pid else None,
+            cpu_percent=metrics.get("cpu_percent"),
+            ram_mb=metrics.get("ram_mb"),
         )
+
+    def adopt(self) -> GatewayView:
+        current = self.view()
+        if (
+            not current.process_alive
+            or current.ownership not in {
+                "owned",
+                "adopted",
+                "orphan_exact",
+            }
+            or not current.pid
+        ):
+            raise RuntimeError(
+                f"gateway_adopt_refused:"
+                f"ownership={current.ownership}:pid={current.pid}"
+            )
+        self.pid_path.write_text(
+            str(current.pid),
+            encoding="ascii",
+        )
+        self.metadata_path.write_text(
+            json.dumps(
+                {
+                    "schema": "ezs.gateway-process.v1",
+                    "target": "prod",
+                    "root": str(self.root),
+                    "port": self.port,
+                    "pid": current.pid,
+                    "adopted": True,
+                    "adopted_at": (
+                        datetime.now(timezone.utc).isoformat()
+                    ),
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        return self.view()
 
     def start(self, maintenance: bool = False) -> GatewayView:
         if self.root.resolve() != self.config.prod.root.resolve():
             raise RuntimeError("gateway_cross_root_refused")
         if self.root.resolve() == self.config.dev.root.resolve():
             raise RuntimeError("gateway_prod_root_equals_dev_root")
-
         self._write_config(maintenance)
         current = self.view()
         if current.process_alive:
-            if current.ownership in {"owned", "orphan_exact"} and current.http_alive:
-                if current.pid:
-                    self.pid_path.write_text(str(current.pid), encoding="ascii")
-                return self.view()
+            if (
+                current.ownership in {
+                    "owned",
+                    "adopted",
+                    "orphan_exact",
+                }
+                and current.http_alive
+            ):
+                if current.ownership == "orphan_exact":
+                    return self.adopt()
+                return current
             raise RuntimeError(
-                f"STOP: gateway port {self.port} occupied by non-owned or unhealthy process pid={current.pid}"
+                f"STOP: gateway port {self.port} occupied "
+                f"by non-owned or unhealthy process "
+                f"pid={current.pid}"
             )
-
         out = (self.logs / "prod.out.log").open("ab")
         err = (self.logs / "prod.err.log").open("ab")
         try:
@@ -180,12 +279,19 @@ class GatewayManager:
                 cwd=str(self.config.orchestrator_root),
                 stdout=out,
                 stderr=err,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
+                creationflags=(
+                    getattr(
+                        subprocess,
+                        "CREATE_NO_WINDOW",
+                        0,
+                    )
+                    if os.name == "nt"
+                    else 0
+                ),
             )
         finally:
             out.close()
             err.close()
-
         self.pid_path.write_text(str(proc.pid), encoding="ascii")
         self.metadata_path.write_text(
             json.dumps(
@@ -195,14 +301,15 @@ class GatewayManager:
                     "root": str(self.root),
                     "port": self.port,
                     "pid": proc.pid,
-                    "started_at": datetime.now(timezone.utc).isoformat(),
+                    "started_at": (
+                        datetime.now(timezone.utc).isoformat()
+                    ),
                 },
                 ensure_ascii=False,
                 indent=2,
             ),
             encoding="utf-8",
         )
-
         deadline = time.monotonic() + 8.0
         while time.monotonic() < deadline:
             if proc.poll() is not None:
@@ -211,11 +318,20 @@ class GatewayManager:
             if view.http_alive and view.protocol == PROTOCOL:
                 return view
             time.sleep(0.15)
-        raise RuntimeError(f"gateway_start_failed:prod:{self.port}")
+        raise RuntimeError(
+            f"gateway_start_failed:prod:{self.port}"
+        )
 
     def set_maintenance(self, enabled: bool) -> GatewayView:
         current = self.view()
-        if not current.process_alive or current.ownership not in {"owned", "orphan_exact"}:
+        if (
+            not current.process_alive
+            or current.ownership not in {
+                "owned",
+                "adopted",
+                "orphan_exact",
+            }
+        ):
             raise RuntimeError("gateway_not_owned_or_stopped")
         self._write_config(bool(enabled))
         deadline = time.monotonic() + 3.0
@@ -224,7 +340,9 @@ class GatewayManager:
             if view.http_alive and view.maintenance is bool(enabled):
                 return view
             time.sleep(0.1)
-        raise RuntimeError("gateway_maintenance_state_not_observed")
+        raise RuntimeError(
+            "gateway_maintenance_state_not_observed"
+        )
 
     def stop(self) -> GatewayView:
         current = self.view()
@@ -232,9 +350,18 @@ class GatewayManager:
             self.pid_path.unlink(missing_ok=True)
             self.metadata_path.unlink(missing_ok=True)
             return self.view()
-        if current.ownership not in {"owned", "orphan_exact"} or not current.pid:
-            raise RuntimeError(f"STOP: refusing to terminate foreign gateway pid={current.pid}")
-
+        if (
+            current.ownership not in {
+                "owned",
+                "adopted",
+                "orphan_exact",
+            }
+            or not current.pid
+        ):
+            raise RuntimeError(
+                f"STOP: refusing to terminate foreign gateway "
+                f"pid={current.pid}"
+            )
         os.kill(int(current.pid), signal.SIGTERM)
         deadline = time.monotonic() + 5.0
         while time.monotonic() < deadline:
@@ -242,7 +369,9 @@ class GatewayManager:
                 break
             time.sleep(0.1)
         if pid_alive(current.pid):
-            raise RuntimeError(f"gateway_stop_timeout:pid={current.pid}")
+            raise RuntimeError(
+                f"gateway_stop_timeout:pid={current.pid}"
+            )
         self.pid_path.unlink(missing_ok=True)
         self.metadata_path.unlink(missing_ok=True)
         return self.view()

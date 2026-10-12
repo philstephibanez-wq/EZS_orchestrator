@@ -15,9 +15,11 @@ from .process import (
     atomic_json,
     command_line,
     exact_php_server,
+    executable_path,
     http_alive,
     listener_pid,
     pid_alive,
+    process_metrics,
     read_json,
     stop_exact,
 )
@@ -37,6 +39,10 @@ class ServerView:
     process_alive: bool
     http_alive: bool
     ownership: str
+    executable_path: str | None = None
+    command_line: str | None = None
+    cpu_percent: float | None = None
+    ram_mb: float | None = None
 
 
 class ServerManager:
@@ -76,13 +82,18 @@ class ServerManager:
 
     def _expected_owned(self, target: Target, pid: int) -> bool:
         spec = self.spec(target)
-        return exact_php_server(pid, spec.backend_port, spec.root / "public")
+        php_path = self.config.web_php_for(target)
+        executable = php_path if php_path.is_absolute() else None
+        return exact_php_server(
+            pid, spec.backend_port, spec.root / "public", executable
+        )
 
     def view(self, target: Target, app_env: str | None = None) -> ServerView:
         spec = self.spec(target)
         meta = read_json(self._meta_path(target))
-        env = spec.validate_env(app_env or str(meta.get("environment") or spec.default_env))
-
+        env = spec.validate_env(
+            app_env or str(meta.get("environment") or spec.default_env)
+        )
         stored_pid = self._read_pid(target)
         listener = listener_pid(spec.backend_port)
         pid = listener or stored_pid
@@ -91,12 +102,17 @@ class ServerManager:
         if not pid:
             ownership = "stopped"
         elif self._expected_owned(target, pid):
-            ownership = "owned" if stored_pid == pid else "orphan_exact"
+            if stored_pid != pid:
+                ownership = "orphan_exact"
+            elif bool(meta.get("adopted")):
+                ownership = "adopted"
+            else:
+                ownership = "owned"
         else:
             ownership = "foreign"
 
         health_path = "/home" if target is Target.LAB else "/fr/login"
-
+        metrics = process_metrics(pid)
         return ServerView(
             target=target,
             root=str(spec.root),
@@ -107,55 +123,88 @@ class ServerManager:
             pid=pid,
             process_alive=alive,
             http_alive=(
-                http_alive(f"http://127.0.0.1:{spec.backend_port}", path=health_path)
-                if alive else False
+                http_alive(
+                    f"http://127.0.0.1:{spec.backend_port}",
+                    path=health_path,
+                )
+                if alive
+                else False
             ),
             ownership=ownership,
+            executable_path=executable_path(pid),
+            command_line=command_line(pid) if pid else None,
+            cpu_percent=metrics.get("cpu_percent"),
+            ram_mb=metrics.get("ram_mb"),
         )
 
-    def start(self, target: Target, app_env: str | None = None) -> ServerView:
+    def adopt(
+        self,
+        target: Target,
+        app_env: str | None = None,
+    ) -> ServerView:
+        spec = self.spec(target)
+        env = spec.validate_env(app_env or spec.default_env)
+        listener = listener_pid(spec.backend_port)
+        if not listener:
+            raise RuntimeError(
+                f"adopt_refused:no_listener:{target.value}:{spec.backend_port}"
+            )
+        if not self._expected_owned(target, listener):
+            raise RuntimeError(
+                f"adopt_refused:foreign_process:{target.value}:pid={listener}"
+            )
+        self._pid_path(target).write_text(str(listener), encoding="ascii")
+        atomic_json(
+            self._meta_path(target),
+            {
+                "schema": "ezs.server-instance.v1",
+                "target": target.value,
+                "environment": env,
+                "pid": listener,
+                "backend_port": spec.backend_port,
+                "root": str(spec.root),
+                "adopted": True,
+                "adopted_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+        return self.view(target, env)
+
+    def start(
+        self,
+        target: Target,
+        app_env: str | None = None,
+    ) -> ServerView:
         spec = self.spec(target)
         env = spec.validate_env(app_env or spec.default_env)
         public = spec.root / "public"
-
         if not public.is_dir():
             raise RuntimeError(f"Public directory missing: {public}")
 
         existing = listener_pid(spec.backend_port)
         if existing:
-            if not exact_php_server(existing, spec.backend_port, public):
-                raise RuntimeError(
-                    f"STOP: port {spec.backend_port} is occupied by PID {existing}, "
-                    f"but not by exact target {target.value} docroot {public}"
-                )
-            # Safe adoption only for the same target exact docroot.
-            self._pid_path(target).write_text(str(existing), encoding="ascii")
-            atomic_json(self._meta_path(target), {
-                "schema": "ezs.server-instance.v1",
-                "target": target.value,
-                "environment": env,
-                "pid": existing,
-                "backend_port": spec.backend_port,
-                "root": str(spec.root),
-                "adopted": True,
-            })
-            return self.view(target, env)
+            return self.adopt(target, env)
 
         php_path = self.config.web_php_for(target)
         if php_path.is_absolute() and not php_path.is_file():
-            raise RuntimeError(f"PHP executable missing for {target.value}: {php_path}")
+            raise RuntimeError(
+                f"PHP executable missing for {target.value}: {php_path}"
+            )
         php = str(php_path)
-        out_path = self.logs / f"{target.value}.out.log"
-        err_path = self.logs / f"{target.value}.err.log"
-        out = out_path.open("ab")
-        err = err_path.open("ab")
+        out = (self.logs / f"{target.value}.out.log").open("ab")
+        err = (self.logs / f"{target.value}.err.log").open("ab")
         process_env = os.environ.copy()
         process_env["APP_ENV"] = env
         process_env["APP_DEBUG"] = "1" if env == "dev" else "0"
         process_env["EZSCORE_INSTANCE"] = target.value
         try:
             proc = subprocess.Popen(
-                [php, "-S", f"127.0.0.1:{spec.backend_port}", "-t", str(public)],
+                [
+                    php,
+                    "-S",
+                    f"127.0.0.1:{spec.backend_port}",
+                    "-t",
+                    str(public),
+                ],
                 cwd=str(spec.root),
                 env=process_env,
                 stdout=out,
@@ -169,25 +218,29 @@ class ServerManager:
         time.sleep(0.5)
         if proc.poll() is not None:
             raise RuntimeError(
-                f"{target.value} PHP server exited immediately with code {proc.returncode}"
+                f"{target.value} PHP server exited immediately "
+                f"with code {proc.returncode}"
             )
-
         self._pid_path(target).write_text(str(proc.pid), encoding="ascii")
-        atomic_json(self._meta_path(target), {
-            "schema": "ezs.server-instance.v1",
-            "target": target.value,
-            "environment": env,
-            "pid": proc.pid,
-            "backend_port": spec.backend_port,
-            "root": str(spec.root),
-            "started_at": datetime.now(timezone.utc).isoformat(),
-        })
+        atomic_json(
+            self._meta_path(target),
+            {
+                "schema": "ezs.server-instance.v1",
+                "target": target.value,
+                "environment": env,
+                "pid": proc.pid,
+                "backend_port": spec.backend_port,
+                "root": str(spec.root),
+                "started_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
         return self.view(target, env)
 
     def stop(self, target: Target) -> ServerView:
         spec = self.spec(target)
-
-        if analysis_execution_active(self.config.orchestrator_root / "runtime"):
+        if analysis_execution_active(
+            self.config.orchestrator_root / "runtime"
+        ):
             raise RuntimeError(
                 f"STOP: analysis execution active; refusing to stop "
                 f"{target.value} server"
@@ -198,8 +251,14 @@ class ServerManager:
             self._meta_path(target).unlink(missing_ok=True)
             return self.view(target, spec.default_env)
 
-        # Never stop based solely on port/PID.
-        stop_exact(listener, spec.backend_port, spec.root / "public")
+        php_path = self.config.web_php_for(target)
+        executable = php_path if php_path.is_absolute() else None
+        stop_exact(
+            listener,
+            spec.backend_port,
+            spec.root / "public",
+            executable=executable,
+        )
         self._pid_path(target).unlink(missing_ok=True)
         self._meta_path(target).unlink(missing_ok=True)
         return self.view(target, spec.default_env)

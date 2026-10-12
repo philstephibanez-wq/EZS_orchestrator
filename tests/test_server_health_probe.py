@@ -16,7 +16,10 @@ class ServerHealthProbeContract(unittest.TestCase):
 
     def test_lab_uses_unprotected_health_route(self):
         self.assertIn('health_path = "/home" if target is Target.LAB else "/fr/login"', MANAGER)
-        self.assertIn('http_alive(f"http://127.0.0.1:{spec.backend_port}", path=health_path)', MANAGER)
+        self.assertRegex(
+            MANAGER,
+            r'http_alive\(\s*f"http://127\.0\.0\.1:\{spec\.backend_port\}",\s*path=health_path,?\s*\)',
+        )
         self.assertNotIn('health_path = "/internal/analysis/desktop/jobs/queue" if target is Target.LAB', MANAGER)
 
 
