@@ -575,7 +575,7 @@ class ControlCenter:
                         "message": f"Logs cleared={result.cleared}; failures={len(result.failed)}",
                         "failures": list(result.failed),
                     }
-                return {"ok": True, "message": f"{result.cleared} log file(s) cleared logically; physical files, servers and worker untouched"}
+                return {"ok": True, "message": f"{result.cleared} log file(s) physically truncated"}
 
             raise ValueError(f"unsupported_action:{name}")
 
@@ -1148,14 +1148,14 @@ $("assistantDeploy").addEventListener("click",async()=>{
  }
 });
 document.querySelectorAll('button[data-action]').forEach(b=>b.addEventListener("click",()=>action(b.dataset.action)));$("serviceStart").addEventListener("click",()=>action("service-start-all"));$("serviceStop").addEventListener("click",()=>action("service-stop"));
-$("clearLogs").addEventListener("click",async()=>{if(currentLog==="deployments"||currentLog==="assistant_deployment"){toast("Les journaux de déploiement sont des journaux d’audit et ne sont pas effacés depuis cette vue.",false);return;}if(!confirm("Masquer l'historique actuel des logs ? Les fichiers actifs ne seront pas tronqués et aucun serveur/worker ne sera arrêté."))return;await action("logs-clear");await refreshLogs()});
+$("clearLogs").addEventListener("click",async()=>{if(!confirm("Effacer physiquement et complètement tous les fichiers de logs gérés ? Cette action est irréversible."))return;await action("logs-clear");await refreshLogs()});
 $("exportLogs").addEventListener("click",()=>{window.location.assign("/api/logs/export")});
 document.querySelectorAll(".tab").forEach(b=>b.addEventListener("click",()=>{
  document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
  b.classList.add("active");
  currentLog=b.dataset.log;
- $("clearLogs").disabled=currentLog==="deployments"||currentLog==="assistant_deployment";
- $("clearLogs").title=(currentLog==="deployments"||currentLog==="assistant_deployment")?"Journal d’audit : suppression désactivée":"";
+ $("clearLogs").disabled=false;
+ $("clearLogs").title="";
  refreshLogs();
 }));
 

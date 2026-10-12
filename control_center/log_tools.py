@@ -14,18 +14,14 @@ class LogClearResult:
 
 
 class LogTools:
-    """Safe Orchestrator log diagnostics with logical clear watermarks."""
+    """Safe Orchestrator log diagnostics with physical log clearing."""
 
     MAX_TAIL_BYTES = 256 * 1024
-    PROTECTED_AUDIT_LOGS = {"logs/assistant-deployment.log"}
 
     def __init__(self, orchestrator_root: Path) -> None:
         self.root = Path(orchestrator_root).resolve()
         self.export_dir = self.root / "runtime" / "exports"
-        self.state_dir = self.root / "runtime" / "logs"
-        self.clear_state_path = self.state_dir / "clear_state.json"
         self.export_dir.mkdir(parents=True, exist_ok=True)
-        self.state_dir.mkdir(parents=True, exist_ok=True)
 
     def _inside_root(self, path: Path) -> bool:
         try:
@@ -93,78 +89,34 @@ class LogTools:
             if (self.root / rel).is_file() and self._inside_root(self.root / rel)
         ]
 
-    def _load_state(self) -> dict[str, dict]:
-        try:
-            data = json.loads(self.clear_state_path.read_text(encoding="utf-8"))
-        except Exception:
-            return {}
-        files = data.get("files", {}) if isinstance(data, dict) else {}
-        return files if isinstance(files, dict) else {}
-
-    def _write_state(self, entries: dict[str, dict]) -> None:
-        payload = {
-            "schema": "ezs.orchestrator.log-clear-state.v1",
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-            "files": entries,
-        }
-        tmp = self.clear_state_path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        tmp.replace(self.clear_state_path)
-
-    @staticmethod
-    def _identity(st) -> tuple[int, int]:
-        return int(getattr(st, "st_dev", 0) or 0), int(getattr(st, "st_ino", 0) or 0)
-
-    def _effective_offset(self, path: Path) -> int:
-        entry = self._load_state().get(self._relative_key(path))
-        if not isinstance(entry, dict):
-            return 0
-        try:
-            st = path.stat()
-            offset = max(0, int(entry.get("offset", 0)))
-        except Exception:
-            return 0
-        if int(st.st_size) < offset:
-            return 0
-        stored = (int(entry.get("dev", 0) or 0), int(entry.get("ino", 0) or 0))
-        current = self._identity(st)
-        if stored[1] and current[1] and stored != current:
-            return 0
-        return offset
-
     def clear_logs(self) -> LogClearResult:
-        entries: dict[str, dict] = {}
+        """Physically truncate every log managed by the Log Center."""
         failed: list[str] = []
         cleared = 0
+
         for path in self.log_files():
-            if self._relative_key(path) in self.PROTECTED_AUDIT_LOGS:
-                continue
+            rel = self._relative_key(path)
             try:
-                st = path.stat()
-                dev, ino = self._identity(st)
-                entries[self._relative_key(path)] = {
-                    "offset": int(st.st_size),
-                    "dev": dev,
-                    "ino": ino,
-                }
+                with path.open("r+b") as handle:
+                    handle.truncate(0)
+                    handle.flush()
                 cleared += 1
             except Exception as exc:
-                failed.append(f"{path.relative_to(self.root)}: {exc}")
+                failed.append(f"{rel}: {exc}")
+
+        legacy_state = self.root / "runtime" / "logs" / "clear_state.json"
         try:
-            self._write_state(entries)
+            legacy_state.unlink(missing_ok=True)
         except Exception as exc:
             failed.append(f"runtime/logs/clear_state.json: {exc}")
+
         return LogClearResult(cleared=cleared, failed=tuple(failed))
 
     def read_visible_bytes(self, path: Path) -> bytes:
         if not self._is_allowed_log(path):
             return b""
         try:
-            size = int(path.stat().st_size)
-            offset = min(self._effective_offset(path), size)
-            with path.open("rb") as handle:
-                handle.seek(offset)
-                return handle.read()
+            return path.read_bytes()
         except Exception:
             return b""
 
@@ -173,14 +125,13 @@ class LogTools:
             return []
         try:
             size = int(path.stat().st_size)
-            offset = min(self._effective_offset(path), size)
-            if size <= offset:
+            if size <= 0:
                 return []
-            start = max(offset, size - self.MAX_TAIL_BYTES)
+            start = max(0, size - self.MAX_TAIL_BYTES)
             with path.open("rb") as handle:
                 handle.seek(start)
                 raw = handle.read(size - start)
-            if start > offset:
+            if start > 0:
                 first_newline = raw.find(b"\n")
                 raw = raw[first_newline + 1:] if first_newline >= 0 else b""
             return raw.decode("utf-8", errors="replace").splitlines()[-max_lines:]
@@ -188,7 +139,7 @@ class LogTools:
             return [f"[log read error] {exc}"]
 
     def error_alerts(self, max_lines_per_file: int = 80) -> list[dict]:
-        """Return actionable visible log errors after the current clear watermark."""
+        """Return actionable errors from the current physical log contents."""
         rels = (
             "logs/control-center-error.log",
             "runtime/service/service.err.log",
@@ -261,10 +212,10 @@ class LogTools:
             "schema": "ezs.orchestrator.log-export.v2",
             "created_at": datetime.now(timezone.utc).isoformat(),
             "orchestrator_root": str(self.root),
-            "clear_mode": "logical-watermark",
+            "clear_mode": "physical-truncate",
             "policy": {
                 "included": [
-                    "Orchestrator logs after current logical-clear watermark",
+                    "Current Orchestrator log files after any physical clear",
                     "selected non-sensitive runtime metadata",
                 ],
                 "excluded": [
