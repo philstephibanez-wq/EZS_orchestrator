@@ -53,12 +53,28 @@ class LogTools:
 
     def log_files(self) -> list[Path]:
         files: set[Path] = set()
-        for base in (self.root / "logs", self.root / "runtime"):
-            if not base.exists():
-                continue
-            for path in base.rglob("*.log"):
+
+        logs_root = self.root / "logs"
+        if logs_root.exists():
+            for path in logs_root.rglob("*.log"):
                 if self._is_allowed_log(path):
                     files.add(path)
+
+        runtime = self.root / "runtime"
+        excluded_runtime_dirs = {"jobs", "exports"}
+        if runtime.exists():
+            for path in runtime.glob("*.log"):
+                if self._is_allowed_log(path):
+                    files.add(path)
+            for child in runtime.iterdir():
+                if not child.is_dir():
+                    continue
+                if child.name.lower() in excluded_runtime_dirs:
+                    continue
+                for path in child.rglob("*.log"):
+                    if self._is_allowed_log(path):
+                        files.add(path)
+
         return sorted(files, key=lambda p: str(p).lower())
 
     def diagnostic_metadata(self) -> list[Path]:
@@ -171,6 +187,47 @@ class LogTools:
         except Exception as exc:
             return [f"[log read error] {exc}"]
 
+    def error_alerts(self, max_lines_per_file: int = 80) -> list[dict]:
+        """Return actionable visible log errors after the current clear watermark."""
+        rels = (
+            "logs/control-center-error.log",
+            "runtime/service/service.err.log",
+            "logs/servers/dev.err.log",
+            "logs/servers/prod.err.log",
+            "logs/servers/lab.err.log",
+            "logs/gateway/prod.err.log",
+            "runtime/caddy/dev/caddy.err.log",
+            "runtime/caddy/prod/caddy.err.log",
+            "runtime/caddy/lab/caddy.err.log",
+        )
+        benign = (
+            "connectionabortederror",
+            "winerror 10053",
+            "context canceled",
+        )
+        indicators = (
+            "[error]",
+            "traceback (most recent call last)",
+            "exception",
+            "fatal",
+            "failed",
+            "permissionerror",
+            "syntaxerror",
+            "accessdeniedhttpexception",
+            "invalid analysis worker token",
+        )
+        alerts: list[dict] = []
+        for rel in rels:
+            path = self.root / rel
+            for line in self.tail(path, max_lines=max_lines_per_file):
+                lowered = line.lower()
+                if any(term in lowered for term in benign):
+                    continue
+                if not any(term in lowered for term in indicators):
+                    continue
+                alerts.append({"source": rel, "line": line[:500]})
+        return alerts[-20:]
+
     def export_zip(self) -> Path:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%SZ")
         target = self.export_dir / f"EZS_orchestrator_logs_{stamp}.zip"
@@ -201,3 +258,22 @@ class LogTools:
             for path in self.diagnostic_metadata():
                 zf.write(path, arcname=self._relative_key(path))
         return target
+
+def main() -> int:
+    import sys
+
+    from config.loader import load_runtime_config
+
+    if len(sys.argv) != 2 or sys.argv[1] != "clear":
+        print("usage: python -m control_center.log_tools clear")
+        return 2
+
+    result = LogTools(load_runtime_config().orchestrator_root).clear_logs()
+    print(f"LOGS_PURGED cleared={result.cleared} failed={len(result.failed)}")
+    for item in result.failed:
+        print(item)
+    return 1 if result.failed else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

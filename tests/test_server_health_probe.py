@@ -14,9 +14,10 @@ class ServerHealthProbeContract(unittest.TestCase):
         self.assertIn('probe_path = path if path.startswith("/") else "/" + path', PROCESS)
         self.assertIn('url.rstrip("/") + probe_path', PROCESS)
 
-    def test_lab_does_not_probe_nonexistent_login_route(self):
-        self.assertIn('health_path = "/internal/analysis/desktop/jobs/queue" if target is Target.LAB else "/fr/login"', MANAGER)
+    def test_lab_uses_unprotected_health_route(self):
+        self.assertIn('health_path = "/home" if target is Target.LAB else "/fr/login"', MANAGER)
         self.assertIn('http_alive(f"http://127.0.0.1:{spec.backend_port}", path=health_path)', MANAGER)
+        self.assertNotIn('health_path = "/internal/analysis/desktop/jobs/queue" if target is Target.LAB', MANAGER)
 
 
 if __name__ == "__main__":

@@ -84,7 +84,12 @@ class R327UiTerminologyContract(unittest.TestCase):
         self.assertIn("Vérification de l’Orchestrator…", SPLASH)
         self.assertIn("[EZS] Orchestrator: http://127.0.0.1:$Port/", STARTER)
         self.assertIn("Ancien Orchestrator EZS arrêté", LAUNCHER)
-        self.assertIn("Script de démarrage Orchestrator introuvable", LAUNCHER)
+
+        # R3.30D starts control_center.web directly with Python.
+        # The old "Script de démarrage Orchestrator introuvable" branch no longer exists.
+        self.assertIn("Start-Process $Python", LAUNCHER)
+        self.assertIn('"control_center.web"', LAUNCHER)
+        self.assertNotIn("Script de démarrage Orchestrator introuvable", LAUNCHER)
 
 
 if __name__ == "__main__":

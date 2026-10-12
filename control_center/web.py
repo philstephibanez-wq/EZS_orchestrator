@@ -124,6 +124,111 @@ class ControlCenter:
                 "workers": [],
                 "error": f"{type(exc).__name__}:{exc}"[:500],
             }
+    @staticmethod
+    def _heartbeat_age_seconds(value: object) -> float | None:
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        try:
+            stamp = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=timezone.utc)
+            return max(0.0, (datetime.now(timezone.utc) - stamp).total_seconds())
+        except Exception:
+            return None
+
+    @staticmethod
+    def _log_key_for_source(source: str) -> str:
+        mapping = {
+            "logs/control-center-error.log": "control_center_error",
+            "runtime/service/service.err.log": "service_error",
+            "logs/servers/dev.err.log": "dev_server_error",
+            "logs/servers/prod.err.log": "prod_server_error",
+            "logs/servers/lab.err.log": "lab_server_error",
+            "logs/gateway/prod.err.log": "prod_gateway_error",
+            "runtime/caddy/dev/caddy.err.log": "dev_caddy_error",
+            "runtime/caddy/prod/caddy.err.log": "prod_caddy_error",
+            "runtime/caddy/lab/caddy.err.log": "lab_caddy_error",
+        }
+        return mapping.get(source, "control_center_error")
+
+    def _safety_status(self, snapshot: dict) -> dict:
+        # Read-only synthesis: never starts/stops/kills a process.
+        issues: list[dict] = []
+        service = snapshot.get("service") or {}
+        if service.get("running"):
+            age = self._heartbeat_age_seconds(service.get("heartbeat"))
+            if age is None or age > 15.0:
+                issues.append({
+                    "severity": "error",
+                    "code": "heartbeat_stale",
+                    "source": "service",
+                    "message": f"Service permanent sans heartbeat récent ({age if age is not None else 'inconnu'} s).",
+                })
+
+        server_rows = (
+            ("DEV", ((snapshot.get("dev") or {}).get("server") or {})),
+            ("PROD", ((((snapshot.get("prod") or {}).get("lifecycle") or {}).get("backend")) or {})),
+            ("LAB", ((snapshot.get("lab") or {}).get("server") or {})),
+        )
+        for label, row in server_rows:
+            ownership = str(row.get("ownership") or "").lower()
+            alive = bool(row.get("process_alive"))
+            http_ok = bool(row.get("http_alive"))
+            if ownership == "foreign":
+                issues.append({
+                    "severity": "error",
+                    "code": "foreign_process",
+                    "source": label.lower(),
+                    "message": f"{label}: processus étranger sur le port géré (pid={row.get('pid')}).",
+                })
+            elif ownership == "orphan_exact":
+                issues.append({
+                    "severity": "warning",
+                    "code": "orphan_exact",
+                    "source": label.lower(),
+                    "message": f"{label}: processus exact reconnu mais non rattaché à son PID enregistré.",
+                })
+            if alive and not http_ok:
+                issues.append({
+                    "severity": "error",
+                    "code": "http_unreachable",
+                    "source": label.lower(),
+                    "message": f"{label}: processus actif mais serveur HTTP indisponible (pid={row.get('pid')}).",
+                })
+
+        for label, queue in (
+            ("DEV", ((snapshot.get("dev") or {}).get("queue") or {})),
+            ("PROD", ((snapshot.get("prod") or {}).get("queue") or {})),
+            ("LAB", ((snapshot.get("lab") or {}).get("queue") or {})),
+        ):
+            if queue.get("ok") is False:
+                issues.append({
+                    "severity": "error",
+                    "code": "queue_error",
+                    "source": label.lower(),
+                    "message": f"{label}: erreur de lecture de queue — {queue.get('error') or 'erreur inconnue'}.",
+                })
+
+        for item in self.log_tools.error_alerts():
+            source = str(item.get("source") or "")
+            issues.append({
+                "severity": "error",
+                "code": "log_error",
+                "source": source,
+                "message": str(item.get("line") or "Erreur journalisée")[:500],
+                "log_key": self._log_key_for_source(source),
+            })
+
+        errors = sum(1 for item in issues if item.get("severity") == "error")
+        warnings = sum(1 for item in issues if item.get("severity") == "warning")
+        return {
+            "state": "ERROR" if errors else "WARNING" if warnings else "OK",
+            "errors": errors,
+            "warnings": warnings,
+            "issues": issues[:30],
+        }
+
     def _snapshot_uncached(self) -> dict:
         clear_process_cache()
         started = time.monotonic()
@@ -133,7 +238,7 @@ class ControlCenter:
         lab = self.servers.view(Target.LAB)
         lab_caddy = self.caddy.view(Target.LAB)
         elapsed_ms = round((time.monotonic() - started) * 1000.0, 1)
-        return {
+        data = {
             "at": datetime.now(timezone.utc).isoformat(),
             "snapshot_ms": elapsed_ms,
             "analysis_active": bool(analysis_execution_active(self.runtime)),
@@ -161,6 +266,8 @@ class ControlCenter:
                 "root": str(self.config.lab.root) if self.config.lab is not None else None,
             },
         }
+        data["safety"] = self._safety_status(data)
+        return data
 
     def snapshot(self, force: bool = False) -> dict:
         with self.snapshot_lock:
@@ -455,6 +562,12 @@ main{padding:20px;max-width:1600px;margin:auto}.view{display:none}.view.active{d
 .tablewrap{overflow:auto;border:1px solid var(--line);border-radius:10px}.datatable{width:100%;border-collapse:collapse;min-width:880px}.datatable th,.datatable td{padding:9px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}.datatable th{color:var(--muted);font-size:12px;background:#0d1519}.job-state{font-weight:750}.job-state.completed{color:var(--ok)}.job-state.failed{color:var(--bad)}.job-state.finalize_error{color:var(--warn)}.job-state.running,.job-state.claimed,.job-state.queued,.job-state.waiting,.job-state.cancelling{color:var(--warn)}.job-target{font-weight:750}.job-target.dev{color:var(--accent)}.job-target.prod{color:var(--prod)}.tabs{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 8px}.tab.active{border-color:#397168;background:#17332f}pre{white-space:pre-wrap;word-break:break-word;background:#080d10;border:1px solid var(--line);padding:12px;border-radius:10px;max-height:360px;overflow:auto;color:#cbd8da}.deployConsole{min-height:180px;max-height:300px;font-family:Consolas,monospace}.deployConsole.running{border-color:#775a27}.deployConsole.completed{border-color:#2b6c49}.deployConsole.failed{border-color:#74383e}
 .queueCard strong{font-size:20px}.queueList{display:grid;gap:6px;margin-top:10px}.queueRow{padding:8px 9px;border:1px solid var(--line);border-radius:8px;background:#0d1519}.deployDecision{font-size:24px;font-weight:850}.deployDecision.ok{color:var(--ok)}.deployDecision.bad{color:var(--bad)}.deployDecision.idle{color:var(--muted)}.checks{display:grid;gap:7px}.check{padding:8px 10px;border:1px solid var(--line);border-radius:8px}.check.ok{border-color:#2b6c49}.check.bad{border-color:#74383e;background:#2a1518}.sensitive{color:var(--warn);font-weight:750}.history{display:grid;gap:7px}.history button{text-align:left;width:100%}.toast{position:fixed;right:18px;bottom:18px;max-width:720px;padding:10px 14px;border-radius:10px;background:#172228;border:1px solid var(--line);display:none;z-index:20}.toast.show{display:block}.toast.ok{border-color:#2b6c49}.toast.bad{border-color:#74383e}
 .modalBackdrop{position:fixed;inset:0;z-index:80;display:none;align-items:center;justify-content:center;padding:24px;background:rgba(0,0,0,.62);backdrop-filter:blur(3px)}.modalBackdrop.show{display:flex}.modal{width:min(720px,calc(100vw - 40px));max-height:calc(100vh - 48px);overflow:auto;border:1px solid #35505a;border-radius:14px;background:#0f191e;box-shadow:0 24px 70px rgba(0,0,0,.55)}.modalHead{padding:18px 20px;border-bottom:1px solid var(--line)}.modalHead h3{margin:0 0 4px;font-size:20px}.modalBody{padding:18px 20px;display:grid;gap:16px}.modalSummary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.modalStat{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:#0c1519}.modalStat b{display:block;font-size:18px;margin-top:3px}.modalSteps{display:grid;gap:8px;margin:0;padding:0;list-style:none}.modalSteps li{padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:#0c1519}.modalWarn{padding:11px 12px;border:1px solid #775a27;border-radius:9px;background:#251f13;color:var(--warn)}.modalFoot{display:flex;justify-content:flex-end;gap:10px;padding:16px 20px;border-top:1px solid var(--line)}@media(max-width:700px){.modalSummary{grid-template-columns:1fr}.modal{width:calc(100vw - 20px)}}@media(max-width:1000px){.grid3,.grid2{grid-template-columns:1fr}.shell{grid-template-columns:var(--sideCollapsed) 1fr}.navLabel,.brandText{display:none}.kv{grid-template-columns:120px minmax(0,1fr)}.appHeaderName{display:none}.viewContext{border-left:0;padding-left:0}.headerRight{gap:6px}.topMeta{display:none}}
+.safetyBanner{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:0 0 14px;padding:12px 14px;border:1px solid #295747;border-radius:10px;background:#10231d}
+.safetyBanner.warning{border-color:#775a27;background:#251f13}.safetyBanner.error{border-color:#7a3138;background:#2b1519}
+.safetyBanner strong{display:block}.safetyBanner .detail{margin-top:3px;color:var(--muted);font-size:12px;max-width:980px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.safetyBanner.error strong{color:var(--bad)}.safetyBanner.warning strong{color:var(--warn)}
+.safetyBanner button{display:none;white-space:nowrap}.safetyBanner.error button,.safetyBanner.warning button{display:inline-block}
+
 </style>
 </head>
 <body>
@@ -488,6 +601,13 @@ main{padding:20px;max-width:1600px;margin:auto}.view{display:none}.view.active{d
 <div class="content">
 <main>
 <div id="analysisBanner" class="banner">État d'exécution en cours de lecture…</div>
+<div id="safetyBanner" class="safetyBanner">
+  <div>
+    <strong id="safetyTitle">Supervision processus : lecture…</strong>
+    <div id="safetyDetail" class="detail">Contrôle des processus, queues et erreurs visibles.</div>
+  </div>
+  <button id="safetyLogs" type="button">Voir logs</button>
+</div>
 
 <section id="view-infrastructure" class="view active">
   <section class="grid3">
@@ -714,11 +834,25 @@ function renderAssistantWorkers(payload){
    return `<div class="assistantNode"><strong>${esc(w.worker_id||"-")} · ${w.online?"EN LIGNE":"PÉRIMÉ"}</strong><div class="assistantMeta"><span>État</span><span>${esc(fmtWorkerState(w.state))}</span><span>GPU</span><span>${esc(gpu)}</span><span>VRAM</span><span>${esc(vram)} MB</span><span>CUDA</span><span>${c.cuda_available?"oui":"non"}</span><span>Heartbeat</span><span>${esc(w.last_seen_at||"-")}</span></div></div>`;
  }).join(""):'<div class="muted" style="margin-top:10px">Aucun assistant distribué enregistré.</div>';
 }
+function renderSafety(payload){
+ const safety=payload||{state:"ERROR",errors:1,warnings:0,issues:[{message:"État de supervision indisponible."}]};
+ const state=String(safety.state||"ERROR").toUpperCase();
+ const issues=Array.isArray(safety.issues)?safety.issues:[];
+ const banner=$("safetyBanner");
+ banner.className="safetyBanner "+(state==="ERROR"?"error":state==="WARNING"?"warning":"");
+ txt("safetyTitle",state==="ERROR"?`ERREUR DÉTECTÉE — ${safety.errors??issues.length}`:state==="WARNING"?`ANOMALIE DÉTECTÉE — ${safety.warnings??issues.length}`:"Supervision processus : OK");
+ txt("safetyDetail",issues.length?issues.slice(0,3).map(x=>x.message||x.code||"anomalie").join(" · "):"Aucune anomalie processus/queue et aucune erreur actionable depuis la dernière purge.");
+ const btn=$("safetyLogs");
+ if(btn)btn.dataset.log=(issues.find(x=>x.log_key)||{}).log_key||"control_center_error";
+ return state;
+}
+
 function renderStatus(s){
  analysisActive=!!s.analysis_active;
+ const safetyState=renderSafety(s.safety);
  txt("updated",`${s.at} · snapshot ${s.snapshot_ms??'-'} ms`);
- txt("globalState",analysisActive?"ANALYSE ACTIVE":"Système disponible");
- const globalBadge=$("globalState");globalBadge.className="globalBadge "+(analysisActive?"busy":"");
+ txt("globalState",safetyState==="ERROR"?"ERREUR":safetyState==="WARNING"?"ANOMALIE":analysisActive?"ANALYSE ACTIVE":"Système disponible");
+ const globalBadge=$("globalState");globalBadge.className="globalBadge "+(safetyState==="ERROR"?"bad":safetyState==="WARNING"?"warn":analysisActive?"busy":"");
  const banner=$("analysisBanner");banner.textContent=analysisActive?"ANALYSE ACTIVE — stop/restart et déploiement bloqués":"Aucune analyse active";banner.className="banner "+(analysisActive?"active":"");
  dot($("gpuDot"),!analysisActive,analysisActive);txt("gpuState",analysisActive?"OCCUPÉ":"LIBRE");
  const svc=s.service||{};dot($("serviceDot"),!!svc.running);txt("serviceState",svc.running?"ACTIF":"ARRÊTÉ");txt("serviceTarget",svc.target?String(svc.target).toUpperCase():"-");txt("serviceMeta",`pid=${svc.pid??'-'} · state=${svc.state??'-'} · heartbeat=${svc.heartbeat??'-'}`);$("serviceStart").disabled=busy||!!svc.running;$("serviceStop").disabled=busy||!svc.running;
@@ -959,6 +1093,12 @@ $("deployApply").addEventListener("click",async()=>{
  }
 });
 
+$("safetyLogs").addEventListener("click",()=>{
+ const key=$("safetyLogs").dataset.log||"control_center_error";
+ setView("logs");
+ const tab=document.querySelector(`.tab[data-log="${key}"]`);
+ if(tab)tab.click();else refreshLogs();
+});
 $("headerRefresh").addEventListener("click",async()=>{await refresh();await refreshJobs();await refreshAssistantDeployment();await refreshAssistantSupervision();if(currentView==="deployment")await refreshDeployment()});
 refresh();refreshJobs();refreshAssistantDeployment();refreshAssistantSupervision();setInterval(refresh,3000);setInterval(refreshJobs,3000);setInterval(refreshAssistantSupervision,10000);
 </script>

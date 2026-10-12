@@ -10,7 +10,6 @@ $Python = "H:\Python\pythoncore-3.14-64\python.exe"
 $ControlCenterUrl = "http://127.0.0.1:8700/"
 $OutLog = Join-Path $Logs "control-center.log"
 $ErrLog = Join-Path $Logs "control-center-error.log"
-$StartScript = Join-Path $Root "scripts\start_control_center.ps1"
 $SplashScript = Join-Path $Root "scripts\show_splash.ps1"
 $ReadyFile = Join-Path $Runtime "control-center-launch.ready"
 $FailureFile = Join-Path $Runtime "control-center-launch.failed"
@@ -20,6 +19,7 @@ Remove-Item -LiteralPath $FailureFile -Force -ErrorAction SilentlyContinue
 
 if (Test-Path -LiteralPath $SplashScript -PathType Leaf) {
     Start-Process powershell.exe `
+        -WindowStyle Hidden `
         -ArgumentList @(
             "-NoProfile",
             "-STA",
@@ -103,6 +103,15 @@ function Stop-ExistingControlCenter {
 }
 
 try {
+    # Purge visible operational logs at every Orchestrator restart.
+    # Use a real module entrypoint: Windows PowerShell 5 can mangle
+    # multiline Python code passed through -c.
+    $logPurgeOutput = & $Python -m control_center.log_tools clear 2>&1
+    $logPurgeExitCode = $LASTEXITCODE
+    if ($logPurgeExitCode -ne 0) {
+        throw "Impossible de purger les logs au redémarrage. $($logPurgeOutput -join ' | ')"
+    }
+
     # 1. Ensure the permanent service is running.
     $serviceStatus = & $Python -m service.service_cli status 2>&1
     if ($LASTEXITCODE -ne 0 -or ($serviceStatus -join "`n") -notmatch "SERVICE:\s+running") {
@@ -118,17 +127,14 @@ try {
     #    Restart our own listener, but never kill an unrelated process on 8700.
     Stop-ExistingControlCenter
 
-    # 3. Start the current Orchestrator implementation.
-    if (-not (Test-Path $StartScript)) {
-        throw "Script de démarrage Orchestrator introuvable: $StartScript"
-    }
-
-    Start-Process powershell.exe `
+    # 3. Start Orchestrator directly. Do not keep a PowerShell wrapper
+    #    alive for the lifetime of the Python HTTP server.
+    Start-Process $Python `
         -WindowStyle Hidden `
+        -WorkingDirectory $Root `
         -ArgumentList @(
-            "-NoProfile",
-            "-ExecutionPolicy", "Bypass",
-            "-File", "`"$StartScript`""
+            "-m", "control_center.web",
+            "--port", "8700", "--no-browser"
         ) `
         -RedirectStandardOutput $OutLog `
         -RedirectStandardError $ErrLog | Out-Null
@@ -155,7 +161,15 @@ try {
 catch {
     $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $message = "[$stamp] $($_.Exception.Message)"
-    Add-Content -Path $ErrLog -Value $message
+
+    # Failure marker first: the splash must never wait forever because
+    # an error log is temporarily locked by another process.
     Set-Content -LiteralPath $FailureFile -Value $message -Encoding utf8
+    try {
+        Add-Content -Path $ErrLog -Value $message -ErrorAction Stop
+    }
+    catch {
+        # The failure marker above is authoritative for the splash.
+    }
     exit 1
 }

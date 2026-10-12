@@ -11,13 +11,15 @@ SPLASH = (ROOT / "scripts" / "show_splash.ps1").read_text(encoding="utf-8-sig")
 
 class R325LauncherSplashContract(unittest.TestCase):
     def test_launch_bat_is_detached(self):
-        self.assertIn('start "" /b powershell.exe', BAT)
+        self.assertNotIn('start "" /b powershell.exe', BAT.lower())
+        self.assertIn('start "" powershell.exe', BAT.lower())
         self.assertIn("launch_hidden.ps1", BAT)
         self.assertIn("exit /b 0", BAT)
 
     def test_splash_is_started_immediately(self):
         self.assertIn("show_splash.ps1", HIDDEN)
         self.assertIn("Start-Process powershell.exe", HIDDEN)
+        self.assertIn("-WindowStyle Hidden", HIDDEN)
         self.assertIn('"-STA"', HIDDEN)
         self.assertIn("ReadyFile", HIDDEN)
         self.assertIn("FailureFile", HIDDEN)

@@ -95,7 +95,7 @@ class ServerManager:
         else:
             ownership = "foreign"
 
-        health_path = "/internal/analysis/desktop/jobs/queue" if target is Target.LAB else "/fr/login"
+        health_path = "/home" if target is Target.LAB else "/fr/login"
 
         return ServerView(
             target=target,
