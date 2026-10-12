@@ -363,6 +363,7 @@ class ControlCenter:
             "prod_caddy_error": self.log_tools.tail(root / "runtime" / "caddy" / "prod" / "caddy.err.log"),
             "lab_server_error": self.log_tools.tail(root / "logs" / "servers" / "lab.err.log"),
             "lab_caddy_error": self.log_tools.tail(root / "runtime" / "caddy" / "lab" / "caddy.err.log"),
+            "assistant_deployment": self.log_tools.tail(root / "logs" / "assistant-deployment.log"),
         }
 
     def assistant_supervision_status(self) -> dict:
@@ -551,7 +552,7 @@ main{padding:20px;max-width:1600px;margin:auto}.view{display:none}.view.active{d
     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
       <div><h2 style="margin-bottom:4px">Logs</h2><div class="muted">Infrastructure, Control Center et déploiements</div></div>
     </div>
-<div class="actions"><button id="clearLogs" class="danger">Clear logs</button><button id="exportLogs" class="primary">Export logs ZIP</button></div><div class="tabs"><button class="tab active" data-log="service">Service</button><button class="tab" data-log="service_error">Service erreurs</button><button class="tab" data-log="control_center">Control Center</button><button class="tab" data-log="control_center_error">Control Center erreurs</button><button class="tab" data-log="dev_server_error">Backend DEV</button><button class="tab" data-log="dev_caddy_error">Caddy DEV</button><button class="tab" data-log="prod_server_error">Backend PROD</button><button class="tab" data-log="prod_gateway_error">Gateway PROD</button><button class="tab" data-log="prod_caddy_error">Caddy PROD</button><button class="tab" data-log="lab_server_error">Backend LAB</button><button class="tab" data-log="lab_caddy_error">Caddy LAB</button><button class="tab" data-log="assistant_xps">Assistant XPS</button><button class="tab" data-log="assistant_xps_error">Assistant XPS erreurs</button><button class="tab" data-log="deployments">Déploiements</button></div><pre id="logText">Chargement…</pre></section>
+<div class="actions"><button id="clearLogs" class="danger">Clear logs</button><button id="exportLogs" class="primary">Export logs ZIP</button></div><div class="tabs"><button class="tab active" data-log="service">Service</button><button class="tab" data-log="service_error">Service erreurs</button><button class="tab" data-log="control_center">Control Center</button><button class="tab" data-log="control_center_error">Control Center erreurs</button><button class="tab" data-log="dev_server_error">Backend DEV</button><button class="tab" data-log="dev_caddy_error">Caddy DEV</button><button class="tab" data-log="prod_server_error">Backend PROD</button><button class="tab" data-log="prod_gateway_error">Gateway PROD</button><button class="tab" data-log="prod_caddy_error">Caddy PROD</button><button class="tab" data-log="lab_server_error">Backend LAB</button><button class="tab" data-log="lab_caddy_error">Caddy LAB</button><button class="tab" data-log="assistant_xps">Assistant XPS</button><button class="tab" data-log="assistant_xps_error">Assistant XPS erreurs</button><button class="tab" data-log="assistant_deployment">Déploiement assistant</button><button class="tab" data-log="deployments">Déploiement DEV → PROD</button></div><pre id="logText">Chargement…</pre></section>
 
   </section>
 </section>
@@ -796,14 +797,14 @@ $("assistantDeploy").addEventListener("click",async()=>{
  }
 });
 document.querySelectorAll('button[data-action]').forEach(b=>b.addEventListener("click",()=>action(b.dataset.action)));$("serviceStart").addEventListener("click",()=>action("service-start-all"));$("serviceStop").addEventListener("click",()=>action("service-stop"));
-$("clearLogs").addEventListener("click",async()=>{if(currentLog==="deployments"){toast("L’historique des déploiements est un journal d’audit et n’est pas effacé depuis cette vue.",false);return;}if(!confirm("Masquer l'historique actuel des logs ? Les fichiers actifs ne seront pas tronqués et aucun serveur/worker ne sera arrêté."))return;await action("logs-clear");await refreshLogs()});
+$("clearLogs").addEventListener("click",async()=>{if(currentLog==="deployments"||currentLog==="assistant_deployment"){toast("Les journaux de déploiement sont des journaux d’audit et ne sont pas effacés depuis cette vue.",false);return;}if(!confirm("Masquer l'historique actuel des logs ? Les fichiers actifs ne seront pas tronqués et aucun serveur/worker ne sera arrêté."))return;await action("logs-clear");await refreshLogs()});
 $("exportLogs").addEventListener("click",async()=>{try{const r=await fetch("/api/logs/export",{method:"POST",headers:{"X-EZS-Token":TOKEN}});if(!r.ok)throw new Error(await r.text());const blob=await r.blob(),disp=r.headers.get("Content-Disposition")||"",m=disp.match(/filename="?([^";]+)"?/),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=m?m[1]:"EZS_orchestrator_logs.zip";document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}catch(e){toast(String(e),false)}});
 document.querySelectorAll(".tab").forEach(b=>b.addEventListener("click",()=>{
  document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
  b.classList.add("active");
  currentLog=b.dataset.log;
- $("clearLogs").disabled=currentLog==="deployments";
- $("clearLogs").title=currentLog==="deployments"?"Journal d’audit : suppression désactivée":"";
+ $("clearLogs").disabled=currentLog==="deployments"||currentLog==="assistant_deployment";
+ $("clearLogs").title=(currentLog==="deployments"||currentLog==="assistant_deployment")?"Journal d’audit : suppression désactivée":"";
  refreshLogs();
 }));
 

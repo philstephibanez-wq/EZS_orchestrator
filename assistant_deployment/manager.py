@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import zipfile
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -16,6 +17,7 @@ DEFAULT_SOURCE = DEFAULT_LAB_ROOT / "EZStudioLab_assistant"
 DEFAULT_NODE = "steph@192.168.1.81"
 DEFAULT_REMOTE_ROOT = r"C:\EZStudioLab_assistant"
 DEFAULT_REMOTE_HOST_REPO = r"C:\EZStudioLab_assistant\runtime"
+ASSISTANT_DEPLOYMENT_LOG = Path(__file__).resolve().parents[1] / "logs" / "assistant-deployment.log"
 
 RUNTIME_FILES = (
     Path("python/ezstudio/__init__.py"),
@@ -38,6 +40,22 @@ class DeployPlan:
     def as_dict(self) -> dict:
         return asdict(self)
 
+
+
+def _audit_deployment(event: str, plan: DeployPlan, detail: str | None = None) -> None:
+    ASSISTANT_DEPLOYMENT_LOG.parent.mkdir(parents=True, exist_ok=True)
+    safe_detail = " ".join(str(detail or "").split())[:800]
+    fields = [
+        datetime.now(timezone.utc).isoformat(),
+        f"event={event}",
+        f"commit={plan.source_commit}",
+        f"node={plan.node}",
+        f"remote_root={plan.remote_root}",
+    ]
+    if safe_detail:
+        fields.append(f"detail={safe_detail}")
+    with ASSISTANT_DEPLOYMENT_LOG.open("a", encoding="utf-8", newline="\n") as handle:
+        handle.write(" ".join(fields) + "\n")
 
 def _run(
     args: list[str],
@@ -288,66 +306,65 @@ def deployment_status(plan: DeployPlan) -> dict:
     }
 
 def deploy(plan: DeployPlan) -> dict:
-    if shutil.which("ssh") is None:
-        raise RuntimeError("ssh_not_found")
-    if shutil.which("scp") is None:
-        raise RuntimeError("scp_not_found")
+    _audit_deployment("START", plan)
+    try:
+        if shutil.which("ssh") is None:
+            raise RuntimeError("ssh_not_found")
+        if shutil.which("scp") is None:
+            raise RuntimeError("scp_not_found")
 
-    short = plan.source_commit[:12]
-    remote_archive_name = f"EZStudioLab_assistant-{short}.zip"
+        short = plan.source_commit[:12]
+        remote_archive_name = f"EZStudioLab_assistant-{short}.zip"
 
-    with tempfile.TemporaryDirectory(prefix="ezs-assistant-deploy-") as tmp:
-        archive = Path(tmp) / remote_archive_name
-        _build_bundle(plan, archive)
+        with tempfile.TemporaryDirectory(prefix="ezs-assistant-deploy-") as tmp:
+            archive = Path(tmp) / remote_archive_name
+            _build_bundle(plan, archive)
 
-        copied = subprocess.run(
-            ["scp", str(archive), f"{plan.node}:{remote_archive_name}"],
+            copied = subprocess.run(
+                ["scp", str(archive), f"{plan.node}:{remote_archive_name}"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            if copied.returncode != 0:
+                raise RuntimeError(f"assistant_scp_failed:{copied.stderr.strip()}")
+
+        remote = _remote_script(plan, remote_archive_name)
+        encoded = base64.b64encode(remote.encode("utf-16le")).decode("ascii")
+        installed = subprocess.run(
+            [
+                "ssh", plan.node, "powershell", "-NoProfile",
+                "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded,
+            ],
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
         )
-        if copied.returncode != 0:
+        if installed.returncode != 0:
             raise RuntimeError(
-                f"assistant_scp_failed:{copied.stderr.strip()}"
+                "assistant_remote_install_failed:"
+                + (installed.stderr.strip() or installed.stdout.strip())
             )
 
-    remote = _remote_script(plan, remote_archive_name)
-    encoded = base64.b64encode(remote.encode("utf-16le")).decode("ascii")
-    installed = subprocess.run(
-        [
-            "ssh",
-            plan.node,
-            "powershell",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-EncodedCommand",
-            encoded,
-        ],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    if installed.returncode != 0:
-        raise RuntimeError(
-            "assistant_remote_install_failed:"
-            + (installed.stderr.strip() or installed.stdout.strip())
-        )
+        result = {
+            "ok": True,
+            "schema": "ezs.assistant-deployment.v1",
+            "commit": plan.source_commit,
+            "node": plan.node,
+            "remote_root": plan.remote_root,
+            "remote_host_repo": plan.remote_host_repo,
+            "stdout": installed.stdout.strip(),
+            "secrets_deployed": False,
+            "scientific_execution_started": False,
+        }
+    except Exception as exc:
+        _audit_deployment("FAIL", plan, f"{type(exc).__name__}:{exc}")
+        raise
 
-    return {
-        "ok": True,
-        "schema": "ezs.assistant-deployment.v1",
-        "commit": plan.source_commit,
-        "node": plan.node,
-        "remote_root": plan.remote_root,
-        "remote_host_repo": plan.remote_host_repo,
-        "stdout": installed.stdout.strip(),
-        "secrets_deployed": False,
-        "scientific_execution_started": False,
-    }
-
+    _audit_deployment("OK", plan, f"remote_host_repo={plan.remote_host_repo}")
+    return result
 
 def main() -> int:
     parser = argparse.ArgumentParser(prog="EZS assistant deployment")

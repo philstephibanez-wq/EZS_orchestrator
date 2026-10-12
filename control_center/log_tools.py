@@ -17,6 +17,7 @@ class LogTools:
     """Safe Orchestrator log diagnostics with logical clear watermarks."""
 
     MAX_TAIL_BYTES = 256 * 1024
+    PROTECTED_AUDIT_LOGS = {"logs/assistant-deployment.log"}
 
     def __init__(self, orchestrator_root: Path) -> None:
         self.root = Path(orchestrator_root).resolve()
@@ -120,6 +121,8 @@ class LogTools:
         failed: list[str] = []
         cleared = 0
         for path in self.log_files():
+            if self._relative_key(path) in self.PROTECTED_AUDIT_LOGS:
+                continue
             try:
                 st = path.stat()
                 dev, ino = self._identity(st)
