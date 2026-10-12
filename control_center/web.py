@@ -956,6 +956,7 @@ function txt(id,v){const e=$(id);if(e)e.textContent=v??"-"}
 function dot(el,ok,warn=false){el.className="dot "+(ok?"ok":warn?"warn":"bad")}
 function toast(message,ok=true){const el=$("toast");el.textContent=message;el.className="toast show "+(ok?"ok":"bad");setTimeout(()=>el.className="toast",4500)}
 async function getJSON(url){const r=await fetch(url,{cache:"no-store"});const data=await r.json();if(!r.ok)throw new Error(data.error||data.message||JSON.stringify(data));return data}
+async function protectedFetch(url,options){const r=await fetch(url,options);if(r.status===403){window.location.reload();throw new Error("Session locale renouvelée. Rechargement de la page…")}return r}
 function fmtMetric(v){return `CPU ${v?.cpu_percent==null?'-':v.cpu_percent+'%'} · RAM ${v?.ram_mb==null?'-':v.ram_mb+' MB'}`}
 function fmtProc(v){return `pid ${v.pid??'-'} · ${v.process_alive?'PROCESSUS OK':'PROCESSUS ARRÊTÉ'} · ${v.http_alive?'HTTP OK':'HTTP KO'} · ${fmtMetric(v)}`}
 function fmtOwnership(v){const x=String(v??"-").toLowerCase();return x==="owned"?"géré":x==="adopted"?"réadopté":x==="orphan_exact"?"orphelin reconnu":x==="orphan"?"orphelin":v??"-"}
@@ -1045,7 +1046,7 @@ function renderAssistantWorkers(payload){
  }).join(""):'<div class="muted" style="margin-top:10px">Aucun assistant distribué enregistré.</div>';
 }
 function openIncidentLog(key){setView("logs");const tab=document.querySelector(`.tab[data-log="${key}"]`);if(tab)tab.click();else refreshLogs()}
-async function acknowledgeIncident(id){try{const r=await fetch("/api/incidents/ack",{method:"POST",headers:{"Content-Type":"application/json","X-EZS-Token":TOKEN},body:JSON.stringify({incident_id:id})});const d=await r.json();if(!r.ok)throw new Error(d.error||d.message||JSON.stringify(d));toast("Incident acquitté",true);await refresh()}catch(e){toast(String(e),false)}}
+async function acknowledgeIncident(id){try{const r=await protectedFetch("/api/incidents/ack",{method:"POST",headers:{"Content-Type":"application/json","X-EZS-Token":TOKEN},body:JSON.stringify({incident_id:id})});const d=await r.json();if(!r.ok)throw new Error(d.error||d.message||JSON.stringify(d));toast("Incident acquitté",true);await refresh()}catch(e){toast(String(e),false)}}
 function renderIncidents(items){const rows=Array.isArray(items)?items:[];txt("incidentCount",`${rows.length} actif${rows.length===1?"":"s"}`);const el=$("incidentList");if(!el)return;el.innerHTML=rows.length?rows.map(i=>`<div class="incidentRow"><span class="incidentLevel ${esc(i.severity||"ERROR")}">${esc(i.severity||"ERROR")}</span><div><strong>${esc(i.code||"incident")}</strong> · ${esc(i.message||"")}<div class="muted">${esc(i.source||"-")} · ${i.acknowledged_at?"ACQUITTÉ":"NON ACQUITTÉ"}</div></div><div>${i.log_key?`<button data-incident-log="${esc(i.log_key)}">Logs</button>`:""} ${i.acknowledged_at?"✓":`<button data-incident-ack="${esc(i.id)}">Acquitter</button>`}</div></div>`).join(""):'<div class="muted">(aucun incident actif)</div>';el.querySelectorAll("[data-incident-ack]").forEach(b=>b.addEventListener("click",()=>acknowledgeIncident(b.dataset.incidentAck)));el.querySelectorAll("[data-incident-log]").forEach(b=>b.addEventListener("click",()=>openIncidentLog(b.dataset.incidentLog)))}
 function renderSafety(payload){
  const safety=payload||{state:"ERROR",errors:1,warnings:0,issues:[{message:"État de supervision indisponible."}]};
@@ -1126,14 +1127,14 @@ async function refreshLogs(){
  }
 }
 async function refresh(){if(refreshInFlight)return;refreshInFlight=true;try{renderStatus(await getJSON("/api/status"));if(currentView==="logs")await refreshLogs()}catch(e){toast(String(e),false)}finally{refreshInFlight=false}}
-async function action(name){if(busy)return;busy=true;syncActionButtons();try{const r=await fetch("/api/action",{method:"POST",headers:{"Content-Type":"application/json","X-EZS-Token":TOKEN},body:JSON.stringify({action:name})});const d=await r.json();toast(d.message||d.error||"OK",!!d.ok)}catch(e){toast(String(e),false)}finally{busy=false;await refresh()}}
+async function action(name){if(busy)return;busy=true;syncActionButtons();try{const r=await protectedFetch("/api/action",{method:"POST",headers:{"Content-Type":"application/json","X-EZS-Token":TOKEN},body:JSON.stringify({action:name})});const d=await r.json();toast(d.message||d.error||"OK",!!d.ok)}catch(e){toast(String(e),false)}finally{busy=false;await refresh()}}
 $("assistantDeploy").addEventListener("click",async()=>{
  if(busy)return;
  if(!confirm("Déployer la version validée de EZStudioLab_assistant vers le XPS ?"))return;
  busy=true;
  syncActionButtons();
  try{
-  const r=await fetch("/api/assistant/deployment/apply",{method:"POST",headers:{"X-EZS-Token":TOKEN}});
+  const r=await protectedFetch("/api/assistant/deployment/apply",{method:"POST",headers:{"X-EZS-Token":TOKEN}});
   const data=await r.json();
   if(!r.ok)throw new Error(data.message||data.error||JSON.stringify(data));
   toast(`Assistant déployé ${(data.commit||"").slice(0,12)}`,true);
@@ -1148,7 +1149,7 @@ $("assistantDeploy").addEventListener("click",async()=>{
 });
 document.querySelectorAll('button[data-action]').forEach(b=>b.addEventListener("click",()=>action(b.dataset.action)));$("serviceStart").addEventListener("click",()=>action("service-start-all"));$("serviceStop").addEventListener("click",()=>action("service-stop"));
 $("clearLogs").addEventListener("click",async()=>{if(currentLog==="deployments"||currentLog==="assistant_deployment"){toast("Les journaux de déploiement sont des journaux d’audit et ne sont pas effacés depuis cette vue.",false);return;}if(!confirm("Masquer l'historique actuel des logs ? Les fichiers actifs ne seront pas tronqués et aucun serveur/worker ne sera arrêté."))return;await action("logs-clear");await refreshLogs()});
-$("exportLogs").addEventListener("click",async()=>{try{const r=await fetch("/api/logs/export",{method:"POST",headers:{"X-EZS-Token":TOKEN}});if(!r.ok)throw new Error(await r.text());const blob=await r.blob(),disp=r.headers.get("Content-Disposition")||"",m=disp.match(/filename="?([^";]+)"?/),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=m?m[1]:"EZS_orchestrator_logs.zip";document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}catch(e){toast(String(e),false)}});
+$("exportLogs").addEventListener("click",()=>{window.location.assign("/api/logs/export")});
 document.querySelectorAll(".tab").forEach(b=>b.addEventListener("click",()=>{
  document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
  b.classList.add("active");
@@ -1290,7 +1291,7 @@ $("deployApply").addEventListener("click",async()=>{
   $("deployProgress").textContent="Initialisation du déploiement…";
   await pollDeployProgress(fresh.target_commit);
   progressTimer=setInterval(()=>pollDeployProgress(fresh.target_commit),800);
-  const r=await fetch("/api/deployment/apply",{method:"POST",headers:{"Content-Type":"application/json","X-EZS-Token":TOKEN},body:JSON.stringify({confirm_commit:fresh.target_commit})});
+  const r=await protectedFetch("/api/deployment/apply",{method:"POST",headers:{"Content-Type":"application/json","X-EZS-Token":TOKEN},body:JSON.stringify({confirm_commit:fresh.target_commit})});
   const data=await r.json();
   await pollDeployProgress(fresh.target_commit);
   if(!r.ok)throw new Error(data.message||data.error||JSON.stringify(data));
@@ -1319,6 +1320,26 @@ refresh();refreshJobs();refreshAssistantDeployment();refreshAssistantSupervision
 </body></html>'''
 
 
+def _load_or_create_ui_token(runtime: Path) -> str:
+    runtime.mkdir(parents=True, exist_ok=True)
+    token_path = runtime / "control-center-ui.token"
+    try:
+        current = token_path.read_text(encoding="ascii").strip()
+    except (OSError, UnicodeError):
+        current = ""
+    if (
+        len(current) >= 32
+        and all(ch.isalnum() or ch in "-_" for ch in current)
+    ):
+        return current
+
+    token = secrets.token_urlsafe(32)
+    tmp = token_path.with_suffix(".token.tmp")
+    tmp.write_text(token + "\n", encoding="ascii")
+    tmp.replace(token_path)
+    return token
+
+
 def make_handler(center: ControlCenter, token: str):
     class Handler(BaseHTTPRequestHandler):
         server_version = "EZSControlCenter/1.0"
@@ -1328,12 +1349,42 @@ def make_handler(center: ControlCenter, token: str):
 
         def _json(self, payload, code: int = 200) -> None:
             data = json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
-            self.send_response(code)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
+            try:
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+            except (
+                BrokenPipeError,
+                ConnectionAbortedError,
+                ConnectionResetError,
+            ):
+                return
+
+        def _send_log_export(self) -> None:
+            try:
+                archive = center.log_tools.export_zip()
+                data = archive.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/zip")
+                self.send_header(
+                    "Content-Disposition",
+                    f'attachment; filename="{archive.name}"',
+                )
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+            except (
+                BrokenPipeError,
+                ConnectionAbortedError,
+                ConnectionResetError,
+            ):
+                return
+            except Exception as exc:
+                self._json({"ok": False, "error": str(exc)}, 500)
 
         def do_GET(self) -> None:
             parsed = urlparse(self.path)
@@ -1358,6 +1409,9 @@ def make_handler(center: ControlCenter, token: str):
                 return
             if path == "/api/logs":
                 self._json(center.logs())
+                return
+            if path == "/api/logs/export":
+                self._send_log_export()
                 return
             if path == "/api/assistant/supervision/status":
                 self._json(center.assistant_supervision_status())
@@ -1396,23 +1450,15 @@ def make_handler(center: ControlCenter, token: str):
 
         def do_POST(self) -> None:
             path = urlparse(self.path).path
-            if self.headers.get("X-EZS-Token") != token:
-                self._json({"ok": False, "error": "forbidden"}, 403)
+
+            # Backward-compatible read-only export for tabs opened before
+            # this release. Export does not mutate application state.
+            if path == "/api/logs/export":
+                self._send_log_export()
                 return
 
-            if path == "/api/logs/export":
-                try:
-                    archive = center.log_tools.export_zip()
-                    data = archive.read_bytes()
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/zip")
-                    self.send_header("Content-Disposition", f'attachment; filename="{archive.name}"')
-                    self.send_header("Cache-Control", "no-store")
-                    self.send_header("Content-Length", str(len(data)))
-                    self.end_headers()
-                    self.wfile.write(data)
-                except Exception as exc:
-                    self._json({"ok": False, "error": str(exc)}, 500)
+            if self.headers.get("X-EZS-Token") != token:
+                self._json({"ok": False, "error": "forbidden"}, 403)
                 return
 
             if path == "/api/incidents/ack":
@@ -1505,7 +1551,9 @@ def main() -> int:
     server = None
     try:
         center = ControlCenter()
-        token = secrets.token_urlsafe(24)
+        token = _load_or_create_ui_token(
+            config.orchestrator_root / "runtime"
+        )
         server = ThreadingHTTPServer(
             (HOST, args.port),
             make_handler(center, token),

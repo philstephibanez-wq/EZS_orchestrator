@@ -77,6 +77,57 @@ function Test-EzsControlCenterProcess([int]$ProcessId) {
     )
 }
 
+function Preserve-CurrentControlCenterToken {
+    $tokenPath = Join-Path $Runtime "control-center-ui.token"
+
+    if (Test-Path -LiteralPath $tokenPath -PathType Leaf) {
+        return
+    }
+
+    $pid8700 = Get-Port8700Owner
+    if ($null -eq $pid8700) {
+        return
+    }
+
+    if (-not (Test-EzsControlCenterProcess -ProcessId $pid8700)) {
+        return
+    }
+
+    try {
+        $page = Invoke-WebRequest `
+            -Uri $ControlCenterUrl `
+            -UseBasicParsing `
+            -TimeoutSec 3
+    }
+    catch {
+        throw "Migration du token Control Center impossible : page locale inaccessible. Aucun arrêt effectué."
+    }
+
+    $match = [regex]::Match(
+        [string]$page.Content,
+        'const TOKEN="([A-Za-z0-9_-]{32,})";'
+    )
+    if (-not $match.Success) {
+        throw "Migration du token Control Center impossible : token local absent ou invalide. Aucun arrêt effectué."
+    }
+
+    $token = [string]$match.Groups[1].Value
+    $tmp = "$tokenPath.tmp"
+
+    try {
+        [System.IO.File]::WriteAllText(
+            $tmp,
+            $token + [Environment]::NewLine,
+            [System.Text.Encoding]::ASCII
+        )
+        Move-Item -LiteralPath $tmp -Destination $tokenPath -Force
+    }
+    catch {
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+        throw "Migration du token Control Center impossible : persistance refusée. Aucun arrêt effectué."
+    }
+}
+
 function Stop-ExistingControlCenter {
     $pid8700 = Get-Port8700Owner
     if ($null -eq $pid8700) {
@@ -112,21 +163,19 @@ try {
         throw "Impossible de purger les logs au redémarrage. $($logPurgeOutput -join ' | ')"
     }
 
-    # 1. Ensure the permanent service is running.
-    $serviceStatus = & $Python -m service.service_cli status 2>&1
-    if ($LASTEXITCODE -ne 0 -or ($serviceStatus -join "`n") -notmatch "SERVICE:\s+running") {
-        $serviceStartOutput = & $Python -m service.service_cli start --target all --poll-seconds 2 2>&1
-        $serviceStartExitCode = $LASTEXITCODE
-        $serviceStartOutput | Set-Content -LiteralPath (Join-Path $Logs "service-start.log") -Encoding utf8
-        if ($serviceStartExitCode -ne 0) {
-            throw "Impossible de démarrer le service permanent EZS."
-        }
+    # 1. Ensure the permanent service is running on the currently installed code.
+    #    If an analysis is active, service_cli leaves the current service untouched.
+    $serviceReloadOutput = & $Python -m service.service_cli restart-if-idle --target all --poll-seconds 2 2>&1
+    $serviceReloadExitCode = $LASTEXITCODE
+    $serviceReloadOutput | Set-Content -LiteralPath (Join-Path $Logs "service-start.log") -Encoding utf8
+    if ($serviceReloadExitCode -ne 0) {
+        throw "Impossible de charger le service permanent EZS."
     }
 
     # 2. launch.bat means: run the currently installed Orchestrator.
     #    Restart our own listener, but never kill an unrelated process on 8700.
+    Preserve-CurrentControlCenterToken
     Stop-ExistingControlCenter
-
     # 3. Start Orchestrator directly. Do not keep a PowerShell wrapper
     #    alive for the lifetime of the Python HTTP server.
     Start-Process $Python `

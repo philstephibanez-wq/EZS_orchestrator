@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+from ctypes import wintypes
 import json
 import os
 import subprocess
@@ -45,6 +46,18 @@ def clear_process_cache() -> None:
         _CACHE.clear()
 
 
+def _open_process(pid: int, access: int):
+    if os.name != "nt":
+        return None, None
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    handle = kernel32.OpenProcess(int(access), False, int(pid))
+    return kernel32, handle or None
+
+
 def _pid_alive_uncached(pid: int) -> bool:
     if os.name != "nt":
         try:
@@ -54,14 +67,13 @@ def _pid_alive_uncached(pid: int) -> bool:
             return False
     PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
     try:
-        handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+        kernel32, handle = _open_process(pid, PROCESS_QUERY_LIMITED_INFORMATION)
         if not handle:
             return False
-        ctypes.windll.kernel32.CloseHandle(handle)
+        kernel32.CloseHandle(handle)
         return True
     except Exception:
         return False
-
 
 def pid_alive(pid: int | None) -> bool:
     if not pid or pid <= 0:
@@ -105,21 +117,28 @@ def _executable_path_uncached(pid: int) -> str | None:
         return None
     PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
     try:
-        kernel32 = ctypes.windll.kernel32
-        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+        kernel32, handle = _open_process(pid, PROCESS_QUERY_LIMITED_INFORMATION)
         if not handle:
             return None
         try:
-            size = ctypes.c_ulong(32768)
+            kernel32.QueryFullProcessImageNameW.argtypes = [
+                wintypes.HANDLE,
+                wintypes.DWORD,
+                wintypes.LPWSTR,
+                ctypes.POINTER(wintypes.DWORD),
+            ]
+            kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+            size = wintypes.DWORD(32768)
             buffer = ctypes.create_unicode_buffer(size.value)
-            if not kernel32.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(size)):
+            if not kernel32.QueryFullProcessImageNameW(
+                handle, 0, buffer, ctypes.byref(size)
+            ):
                 return None
             return buffer.value or None
         finally:
             kernel32.CloseHandle(handle)
     except Exception:
         return None
-
 
 def executable_path(pid: int | None) -> str | None:
     if not pid or pid <= 0:
@@ -162,20 +181,44 @@ def _process_resource_sample(pid: int) -> tuple[float, float] | None:
     PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
     PROCESS_VM_READ = 0x0010
     try:
-        kernel32 = ctypes.windll.kernel32
-        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, False, int(pid))
+        kernel32, handle = _open_process(
+            pid, PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ
+        )
         if not handle:
             return None
         try:
+            kernel32.GetProcessTimes.argtypes = [
+                wintypes.HANDLE,
+                ctypes.POINTER(_FILETIME),
+                ctypes.POINTER(_FILETIME),
+                ctypes.POINTER(_FILETIME),
+                ctypes.POINTER(_FILETIME),
+            ]
+            kernel32.GetProcessTimes.restype = wintypes.BOOL
+            psapi = ctypes.WinDLL("psapi", use_last_error=True)
+            psapi.GetProcessMemoryInfo.argtypes = [
+                wintypes.HANDLE,
+                ctypes.c_void_p,
+                wintypes.DWORD,
+            ]
+            psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
             creation = _FILETIME()
             exit_time = _FILETIME()
             kernel = _FILETIME()
             user = _FILETIME()
-            if not kernel32.GetProcessTimes(handle, ctypes.byref(creation), ctypes.byref(exit_time), ctypes.byref(kernel), ctypes.byref(user)):
+            if not kernel32.GetProcessTimes(
+                handle,
+                ctypes.byref(creation),
+                ctypes.byref(exit_time),
+                ctypes.byref(kernel),
+                ctypes.byref(user),
+            ):
                 return None
             counters = _PROCESS_MEMORY_COUNTERS_EX()
             counters.cb = ctypes.sizeof(counters)
-            if not ctypes.windll.psapi.GetProcessMemoryInfo(handle, ctypes.byref(counters), counters.cb):
+            if not psapi.GetProcessMemoryInfo(
+                handle, ctypes.byref(counters), counters.cb
+            ):
                 return None
             cpu_seconds = _filetime_seconds(kernel) + _filetime_seconds(user)
             ram_mb = float(counters.WorkingSetSize) / (1024.0 * 1024.0)
@@ -184,7 +227,6 @@ def _process_resource_sample(pid: int) -> tuple[float, float] | None:
             kernel32.CloseHandle(handle)
     except Exception:
         return None
-
 
 def process_metrics(pid: int | None) -> dict:
     if not pid or not pid_alive(pid):

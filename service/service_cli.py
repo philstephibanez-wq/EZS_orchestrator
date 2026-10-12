@@ -12,7 +12,8 @@ from contracts.target import Target
 from .runner import PermanentRunner
 from .singleton import ServiceSingletonBusy
 from config.loader import load_runtime_config
-from server_manager.process import clear_process_cache, pid_alive
+from server_manager.process import clear_process_cache, command_line, executable_path, pid_alive
+from runtime_guard.activity import analysis_execution_active
 
 WINDOWS_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -51,6 +52,20 @@ def _cleanup_stale(meta: Path, stop_file: Path) -> None:
     stop_file.unlink(missing_ok=True)
 
 
+def _expected_service_process(pid: int) -> bool:
+    exe = executable_path(pid)
+    cmd = command_line(pid)
+    if not exe or not cmd:
+        return False
+    try:
+        if Path(exe).resolve() != Path(sys.executable).resolve():
+            return False
+    except Exception:
+        return False
+    normalized = cmd.lower().replace('"', "")
+    return "-m service.service_cli run" in normalized
+
+
 def _live_metadata_pid(meta: Path, stop_file: Path) -> int:
     pid = _metadata_pid(meta)
     if pid <= 0:
@@ -61,8 +76,10 @@ def _live_metadata_pid(meta: Path, stop_file: Path) -> int:
     if not pid_alive(pid):
         _cleanup_stale(meta, stop_file)
         return 0
+    if not _expected_service_process(pid):
+        _cleanup_stale(meta, stop_file)
+        return 0
     return pid
-
 
 def run_foreground(scope: str, poll_seconds: float) -> int:
     try:
@@ -181,10 +198,23 @@ def stop(wait_seconds: float) -> int:
     return 2
 
 
+def restart_if_idle(scope: str, poll_seconds: float) -> int:
+    config, _service_dir, meta, _heartbeat, stop_file, _out, _err = runtime_paths()
+    if analysis_execution_active(config.orchestrator_root / "runtime"):
+        print("SERVICE_RELOAD_SKIPPED active_analysis")
+        return 0
+    live_pid = _live_metadata_pid(meta, stop_file)
+    if live_pid:
+        rc = stop(15.0)
+        if rc != 0:
+            return rc
+    return start(scope, poll_seconds)
+
+
 def main() -> int:
     p = argparse.ArgumentParser(prog="EZS_orchestrator service")
     sub = p.add_subparsers(dest="command", required=True)
-    for name in ("start", "run"):
+    for name in ("start", "run", "restart-if-idle"):
         sp = sub.add_parser(name)
         sp.add_argument(
             "--target", choices=("all", "dev", "prod", "lab"), required=True,
@@ -195,17 +225,17 @@ def main() -> int:
     sp_stop = sub.add_parser("stop")
     sp_stop.add_argument("--wait-seconds", type=float, default=15.0)
     args = p.parse_args()
-
     if args.command == "start":
         return start(args.target, args.poll_seconds)
     if args.command == "run":
         return run_foreground(args.target, args.poll_seconds)
+    if args.command == "restart-if-idle":
+        return restart_if_idle(args.target, args.poll_seconds)
     if args.command == "status":
         return status()
     if args.command == "stop":
         return stop(args.wait_seconds)
     return 2
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

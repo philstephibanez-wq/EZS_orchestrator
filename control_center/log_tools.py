@@ -219,12 +219,38 @@ class LogTools:
         alerts: list[dict] = []
         for rel in rels:
             path = self.root / rel
-            for line in self.tail(path, max_lines=max_lines_per_file):
-                lowered = line.lower()
+            lines = self.tail(path, max_lines=max_lines_per_file)
+            lowered_lines = [line.lower() for line in lines]
+            for index, line in enumerate(lines):
+                lowered = lowered_lines[index]
                 if any(term in lowered for term in benign):
                     continue
                 if not any(term in lowered for term in indicators):
                     continue
+                if rel == "logs/control-center-error.log":
+                    start = index
+                    while (
+                        start > 0
+                        and not lines[start - 1].startswith(
+                            "----------------------------------------"
+                        )
+                    ):
+                        start -= 1
+                    end = index
+                    while (
+                        end + 1 < len(lines)
+                        and not lines[end + 1].startswith(
+                            "----------------------------------------"
+                        )
+                    ):
+                        end += 1
+                    block = "\n".join(lowered_lines[start:end + 1])
+                    if any(term in block for term in benign):
+                        continue
+                elif "traceback (most recent call last)" in lowered:
+                    context = "\n".join(lowered_lines[index:index + 32])
+                    if any(term in context for term in benign):
+                        continue
                 alerts.append({"source": rel, "line": line[:500]})
         return alerts[-20:]
 
