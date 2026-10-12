@@ -205,6 +205,67 @@ def _build_bundle(plan: DeployPlan, destination: Path) -> None:
         raise RuntimeError("assistant_bundle_archive_failed")
 
 
+
+def _remote_deployed_commit(plan: DeployPlan) -> tuple[bool, str | None, str | None]:
+    script = f"""$path = '{plan.remote_root}\DEPLOYED_COMMIT.txt'
+if (Test-Path -LiteralPath $path -PathType Leaf) {{
+    (Get-Content -LiteralPath $path -Raw).Trim()
+    exit 0
+}}
+exit 3
+"""
+    encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
+    completed = subprocess.run(
+        [
+            "ssh",
+            plan.node,
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-EncodedCommand",
+            encoded,
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=8,
+    )
+    if completed.returncode == 0:
+        rows = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+        value = rows[-1] if rows else ""
+        return True, value or None, None
+    if completed.returncode == 3:
+        return True, None, None
+    return False, None, (
+        completed.stderr.strip()
+        or completed.stdout.strip()
+        or f"ssh_rc={completed.returncode}"
+    )[:500]
+
+
+def deployment_status(plan: DeployPlan) -> dict:
+    reachable, deployed_commit, error = _remote_deployed_commit(plan)
+    if not reachable:
+        state = "UNREACHABLE"
+    elif deployed_commit is None:
+        state = "NOT_DEPLOYED"
+    elif deployed_commit == plan.source_commit:
+        state = "UP_TO_DATE"
+    else:
+        state = "UPDATE_AVAILABLE"
+    return {
+        "ok": reachable,
+        "schema": "ezs.assistant-deployment.status.v1",
+        "state": state,
+        "source_commit": plan.source_commit,
+        "deployed_commit": deployed_commit,
+        "node": plan.node,
+        "remote_root": plan.remote_root,
+        "error": error,
+    }
+
 def deploy(plan: DeployPlan) -> dict:
     if shutil.which("ssh") is None:
         raise RuntimeError("ssh_not_found")

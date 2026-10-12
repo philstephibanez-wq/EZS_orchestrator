@@ -20,6 +20,7 @@ from contracts.target import Target
 from control_center.job_history import JobHistory
 from control_center.log_tools import LogTools
 from deployment.manager import DeploymentManager
+from assistant_deployment.manager import build_plan as build_assistant_deploy_plan, deploy as deploy_assistant_node, deployment_status as get_assistant_deployment_status
 from gateway_manager.manager import GatewayManager
 from prod_lifecycle.manager import ProdLifecycleManager
 from runtime_guard.activity import analysis_execution_active
@@ -362,6 +363,28 @@ class ControlCenter:
             "lab_caddy_error": self.log_tools.tail(root / "runtime" / "caddy" / "lab" / "caddy.err.log"),
         }
 
+    def assistant_deployment_status(self) -> dict:
+        try:
+            return get_assistant_deployment_status(build_assistant_deploy_plan())
+        except Exception as exc:
+            return {
+                "ok": False,
+                "schema": "ezs.assistant-deployment.status.v1",
+                "state": "ERROR",
+                "source_commit": None,
+                "deployed_commit": None,
+                "node": "steph@192.168.1.81",
+                "remote_root": r"C:\EZStudioLab_assistant",
+                "error": f"{type(exc).__name__}:{exc}"[:500],
+            }
+
+    def assistant_deployment_apply(self) -> dict:
+        with self.action_lock:
+            plan = build_assistant_deploy_plan()
+            result = deploy_assistant_node(plan)
+            self._invalidate_snapshot()
+            return result
+
     def deployment_plan(self) -> dict:
         return self.deployment.plan(fetch=True).as_dict()
 
@@ -469,6 +492,14 @@ main{padding:20px;max-width:1600px;margin:auto}.view{display:none}.view.active{d
       <h2>EZStudioLab_assistant · nœuds distribués</h2>
       <div class="statusrow"><span id="assistantDot" class="dot"></span><strong id="assistantState">-</strong></div>
       <div class="muted" id="assistantMeta" style="margin-top:6px">Inventaire en lecture seule.</div>
+      <dl class="kv" style="margin-top:10px">
+        <dt>Source LAB</dt><dd id="assistantSourceCommit">-</dd>
+        <dt>Version XPS</dt><dd id="assistantDeployedCommit">-</dd>
+        <dt>Déploiement</dt><dd id="assistantDeployState">-</dd>
+      </dl>
+      <div class="actions">
+        <button id="assistantDeploy" class="primary">Déployer assistant</button>
+      </div>
       <div id="assistantWorkers"></div>
     </article>
   </section>
@@ -591,7 +622,31 @@ function renderQueue(idCount,idList,q){
 function syncActionButtons(){
  document.querySelectorAll('button[data-action]').forEach(b=>{const destructive=b.dataset.destructive==="1";b.disabled=busy||(destructive&&analysisActive)});
  if(deployData)$("deployApply").disabled=busy||analysisActive||!deployData.ok;
+ if($("assistantDeploy"))$("assistantDeploy").disabled=busy||assistantDeployData?.state==="UP_TO_DATE"||assistantDeployData?.state==="UNREACHABLE";
 }
+let assistantDeployData=null,assistantDeployRefreshInFlight=false;
+function renderAssistantDeployment(payload){
+ assistantDeployData=payload||{};
+ const state=assistantDeployData.state||"ERROR";
+ txt("assistantSourceCommit",(assistantDeployData.source_commit||"").slice(0,12)||"-");
+ txt("assistantDeployedCommit",(assistantDeployData.deployed_commit||"").slice(0,12)||"-");
+ const label=state==="UP_TO_DATE"?"À JOUR":state==="UPDATE_AVAILABLE"?"MISE À JOUR DISPONIBLE":state==="NOT_DEPLOYED"?"NON DÉPLOYÉ":state==="UNREACHABLE"?"XPS INJOIGNABLE":"ERREUR";
+ txt("assistantDeployState",label);
+ const btn=$("assistantDeploy");
+ if(btn)btn.disabled=busy||state==="UP_TO_DATE"||state==="UNREACHABLE";
+}
+async function refreshAssistantDeployment(){
+ if(assistantDeployRefreshInFlight)return;
+ assistantDeployRefreshInFlight=true;
+ try{
+  renderAssistantDeployment(await getJSON("/api/assistant/deployment/status"));
+ }catch(e){
+  renderAssistantDeployment({ok:false,state:"ERROR",error:String(e)});
+ }finally{
+  assistantDeployRefreshInFlight=false;
+ }
+}
+
 function renderAssistantWorkers(payload){
  const workers=(payload&&payload.workers)||[];
  const online=workers.filter(w=>!!w.online);
@@ -664,6 +719,25 @@ async function refreshLogs(){
 }
 async function refresh(){if(refreshInFlight)return;refreshInFlight=true;try{renderStatus(await getJSON("/api/status"));if(currentView==="logs")await refreshLogs()}catch(e){toast(String(e),false)}finally{refreshInFlight=false}}
 async function action(name){if(busy)return;busy=true;syncActionButtons();try{const r=await fetch("/api/action",{method:"POST",headers:{"Content-Type":"application/json","X-EZS-Token":TOKEN},body:JSON.stringify({action:name})});const d=await r.json();toast(d.message||d.error||"OK",!!d.ok)}catch(e){toast(String(e),false)}finally{busy=false;await refresh()}}
+$("assistantDeploy").addEventListener("click",async()=>{
+ if(busy)return;
+ if(!confirm("Déployer la version validée de EZStudioLab_assistant vers le XPS ?"))return;
+ busy=true;
+ syncActionButtons();
+ try{
+  const r=await fetch("/api/assistant/deployment/apply",{method:"POST",headers:{"X-EZS-Token":TOKEN}});
+  const data=await r.json();
+  if(!r.ok)throw new Error(data.message||data.error||JSON.stringify(data));
+  toast(`Assistant déployé ${(data.commit||"").slice(0,12)}`,true);
+ }catch(e){
+  toast(String(e),false);
+ }finally{
+  busy=false;
+  await refreshAssistantDeployment();
+  await refresh();
+  syncActionButtons();
+ }
+});
 document.querySelectorAll('button[data-action]').forEach(b=>b.addEventListener("click",()=>action(b.dataset.action)));$("serviceStart").addEventListener("click",()=>action("service-start-all"));$("serviceStop").addEventListener("click",()=>action("service-stop"));
 $("clearLogs").addEventListener("click",async()=>{if(currentLog==="deployments"){toast("L’historique des déploiements est un journal d’audit et n’est pas effacé depuis cette vue.",false);return;}if(!confirm("Masquer l'historique actuel des logs ? Les fichiers actifs ne seront pas tronqués et aucun serveur/worker ne sera arrêté."))return;await action("logs-clear");await refreshLogs()});
 $("exportLogs").addEventListener("click",async()=>{try{const r=await fetch("/api/logs/export",{method:"POST",headers:{"X-EZS-Token":TOKEN}});if(!r.ok)throw new Error(await r.text());const blob=await r.blob(),disp=r.headers.get("Content-Disposition")||"",m=disp.match(/filename="?([^";]+)"?/),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=m?m[1]:"EZS_orchestrator_logs.zip";document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}catch(e){toast(String(e),false)}});
@@ -825,8 +899,8 @@ $("deployApply").addEventListener("click",async()=>{
  }
 });
 
-$("headerRefresh").addEventListener("click",async()=>{await refresh();await refreshJobs();if(currentView==="deployment")await refreshDeployment()});
-refresh();refreshJobs();setInterval(refresh,3000);setInterval(refreshJobs,3000);
+$("headerRefresh").addEventListener("click",async()=>{await refresh();await refreshJobs();await refreshAssistantDeployment();if(currentView==="deployment")await refreshDeployment()});
+refresh();refreshJobs();refreshAssistantDeployment();setInterval(refresh,3000);setInterval(refreshJobs,3000);
 </script>
 </body></html>'''
 
@@ -871,6 +945,9 @@ def make_handler(center: ControlCenter, token: str):
             if path == "/api/logs":
                 self._json(center.logs())
                 return
+            if path == "/api/assistant/deployment/status":
+                self._json(center.assistant_deployment_status())
+                return
             if path == "/api/deployment/plan":
                 try:
                     self._json(center.deployment_plan())
@@ -910,6 +987,13 @@ def make_handler(center: ControlCenter, token: str):
                     self.wfile.write(data)
                 except Exception as exc:
                     self._json({"ok": False, "error": str(exc)}, 500)
+                return
+
+            if path == "/api/assistant/deployment/apply":
+                try:
+                    self._json(center.assistant_deployment_apply())
+                except Exception as exc:
+                    self._json({"ok": False, "message": str(exc)}, 500)
                 return
 
             if path == "/api/deployment/apply":
