@@ -187,15 +187,15 @@ class ControlCenter:
             if name == "dev-server-start":
                 view = self.servers.start(Target.DEV)
                 self._invalidate_snapshot()
-                return {"ok": True, "message": f"DEV backend active pid={view.pid}"}
+                return {"ok": True, "message": f"Serveur DEV actif pid={view.pid}"}
             if name == "dev-server-stop":
                 view = self.servers.stop(Target.DEV)
                 self._invalidate_snapshot()
-                return {"ok": True, "message": "DEV backend stopped" if not view.process_alive else "DEV backend still active"}
+                return {"ok": True, "message": "Serveur DEV arrêté" if not view.process_alive else "Serveur DEV toujours actif"}
             if name == "dev-server-restart":
                 view = self.servers.restart(Target.DEV)
                 self._invalidate_snapshot()
-                return {"ok": True, "message": f"DEV backend restarted pid={view.pid}"}
+                return {"ok": True, "message": f"Serveur DEV redémarré pid={view.pid}"}
             if name == "dev-caddy-start":
                 view = self.caddy.start(Target.DEV)
                 self._invalidate_snapshot()
@@ -204,15 +204,15 @@ class ControlCenter:
             if name == "lab-server-start":
                 view = self.servers.start(Target.LAB)
                 self._invalidate_snapshot()
-                return {"ok": True, "message": f"LAB backend active pid={view.pid}"}
+                return {"ok": True, "message": f"Serveur LAB actif pid={view.pid}"}
             if name == "lab-server-stop":
                 view = self.servers.stop(Target.LAB)
                 self._invalidate_snapshot()
-                return {"ok": True, "message": "LAB backend stopped" if not view.process_alive else "LAB backend still active"}
+                return {"ok": True, "message": "Serveur LAB arrêté" if not view.process_alive else "Serveur LAB toujours actif"}
             if name == "lab-server-restart":
                 view = self.servers.restart(Target.LAB)
                 self._invalidate_snapshot()
-                return {"ok": True, "message": f"LAB backend restarted pid={view.pid}"}
+                return {"ok": True, "message": f"Serveur LAB redémarré pid={view.pid}"}
             if name == "lab-caddy-start":
                 view = self.caddy.start(Target.LAB)
                 self._invalidate_snapshot()
@@ -466,7 +466,7 @@ main{padding:20px;max-width:1600px;margin:auto}.view{display:none}.view.active{d
     </div>
     <div class="viewContext">
       <div id="viewTitle" class="topTitle">Infrastructure</div>
-      <div class="topSubtitle">Control Center · 127.0.0.1:8700</div>
+      <div class="topSubtitle">Orchestrator · 127.0.0.1:8700</div>
     </div>
   </div>
   <div class="headerRight">
@@ -496,26 +496,26 @@ main{padding:20px;max-width:1600px;margin:auto}.view{display:none}.view.active{d
     <article class="card"><h2>Politique de sûreté</h2><div class="lock">DEV, PROD et LAB restent physiquement isolés. Les actions destructives sont bloquées pendant une analyse.</div><div class="muted" style="margin-top:10px">Les diagnostics n'exportent pas runtime/jobs ni les données métier.</div></article>
   </section>
   <section class="grid2" style="margin-top:14px">
-    <article class="card target dev"><h2>DEV</h2><div class="statusrow"><span id="devDot" class="dot"></span><strong id="devState">-</strong></div><dl class="kv"><dt>Root</dt><dd id="devRoot">-</dd><dt>APP_ENV</dt><dd id="devEnv">-</dd><dt>Backend</dt><dd id="devBackend">-</dd><dt>Caddy</dt><dd id="devCaddy">-</dd><dt>Transport</dt><dd id="devTransport">-</dd><dt>Python analyse</dt><dd id="devPython">-</dd><dt>Ownership</dt><dd id="devOwnership">-</dd></dl><div class="actions"><button data-action="dev-server-start" class="primary">Démarrer backend</button><button data-action="dev-server-restart">Redémarrer backend</button><button data-action="dev-server-stop" data-destructive="1" class="danger">Arrêter backend</button><button data-action="dev-caddy-start">Démarrer Caddy</button><a class="btn primary" href="http://127.0.0.1:8502/fr/catalog" target="_blank" rel="noreferrer">Ouvrir DEV</a></div></article>
-    <article class="card target prod"><h2>PROD · exploitation protégée</h2><div class="statusrow"><span id="prodDot" class="dot"></span><strong id="prodState">-</strong><span id="prodMode" class="mode">-</span></div><dl class="kv"><dt>Root</dt><dd id="prodRoot">-</dd><dt>APP_ENV</dt><dd>prod</dd><dt>Backend :8511</dt><dd id="prodBackend">-</dd><dt>Gateway :8510</dt><dd id="prodGateway">-</dd><dt>Caddy :8501</dt><dd id="prodCaddy">-</dd><dt>Transport</dt><dd id="prodTransport">-</dd><dt>Python analyse</dt><dd id="prodPython">-</dd><dt>Ownership backend</dt><dd id="prodOwnership">-</dd></dl><div class="actions"><button data-action="prod-start" class="primary">Démarrer PROD</button><button data-action="prod-restart" data-destructive="1">Redémarrer PROD</button><button data-action="prod-stop" data-destructive="1" class="danger">Arrêter PROD</button><button data-action="prod-maintenance-off">Mode normal</button><button data-action="prod-maintenance-on" class="warn">Maintenance</button><a class="btn primary" href="https://ezscore.logandplay.com/fr/catalog" target="_blank" rel="noreferrer">Ouvrir PROD</a></div></article>
+    <article class="card target dev"><h2>DEV</h2><div class="statusrow"><span id="devDot" class="dot"></span><strong id="devState">-</strong></div><dl class="kv"><dt>Répertoire</dt><dd id="devRoot">-</dd><dt>APP_ENV</dt><dd id="devEnv">-</dd><dt>Serveur</dt><dd id="devBackend">-</dd><dt>Caddy</dt><dd id="devCaddy">-</dd><dt>URL serveur</dt><dd id="devTransport">-</dd><dt>Python analyse</dt><dd id="devPython">-</dd><dt>Propriété processus</dt><dd id="devOwnership">-</dd></dl><div class="actions"><button data-action="dev-server-start" class="primary">Démarrer serveur</button><button data-action="dev-server-restart">Redémarrer serveur</button><button data-action="dev-server-stop" data-destructive="1" class="danger">Arrêter serveur</button><button data-action="dev-caddy-start">Démarrer Caddy</button><a class="btn primary" href="http://127.0.0.1:8502/fr/catalog" target="_blank" rel="noreferrer">Ouvrir DEV</a></div></article>
+    <article class="card target prod"><h2>PROD · exploitation protégée</h2><div class="statusrow"><span id="prodDot" class="dot"></span><strong id="prodState">-</strong><span id="prodMode" class="mode">-</span></div><dl class="kv"><dt>Répertoire</dt><dd id="prodRoot">-</dd><dt>APP_ENV</dt><dd>prod</dd><dt>Serveur :8511</dt><dd id="prodBackend">-</dd><dt>Passerelle :8510</dt><dd id="prodGateway">-</dd><dt>Caddy :8501</dt><dd id="prodCaddy">-</dd><dt>URL serveur</dt><dd id="prodTransport">-</dd><dt>Python analyse</dt><dd id="prodPython">-</dd><dt>Propriété processus</dt><dd id="prodOwnership">-</dd></dl><div class="actions"><button data-action="prod-start" class="primary">Démarrer PROD</button><button data-action="prod-restart" data-destructive="1">Redémarrer PROD</button><button data-action="prod-stop" data-destructive="1" class="danger">Arrêter PROD</button><button data-action="prod-maintenance-off">Mode normal</button><button data-action="prod-maintenance-on" class="warn">Maintenance</button><a class="btn primary" href="https://ezscore.logandplay.com/fr/catalog" target="_blank" rel="noreferrer">Ouvrir PROD</a></div></article>
   </section>
   <section class="grid2" style="margin-top:14px">
     <article class="card target lab">
       <h2>LAB · expérimentation isolée</h2>
       <div class="statusrow"><span id="labDot" class="dot"></span><strong id="labState">-</strong></div>
       <dl class="kv">
-        <dt>Root</dt><dd id="labRoot">-</dd>
+        <dt>Répertoire</dt><dd id="labRoot">-</dd>
         <dt>APP_ENV</dt><dd id="labEnv">-</dd>
-        <dt>Backend</dt><dd id="labBackend">-</dd>
+        <dt>Serveur</dt><dd id="labBackend">-</dd>
         <dt>Caddy LAN</dt><dd id="labCaddy">-</dd>
-        <dt>Transport interne</dt><dd id="labTransport">-</dd>
+        <dt>URL serveur</dt><dd id="labTransport">-</dd>
         <dt>Python analyse</dt><dd id="labPython">-</dd>
-        <dt>Ownership</dt><dd id="labOwnership">-</dd>
+        <dt>Propriété processus</dt><dd id="labOwnership">-</dd>
       </dl>
       <div class="actions">
-        <button data-action="lab-server-start" class="primary">Démarrer backend</button>
-        <button data-action="lab-server-restart">Redémarrer backend</button>
-        <button data-action="lab-server-stop" data-destructive="1" class="danger">Arrêter backend</button>
+        <button data-action="lab-server-start" class="primary">Démarrer serveur</button>
+        <button data-action="lab-server-restart">Redémarrer serveur</button>
+        <button data-action="lab-server-stop" data-destructive="1" class="danger">Arrêter serveur</button>
         <button data-action="lab-caddy-start">Démarrer Caddy LAB</button>
         <a class="btn primary" href="http://127.0.0.1:8701/" target="_blank" rel="noreferrer">Ouvrir LAB</a>
       </div>
@@ -525,13 +525,13 @@ main{padding:20px;max-width:1600px;margin:auto}.view{display:none}.view.active{d
       <div class="statusrow"><span id="assistantDot" class="dot"></span><strong id="assistantState">-</strong></div>
       <div class="muted" id="assistantMeta" style="margin-top:6px">Inventaire en lecture seule.</div>
       <dl class="kv" style="margin-top:10px">
-        <dt>Source LAB</dt><dd id="assistantSourceCommit">-</dd>
-        <dt>Version XPS</dt><dd id="assistantDeployedCommit">-</dd>
-        <dt>Déploiement</dt><dd id="assistantDeployState">-</dd>
-        <dt>Runtime XPS</dt><dd id="assistantRuntimeState">-</dd>
+        <dt>Version source</dt><dd id="assistantSourceCommit">-</dd>
+        <dt>Version déployée</dt><dd id="assistantDeployedCommit">-</dd>
+        <dt>État déploiement</dt><dd id="assistantDeployState">-</dd>
+        <dt>Processus assistant XPS</dt><dd id="assistantRuntimeState">-</dd>
       </dl>
       <div class="actions">
-        <button id="assistantDeploy" class="primary">Déployer assistant</button>
+        <button id="assistantDeploy" class="primary">Déployer assistant → XPS</button>
       </div>
       <div id="assistantWorkers"></div>
     </article>
@@ -550,9 +550,9 @@ main{padding:20px;max-width:1600px;margin:auto}.view{display:none}.view.active{d
 <section id="view-logs" class="view">
   <section class="card">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
-      <div><h2 style="margin-bottom:4px">Logs</h2><div class="muted">Infrastructure, Control Center et déploiements</div></div>
+      <div><h2 style="margin-bottom:4px">Logs</h2><div class="muted">Infrastructure, Orchestrator et déploiements</div></div>
     </div>
-<div class="actions"><button id="clearLogs" class="danger">Clear logs</button><button id="exportLogs" class="primary">Export logs ZIP</button></div><div class="tabs"><button class="tab active" data-log="service">Service</button><button class="tab" data-log="service_error">Service erreurs</button><button class="tab" data-log="control_center">Control Center</button><button class="tab" data-log="control_center_error">Control Center erreurs</button><button class="tab" data-log="dev_server_error">Backend DEV</button><button class="tab" data-log="dev_caddy_error">Caddy DEV</button><button class="tab" data-log="prod_server_error">Backend PROD</button><button class="tab" data-log="prod_gateway_error">Gateway PROD</button><button class="tab" data-log="prod_caddy_error">Caddy PROD</button><button class="tab" data-log="lab_server_error">Backend LAB</button><button class="tab" data-log="lab_caddy_error">Caddy LAB</button><button class="tab" data-log="assistant_xps">Assistant XPS</button><button class="tab" data-log="assistant_xps_error">Assistant XPS erreurs</button><button class="tab" data-log="assistant_deployment">Déploiement assistant</button><button class="tab" data-log="deployments">Déploiement DEV → PROD</button></div><pre id="logText">Chargement…</pre></section>
+<div class="actions"><button id="clearLogs" class="danger">Clear logs</button><button id="exportLogs" class="primary">Export logs ZIP</button></div><div class="tabs"><button class="tab active" data-log="service">Service</button><button class="tab" data-log="service_error">Service erreurs</button><button class="tab" data-log="control_center">Orchestrator</button><button class="tab" data-log="control_center_error">Orchestrator erreurs</button><button class="tab" data-log="dev_server_error">Serveur DEV</button><button class="tab" data-log="dev_caddy_error">Caddy DEV</button><button class="tab" data-log="prod_server_error">Serveur PROD</button><button class="tab" data-log="prod_gateway_error">Passerelle PROD</button><button class="tab" data-log="prod_caddy_error">Caddy PROD</button><button class="tab" data-log="lab_server_error">Serveur LAB</button><button class="tab" data-log="lab_caddy_error">Caddy LAB</button><button class="tab" data-log="assistant_xps">Assistant XPS</button><button class="tab" data-log="assistant_xps_error">Assistant XPS erreurs</button><button class="tab" data-log="assistant_deployment">Déploiement assistant → XPS</button><button class="tab" data-log="deployments">Déploiement DEV → PROD</button></div><pre id="logText">Chargement…</pre></section>
 
   </section>
 </section>
@@ -627,7 +627,9 @@ function txt(id,v){const e=$(id);if(e)e.textContent=v??"-"}
 function dot(el,ok,warn=false){el.className="dot "+(ok?"ok":warn?"warn":"bad")}
 function toast(message,ok=true){const el=$("toast");el.textContent=message;el.className="toast show "+(ok?"ok":"bad");setTimeout(()=>el.className="toast",4500)}
 async function getJSON(url){const r=await fetch(url,{cache:"no-store"});const data=await r.json();if(!r.ok)throw new Error(data.error||data.message||JSON.stringify(data));return data}
-function fmtProc(v){return `pid ${v.pid??'-'} · ${v.process_alive?'PROCESS OK':'PROCESS OFF'} · ${v.http_alive?'HTTP OK':'HTTP OFF'}`}
+function fmtProc(v){return `pid ${v.pid??'-'} · ${v.process_alive?'PROCESSUS OK':'PROCESSUS ARRÊTÉ'} · ${v.http_alive?'HTTP OK':'HTTP KO'}`}
+function fmtOwnership(v){const x=String(v??"-").toLowerCase();return x==="owned"?"géré":x==="orphan_exact"?"orphelin reconnu":x==="orphan"?"orphelin":v??"-"}
+function fmtWorkerState(v){const x=String(v??"-").toLowerCase();const labels={idle:"DISPONIBLE",online:"EN LIGNE",running:"OCCUPÉ",busy:"OCCUPÉ",claimed:"OCCUPÉ",processing:"OCCUPÉ",stale:"PÉRIMÉ",stopped:"ARRÊTÉ",error:"ERREUR"};return labels[x]||String(v??"-").toUpperCase()}
 
 function setView(name){
  currentView=name;
@@ -683,7 +685,7 @@ async function refreshAssistantDeployment(){
 let assistantSupervisionRefreshInFlight=false;
 function renderAssistantSupervision(payload){
  const state=payload?.state||"ERROR";
- const labels={STOPPED:"STOPPED",ONLINE:"ONLINE",BUSY:"BUSY",STALE:"STALE",ERROR:"ERROR"};
+ const labels={STOPPED:"ARRÊTÉ",ONLINE:"EN LIGNE",BUSY:"OCCUPÉ",STALE:"PÉRIMÉ",ERROR:"ERREUR"};
  txt("assistantRuntimeState",labels[state]||state);
 }
 async function refreshAssistantSupervision(){
@@ -702,14 +704,14 @@ function renderAssistantWorkers(payload){
  const workers=(payload&&payload.workers)||[];
  const online=workers.filter(w=>!!w.online);
  dot($("assistantDot"),online.length>0,workers.length>0&&online.length===0);
- txt("assistantState",online.length>0?`${online.length} ONLINE`:workers.length?`${workers.length} STALE`:"AUCUN NŒUD");
- txt("assistantMeta",payload&&payload.ok?`${workers.length} nœud(s) enregistré(s) · inventaire read-only`:`Inventaire indisponible · ${payload?.error??"-"}`);
+ txt("assistantState",online.length>0?`${online.length} EN LIGNE`:workers.length?`${workers.length} PÉRIMÉ`:"AUCUN NŒUD");
+ txt("assistantMeta",payload&&payload.ok?`${workers.length} nœud(s) enregistré(s) · inventaire lecture seule`:`Inventaire indisponible · ${payload?.error??"-"}`);
  const el=$("assistantWorkers");
  el.innerHTML=workers.length?workers.map(w=>{
    const c=w.capabilities||{},g=(c.gpus||[])[0]||{};
    const gpu=g.name||"GPU non déclaré";
    const vram=g.vram_total_mb??c.max_vram_mb??"-";
-   return `<div class="assistantNode"><strong>${esc(w.worker_id||"-")} · ${w.online?"ONLINE":"STALE"}</strong><div class="assistantMeta"><span>État</span><span>${esc(w.state||"-")}</span><span>GPU</span><span>${esc(gpu)}</span><span>VRAM</span><span>${esc(vram)} MB</span><span>CUDA</span><span>${c.cuda_available?"oui":"non"}</span><span>Heartbeat</span><span>${esc(w.last_seen_at||"-")}</span></div></div>`;
+   return `<div class="assistantNode"><strong>${esc(w.worker_id||"-")} · ${w.online?"EN LIGNE":"PÉRIMÉ"}</strong><div class="assistantMeta"><span>État</span><span>${esc(fmtWorkerState(w.state))}</span><span>GPU</span><span>${esc(gpu)}</span><span>VRAM</span><span>${esc(vram)} MB</span><span>CUDA</span><span>${c.cuda_available?"oui":"non"}</span><span>Heartbeat</span><span>${esc(w.last_seen_at||"-")}</span></div></div>`;
  }).join(""):'<div class="muted" style="margin-top:10px">Aucun assistant distribué enregistré.</div>';
 }
 function renderStatus(s){
@@ -719,10 +721,10 @@ function renderStatus(s){
  const globalBadge=$("globalState");globalBadge.className="globalBadge "+(analysisActive?"busy":"");
  const banner=$("analysisBanner");banner.textContent=analysisActive?"ANALYSE ACTIVE — stop/restart et déploiement bloqués":"Aucune analyse active";banner.className="banner "+(analysisActive?"active":"");
  dot($("gpuDot"),!analysisActive,analysisActive);txt("gpuState",analysisActive?"OCCUPÉ":"LIBRE");
- const svc=s.service||{};dot($("serviceDot"),!!svc.running);txt("serviceState",svc.running?"RUNNING":"STOPPED");txt("serviceTarget",svc.target?String(svc.target).toUpperCase():"-");txt("serviceMeta",`pid=${svc.pid??'-'} · state=${svc.state??'-'} · heartbeat=${svc.heartbeat??'-'}`);$("serviceStart").disabled=busy||!!svc.running;$("serviceStop").disabled=busy||!svc.running;
- const d=s.dev,ds=d.server,dc=d.caddy;const devHealthy=!!(ds.process_alive&&ds.http_alive&&dc.process_alive&&dc.http_alive);devFailures=devHealthy?0:devFailures+1;const devShown=devHealthy||devFailures<3;dot($("devDot"),devShown,!devHealthy);txt("devState",devHealthy?"ONLINE":(devFailures<3?"DEGRADED / CHECKING":"PROCESS / HTTP DOWN"));txt("devRoot",ds.root);txt("devEnv",ds.app_env);txt("devBackend",`:${ds.backend_port} · ${fmtProc(ds)}`);txt("devCaddy",`:${dc.public_port} · ${fmtProc(dc)}`);txt("devTransport",d.transport);txt("devPython",d.analysis_python);txt("devOwnership",ds.ownership);renderQueue("devQueueCount","devQueueList",d.queue);
- const p=s.prod,pl=p.lifecycle,pb=pl.backend,pg=pl.gateway,pc=pl.caddy;const prodHealthy=!!pl.online;prodFailures=prodHealthy?0:prodFailures+1;const prodShown=prodHealthy||prodFailures<3;dot($("prodDot"),prodShown,!prodHealthy);txt("prodState",prodHealthy?"ONLINE":(prodFailures<3?"DEGRADED / CHECKING":"CHAIN INCOMPLETE / DOWN"));txt("prodRoot",pb.root);txt("prodBackend",`:${pb.backend_port} · ${fmtProc(pb)}`);txt("prodGateway",`:${pg.port} · pid ${pg.pid??'-'} · ${pg.process_alive?'PROCESS OK':'PROCESS OFF'} · ${pg.http_alive?'HTTP OK':'HTTP OFF'} · ${pg.protocol??'-'} · ownership=${pg.ownership}`);txt("prodCaddy",`:${pc.public_port} · ${fmtProc(pc)}`);txt("prodTransport",p.transport);txt("prodPython",p.analysis_python);txt("prodOwnership",pb.ownership);renderQueue("prodQueueCount","prodQueueList",p.queue);const mode=$("prodMode");mode.textContent=(pl.mode||"-").toUpperCase();mode.className="mode "+(pl.mode==="maintenance"?"maintenance":"");
- const l=s.lab||{},ls=l.server||{},lc=l.caddy||{};const labHealthy=!!(ls.process_alive&&ls.http_alive&&lc.process_alive&&lc.http_alive);labFailures=labHealthy?0:labFailures+1;const labShown=labHealthy||labFailures<3;dot($("labDot"),labShown,!labHealthy);txt("labState",labHealthy?"ONLINE":(labFailures<3?"DEGRADED / CHECKING":"PROCESS / HTTP DOWN"));txt("labRoot",ls.root??l.root);txt("labEnv",ls.app_env);txt("labBackend",`:${ls.backend_port??8701} · ${fmtProc(ls)}`);txt("labCaddy",`:${lc.public_port??8702} · ${fmtProc(lc)}`);txt("labTransport",l.transport);txt("labPython",l.analysis_python);txt("labOwnership",ls.ownership);renderQueue("labQueueCount","labQueueList",l.queue);txt("labQueueMeta",`${l.transport??"-"} · ${l.analysis_python??"-"}`);renderAssistantWorkers(l.workers||{});
+ const svc=s.service||{};dot($("serviceDot"),!!svc.running);txt("serviceState",svc.running?"ACTIF":"ARRÊTÉ");txt("serviceTarget",svc.target?String(svc.target).toUpperCase():"-");txt("serviceMeta",`pid=${svc.pid??'-'} · state=${svc.state??'-'} · heartbeat=${svc.heartbeat??'-'}`);$("serviceStart").disabled=busy||!!svc.running;$("serviceStop").disabled=busy||!svc.running;
+ const d=s.dev,ds=d.server,dc=d.caddy;const devHealthy=!!(ds.process_alive&&ds.http_alive&&dc.process_alive&&dc.http_alive);devFailures=devHealthy?0:devFailures+1;const devShown=devHealthy||devFailures<3;dot($("devDot"),devShown,!devHealthy);txt("devState",devHealthy?"EN LIGNE":(devFailures<3?"VÉRIFICATION":"HORS LIGNE"));txt("devRoot",ds.root);txt("devEnv",ds.app_env);txt("devBackend",`:${ds.backend_port} · ${fmtProc(ds)}`);txt("devCaddy",`:${dc.public_port} · ${fmtProc(dc)}`);txt("devTransport",d.transport);txt("devPython",d.analysis_python);txt("devOwnership",fmtOwnership(ds.ownership));renderQueue("devQueueCount","devQueueList",d.queue);
+ const p=s.prod,pl=p.lifecycle,pb=pl.backend,pg=pl.gateway,pc=pl.caddy;const prodHealthy=!!pl.online;prodFailures=prodHealthy?0:prodFailures+1;const prodShown=prodHealthy||prodFailures<3;dot($("prodDot"),prodShown,!prodHealthy);txt("prodState",prodHealthy?"EN LIGNE":(prodFailures<3?"VÉRIFICATION":"CHAÎNE INCOMPLÈTE"));txt("prodRoot",pb.root);txt("prodBackend",`:${pb.backend_port} · ${fmtProc(pb)}`);txt("prodGateway",`:${pg.port} · pid ${pg.pid??'-'} · ${pg.process_alive?'PROCESSUS OK':'PROCESSUS ARRÊTÉ'} · ${pg.http_alive?'HTTP OK':'HTTP KO'} · ${pg.protocol??'-'} · propriété=${fmtOwnership(pg.ownership)}`);txt("prodCaddy",`:${pc.public_port} · ${fmtProc(pc)}`);txt("prodTransport",p.transport);txt("prodPython",p.analysis_python);txt("prodOwnership",fmtOwnership(pb.ownership));renderQueue("prodQueueCount","prodQueueList",p.queue);const mode=$("prodMode");mode.textContent=pl.mode==="maintenance"?"MAINTENANCE":pl.mode==="normal"?"NORMAL":String(pl.mode||"-").toUpperCase();mode.className="mode "+(pl.mode==="maintenance"?"maintenance":"");
+ const l=s.lab||{},ls=l.server||{},lc=l.caddy||{};const labHealthy=!!(ls.process_alive&&ls.http_alive&&lc.process_alive&&lc.http_alive);labFailures=labHealthy?0:labFailures+1;const labShown=labHealthy||labFailures<3;dot($("labDot"),labShown,!labHealthy);txt("labState",labHealthy?"EN LIGNE":(labFailures<3?"VÉRIFICATION":"HORS LIGNE"));txt("labRoot",ls.root??l.root);txt("labEnv",ls.app_env);txt("labBackend",`:${ls.backend_port??8701} · ${fmtProc(ls)}`);txt("labCaddy",`:${lc.public_port??8702} · ${fmtProc(lc)}`);txt("labTransport",l.transport);txt("labPython",l.analysis_python);txt("labOwnership",fmtOwnership(ls.ownership));renderQueue("labQueueCount","labQueueList",l.queue);txt("labQueueMeta",`${l.transport??"-"} · ${l.analysis_python??"-"}`);renderAssistantWorkers(l.workers||{});
  syncActionButtons();
 }
 function renderJobs(payload){
@@ -1096,7 +1098,7 @@ def make_handler(center: ControlCenter, token: str):
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(prog="EZS Orchestrator V1.0 Control Center")
+    parser = argparse.ArgumentParser(prog="EZS Orchestrator V1.0")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--no-browser", action="store_true")
     args = parser.parse_args()

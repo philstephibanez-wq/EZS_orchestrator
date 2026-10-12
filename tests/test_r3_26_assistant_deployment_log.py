@@ -20,7 +20,7 @@ class R326AssistantDeploymentLogContract(unittest.TestCase):
 
     def test_ui_has_separate_assistant_deployment_tab(self):
         self.assertIn('data-log="assistant_deployment"', WEB)
-        self.assertIn(">Déploiement assistant<", WEB)
+        self.assertIn(">Déploiement assistant → XPS<", WEB)
         self.assertIn(">Déploiement DEV → PROD<", WEB)
         self.assertIn('"assistant_deployment": self.log_tools.tail(', WEB)
 
