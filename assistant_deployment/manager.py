@@ -3,10 +3,10 @@ from __future__ import annotations
 import argparse
 import base64
 import json
-import os
 import shutil
 import subprocess
 import tempfile
+import zipfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -16,6 +16,14 @@ DEFAULT_SOURCE = DEFAULT_LAB_ROOT / "EZStudioLab_assistant"
 DEFAULT_NODE = "steph@192.168.1.81"
 DEFAULT_REMOTE_ROOT = r"C:\EZStudioLab_assistant"
 DEFAULT_REMOTE_HOST_REPO = r"C:\EZStudioLab_assistant\runtime"
+
+RUNTIME_FILES = (
+    Path("python/ezstudio/__init__.py"),
+    Path("python/ezstudio/distributed/__init__.py"),
+    Path("python/ezstudio/distributed/capabilities.py"),
+    Path("python/ezstudio/distributed/model_resolver.py"),
+    Path("python/ezstudio/distributed/worker_protocol.py"),
+)
 
 
 @dataclass(frozen=True)
@@ -31,7 +39,12 @@ class DeployPlan:
         return asdict(self)
 
 
-def _run(args: list[str], *, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
+def _run(
+    args: list[str],
+    *,
+    cwd: Path | None = None,
+    check: bool = True,
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         args,
         cwd=str(cwd) if cwd else None,
@@ -76,7 +89,8 @@ def build_plan(
 
     if source_commit != parent_gitlink_commit:
         raise RuntimeError(
-            f"assistant_source_not_parent_pinned:source={source_commit}:gitlink={parent_gitlink_commit}"
+            f"assistant_source_not_parent_pinned:"
+            f"source={source_commit}:gitlink={parent_gitlink_commit}"
         )
 
     return DeployPlan(
@@ -93,6 +107,7 @@ def _remote_script(plan: DeployPlan, remote_archive: str) -> str:
     commit = plan.source_commit
     remote_root = plan.remote_root
     host_repo = plan.remote_host_repo
+
     return f"""$ErrorActionPreference = 'Stop'
 $remoteRoot = '{remote_root}'
 $staging = '{remote_root}.__new'
@@ -102,9 +117,6 @@ $hostRepo = '{host_repo}'
 
 if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) {{
     throw 'remote_archive_missing'
-}}
-if (-not (Test-Path -LiteralPath (Join-Path $hostRepo 'python') -PathType Container)) {{
-    throw 'remote_host_repo_python_missing'
 }}
 
 if (Test-Path -LiteralPath $staging) {{
@@ -118,6 +130,9 @@ if (-not (Test-Path -LiteralPath (Join-Path $staging 'app\\main.py') -PathType L
 }}
 if (-not (Test-Path -LiteralPath (Join-Path $staging 'scripts\\start-EZStudioLab_assistant.ps1') -PathType Leaf)) {{
     throw 'remote_staging_launcher_missing'
+}}
+if (-not (Test-Path -LiteralPath (Join-Path $staging 'runtime\\python\\ezstudio\\distributed\\capabilities.py') -PathType Leaf)) {{
+    throw 'remote_staging_runtime_missing'
 }}
 
 Set-Content -LiteralPath (Join-Path $staging 'DEPLOYED_COMMIT.txt') -Value '{commit}' -Encoding ascii
@@ -136,6 +151,9 @@ $deployed = (Get-Content -LiteralPath (Join-Path $remoteRoot 'DEPLOYED_COMMIT.tx
 if ($deployed -ne '{commit}') {{
     throw "remote_commit_mismatch:$deployed"
 }}
+if (-not (Test-Path -LiteralPath (Join-Path $hostRepo 'python\\ezstudio\\distributed\\capabilities.py') -PathType Leaf)) {{
+    throw 'remote_runtime_missing_after_install'
+}}
 
 Write-Output 'EZS_ASSISTANT_REMOTE_DEPLOY_OK'
 Write-Output "commit=$deployed"
@@ -144,8 +162,50 @@ Write-Output "host_repo=$hostRepo"
 """
 
 
-def deploy(plan: DeployPlan) -> dict:
+def _build_bundle(plan: DeployPlan, destination: Path) -> None:
     source = Path(plan.source)
+    lab_root = DEFAULT_LAB_ROOT.resolve()
+
+    assistant_archive = destination.parent / "assistant-source.zip"
+    completed = subprocess.run(
+        ["git", "archive", "--format=zip", f"--output={assistant_archive}", "HEAD"],
+        cwd=str(source),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if completed.returncode != 0 or not assistant_archive.is_file():
+        raise RuntimeError(
+            f"assistant_archive_failed:{completed.stderr.strip()}"
+        )
+
+    bundle_root = destination.parent / "bundle"
+    bundle_root.mkdir(parents=True, exist_ok=True)
+
+    with zipfile.ZipFile(assistant_archive, "r") as src_zip:
+        src_zip.extractall(bundle_root)
+
+    for relative in RUNTIME_FILES:
+        source_file = lab_root / relative
+        if not source_file.is_file():
+            raise RuntimeError(
+                f"assistant_runtime_dependency_missing:{source_file}"
+            )
+        target_file = bundle_root / "runtime" / relative
+        target_file.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_file, target_file)
+
+    shutil.make_archive(
+        str(destination.with_suffix("")),
+        "zip",
+        root_dir=bundle_root,
+    )
+    if not destination.is_file():
+        raise RuntimeError("assistant_bundle_archive_failed")
+
+
+def deploy(plan: DeployPlan) -> dict:
     if shutil.which("ssh") is None:
         raise RuntimeError("ssh_not_found")
     if shutil.which("scp") is None:
@@ -155,45 +215,8 @@ def deploy(plan: DeployPlan) -> dict:
     remote_archive_name = f"EZStudioLab_assistant-{short}.zip"
 
     with tempfile.TemporaryDirectory(prefix="ezs-assistant-deploy-") as tmp:
-        tmp_root = Path(tmp)
-        assistant_archive = tmp_root / "assistant-source.zip"
-        bundle_root = tmp_root / "bundle"
-        archive = tmp_root / remote_archive_name
-
-        completed = subprocess.run(
-            ["git", "archive", "--format=zip", f"--output={assistant_archive}", "HEAD"],
-            cwd=str(source),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
-        if completed.returncode != 0 or not assistant_archive.is_file():
-            raise RuntimeError(f"assistant_archive_failed:{completed.stderr.strip()}")
-
-        import zipfile
-        with zipfile.ZipFile(assistant_archive, "r") as src_zip:
-            src_zip.extractall(bundle_root)
-
-        lab_root = Path(r"H:\EZStudio_lab")
-        runtime_files = (
-            Path("python/ezstudio/__init__.py"),
-            Path("python/ezstudio/distributed/__init__.py"),
-            Path("python/ezstudio/distributed/capabilities.py"),
-            Path("python/ezstudio/distributed/model_resolver.py"),
-            Path("python/ezstudio/distributed/worker_protocol.py"),
-        )
-        for relative in runtime_files:
-            source_file = lab_root / relative
-            if not source_file.is_file():
-                raise RuntimeError(f"assistant_runtime_dependency_missing:{source_file}")
-            target_file = bundle_root / "runtime" / relative
-            target_file.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source_file, target_file)
-
-        shutil.make_archive(str(archive.with_suffix("")), "zip", root_dir=bundle_root)
-        if not archive.is_file():
-            raise RuntimeError("assistant_bundle_archive_failed")
+        archive = Path(tmp) / remote_archive_name
+        _build_bundle(plan, archive)
 
         copied = subprocess.run(
             ["scp", str(archive), f"{plan.node}:{remote_archive_name}"],
@@ -203,12 +226,23 @@ def deploy(plan: DeployPlan) -> dict:
             errors="replace",
         )
         if copied.returncode != 0:
-            raise RuntimeError(f"assistant_scp_failed:{copied.stderr.strip()}")
+            raise RuntimeError(
+                f"assistant_scp_failed:{copied.stderr.strip()}"
+            )
 
     remote = _remote_script(plan, remote_archive_name)
     encoded = base64.b64encode(remote.encode("utf-16le")).decode("ascii")
     installed = subprocess.run(
-        ["ssh", plan.node, "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded],
+        [
+            "ssh",
+            plan.node,
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-EncodedCommand",
+            encoded,
+        ],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -240,7 +274,10 @@ def main() -> int:
     parser.add_argument("--source", default=str(DEFAULT_SOURCE))
     parser.add_argument("--node", default=DEFAULT_NODE)
     parser.add_argument("--remote-root", default=DEFAULT_REMOTE_ROOT)
-    parser.add_argument("--remote-host-repo", default=DEFAULT_REMOTE_HOST_REPO)
+    parser.add_argument(
+        "--remote-host-repo",
+        default=DEFAULT_REMOTE_HOST_REPO,
+    )
     args = parser.parse_args()
 
     plan = build_plan(
@@ -250,8 +287,19 @@ def main() -> int:
         remote_root=args.remote_root,
         remote_host_repo=args.remote_host_repo,
     )
+
     if args.command == "plan":
-        print(json.dumps({"ok": True, "schema": "ezs.assistant-deployment.plan.v1", **plan.as_dict()}, ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                {
+                    "ok": True,
+                    "schema": "ezs.assistant-deployment.plan.v1",
+                    **plan.as_dict(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
         return 0
 
     print(json.dumps(deploy(plan), ensure_ascii=False, indent=2))

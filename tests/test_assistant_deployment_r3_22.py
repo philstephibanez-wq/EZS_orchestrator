@@ -26,13 +26,18 @@ class AssistantDeploymentR322Contract(unittest.TestCase):
         self.assertIn(r'C:\EZStudioLab_assistant\runtime', MANAGER)
         self.assertIn('["git", "archive", "--format=zip"', MANAGER)
         self.assertIn('["scp", str(archive)', MANAGER)
-        self.assertIn('["ssh", plan.node, "powershell"', MANAGER)
+        self.assertIn('"ssh",', MANAGER)
         self.assertNotIn("git clone", MANAGER)
         self.assertNotIn("git pull", MANAGER)
-        self.assertIn("runtime_files = (", MANAGER)
+
+    def test_minimal_runtime_is_bundled(self):
+        self.assertIn("RUNTIME_FILES = (", MANAGER)
         self.assertIn('Path("python/ezstudio/distributed/capabilities.py")', MANAGER)
         self.assertIn('Path("python/ezstudio/distributed/model_resolver.py")', MANAGER)
         self.assertIn('Path("python/ezstudio/distributed/worker_protocol.py")', MANAGER)
+        self.assertIn("remote_staging_runtime_missing", MANAGER)
+        self.assertIn("remote_runtime_missing_after_install", MANAGER)
+        self.assertNotIn("remote_host_repo_python_missing", MANAGER)
 
     def test_atomic_install_and_rollback_slot(self):
         self.assertIn(".__new", MANAGER)
