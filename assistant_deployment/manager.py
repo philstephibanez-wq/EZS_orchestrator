@@ -18,6 +18,7 @@ DEFAULT_NODE = "steph@192.168.1.81"
 DEFAULT_REMOTE_ROOT = r"C:\EZStudioLab_assistant"
 DEFAULT_REMOTE_HOST_REPO = r"C:\EZStudioLab_assistant\runtime"
 ASSISTANT_DEPLOYMENT_LOG = Path(__file__).resolve().parents[1] / "logs" / "assistant-deployment.log"
+SUPERVISION_HELPER = Path(__file__).resolve().parents[1] / "assistant_supervision" / "remote_helper.ps1"
 
 RUNTIME_FILES = (
     Path("python/ezstudio/__init__.py"),
@@ -152,6 +153,9 @@ if (-not (Test-Path -LiteralPath (Join-Path $staging 'scripts\\start-EZStudioLab
 if (-not (Test-Path -LiteralPath (Join-Path $staging 'runtime\\python\\ezstudio\\distributed\\capabilities.py') -PathType Leaf)) {{
     throw 'remote_staging_runtime_missing'
 }}
+if (-not (Test-Path -LiteralPath (Join-Path $staging 'runtime\\assistant-supervision.ps1') -PathType Leaf)) {{
+    throw 'remote_staging_supervision_helper_missing'
+}}
 
 Set-Content -LiteralPath (Join-Path $staging 'DEPLOYED_COMMIT.txt') -Value '{commit}' -Encoding ascii
 Set-Content -LiteralPath (Join-Path $staging 'HOST_REPO.txt') -Value $hostRepo -Encoding ascii
@@ -171,6 +175,9 @@ if ($deployed -ne '{commit}') {{
 }}
 if (-not (Test-Path -LiteralPath (Join-Path $hostRepo 'python\\ezstudio\\distributed\\capabilities.py') -PathType Leaf)) {{
     throw 'remote_runtime_missing_after_install'
+}}
+if (-not (Test-Path -LiteralPath (Join-Path $hostRepo 'assistant-supervision.ps1') -PathType Leaf)) {{
+    throw 'remote_supervision_helper_missing_after_install'
 }}
 
 Write-Output 'EZS_ASSISTANT_REMOTE_DEPLOY_OK'
@@ -213,6 +220,12 @@ def _build_bundle(plan: DeployPlan, destination: Path) -> None:
         target_file = bundle_root / "runtime" / relative
         target_file.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source_file, target_file)
+
+    if not SUPERVISION_HELPER.is_file():
+        raise RuntimeError("assistant_supervision_helper_missing")
+    helper_target = bundle_root / "runtime" / "assistant-supervision.ps1"
+    helper_target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(SUPERVISION_HELPER, helper_target)
 
     shutil.make_archive(
         str(destination.with_suffix("")),

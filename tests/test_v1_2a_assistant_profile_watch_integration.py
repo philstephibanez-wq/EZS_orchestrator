@@ -6,6 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SUP = (ROOT / "assistant_supervision" / "manager.py").read_text(encoding="utf-8")
 DEPLOY = (ROOT / "assistant_deployment" / "manager.py").read_text(encoding="utf-8")
+HELPER = (ROOT / "assistant_supervision" / "remote_helper.ps1").read_text(encoding="utf-8-sig")
 
 
 class V12aAssistantProfileWatchIntegration(unittest.TestCase):
@@ -23,32 +24,33 @@ class V12aAssistantProfileWatchIntegration(unittest.TestCase):
         self.assertIn("except subprocess.TimeoutExpired as exc:", DEPLOY)
 
     def test_profile_watch_is_started_by_existing_supervisor(self):
-        self.assertIn("'profile-review-auto-watch'", SUP)
-        self.assertIn("'--poll-seconds','900'", SUP)
-        self.assertIn("'--draft-cooldown-hours','24'", SUP)
-        self.assertIn("'--abstain-cooldown-hours','168'", SUP)
-        self.assertIn("'--max-items','5'", SUP)
-        self.assertIn("'--network-max-requests','6'", SUP)
-        self.assertIn("profile-review-watch.state.json", SUP)
+        self.assertIn('"profile-review-auto-watch"', HELPER)
+        self.assertIn('"--poll-seconds","900"', HELPER)
+        self.assertIn('"--draft-cooldown-hours","24"', HELPER)
+        self.assertIn('"--abstain-cooldown-hours","168"', HELPER)
+        self.assertIn('"--max-items","5"', HELPER)
+        self.assertIn('"--network-max-requests","6"', HELPER)
+        self.assertIn("profile-review-watch.state.json", HELPER)
 
     def test_profile_state_survives_runtime_redeploy(self):
-        self.assertIn("$env:LOCALAPPDATA", SUP)
-        self.assertIn("EZStudioLab_assistant\\\\runtime", SUP)
+        self.assertIn("$env:LOCALAPPDATA", HELPER)
+        self.assertIn("EZStudioLab_assistant\\runtime", HELPER)
 
     def test_supervision_is_exact_and_secret_stays_off_command_line(self):
-        self.assertIn("assistant_duplicate_distributed_processes", SUP)
-        self.assertIn("assistant_duplicate_profile_processes", SUP)
+        self.assertIn("assistant_duplicate_distributed_processes", HELPER)
+        self.assertIn("assistant_duplicate_profile_processes", HELPER)
         self.assertIn("profile_review_count", SUP)
-        self.assertIn("Stop-Process -Id", SUP)
-        self.assertNotIn("Stop-Process -Name", SUP)
-        self.assertIn("[Console]::In.ReadLine()", SUP)
+        self.assertIn("Stop-Process -Id", HELPER)
+        self.assertNotIn("Stop-Process -Name", HELPER)
+        self.assertIn("[Console]::In.ReadLine()", HELPER)
         self.assertIn("stdin_text=token +", SUP)
         self.assertNotIn("'--token'", SUP)
+        self.assertNotIn('"--token"', HELPER)
 
     def test_distributed_scientific_execution_contract_unchanged(self):
-        self.assertIn("'distributed-watch'", SUP)
-        self.assertNotIn("distributed-claim-once", SUP)
-        self.assertNotIn("jobs/claim", SUP)
+        self.assertIn('"distributed-watch"', HELPER)
+        self.assertNotIn("distributed-claim-once", SUP + HELPER)
+        self.assertNotIn("jobs/claim", SUP + HELPER)
 
 
 if __name__ == "__main__":
