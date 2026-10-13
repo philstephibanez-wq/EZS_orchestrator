@@ -37,7 +37,22 @@ from transport.targets import TargetRegistry
 HOST = "127.0.0.1"
 DEFAULT_PORT = 8700
 SNAPSHOT_CACHE_SECONDS = 1.0
-VERSION = "1.0"
+
+
+def _read_version(path: Path) -> str:
+    try:
+        value = path.read_text(encoding="utf-8-sig").strip()
+    except OSError:
+        return "-"
+    return value or "-"
+
+
+VERSION = _read_version(Path(__file__).resolve().parents[1] / "VERSION")
+DEV_VERSION = _read_version(Path(r"H:\EZScore_dev") / "VERSION")
+LAB_VERSION = _read_version(Path(r"H:\EZStudio_lab") / "VERSION")
+ASSISTANT_VERSION = _read_version(
+    Path(r"H:\EZStudio_lab\EZStudioLab_assistant") / "VERSION"
+)
 
 
 def _read_json(path: Path) -> dict:
@@ -761,7 +776,7 @@ HTML = r'''<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>EZS Orchestrator V1.0</title>
+<title>EZS Orchestrator V__ORCH_VERSION__</title>
 <style>
 :root{color-scheme:dark;--bg:#0a1013;--panel:#10191e;--panel2:#152229;--line:#263840;--text:#edf5f4;--muted:#91a6ac;--accent:#49d1bd;--ok:#5ed38b;--warn:#f2c96d;--bad:#ff7b7b;--prod:#9da8ff;--side:236px;--sideCollapsed:72px}
 *{box-sizing:border-box}body{margin:0;font:14px/1.45 system-ui,Segoe UI,Arial;background:var(--bg);color:var(--text)}
@@ -792,11 +807,11 @@ main{padding:20px;max-width:1600px;margin:auto}.view{display:none}.view.active{d
   <div class="headerLeft">
     <div class="appHeader">
       <div class="appHeaderMark">EZ</div>
-      <div class="appHeaderName"><b>EZS</b> ORCHESTRATOR <span class="muted">V1.0</span></div>
+      <div class="appHeaderName"><b>EZS</b> ORCHESTRATOR <span class="muted">V__ORCH_VERSION__</span></div>
     </div>
     <div class="viewContext">
       <div id="viewTitle" class="topTitle">Infrastructure</div>
-      <div class="topSubtitle">Orchestrator · 127.0.0.1:8700</div>
+      <div class="topSubtitle">ORCH V__ORCH_VERSION__ · DEV V__DEV_VERSION__ · LAB V__LAB_VERSION__ · ASSISTANT V__ASSISTANT_VERSION__</div>
     </div>
   </div>
   <div class="headerRight">
@@ -835,12 +850,12 @@ main{padding:20px;max-width:1600px;margin:auto}.view{display:none}.view.active{d
     <article class="card"><h2>Politique de sûreté</h2><div class="lock">DEV, PROD et LAB restent physiquement isolés. Les actions destructives sont bloquées pendant une analyse.</div><div class="muted" style="margin-top:10px">Les diagnostics n'exportent pas runtime/jobs ni les données métier.</div></article>
   </section>
   <section class="grid2" style="margin-top:14px">
-    <article class="card target dev"><h2>DEV</h2><div class="statusrow"><span id="devDot" class="dot"></span><strong id="devState">-</strong></div><dl class="kv"><dt>Répertoire</dt><dd id="devRoot">-</dd><dt>APP_ENV</dt><dd id="devEnv">-</dd><dt>Serveur</dt><dd id="devBackend">-</dd><dt>Caddy</dt><dd id="devCaddy">-</dd><dt>URL serveur</dt><dd id="devTransport">-</dd><dt>Python analyse</dt><dd id="devPython">-</dd><dt>Propriété processus</dt><dd id="devOwnership">-</dd></dl><div class="actions"><button data-action="dev-server-start" class="primary">Démarrer serveur</button><button data-action="dev-server-restart">Redémarrer serveur</button><button data-action="dev-server-stop" data-destructive="1" class="danger">Arrêter serveur</button><button data-action="dev-caddy-start">Démarrer Caddy</button><a class="btn primary" href="http://127.0.0.1:8502/fr/catalog" target="_blank" rel="noreferrer">Ouvrir DEV</a></div></article>
+    <article class="card target dev"><h2>DEV · V__DEV_VERSION__</h2><div class="statusrow"><span id="devDot" class="dot"></span><strong id="devState">-</strong></div><dl class="kv"><dt>Répertoire</dt><dd id="devRoot">-</dd><dt>APP_ENV</dt><dd id="devEnv">-</dd><dt>Serveur</dt><dd id="devBackend">-</dd><dt>Caddy</dt><dd id="devCaddy">-</dd><dt>URL serveur</dt><dd id="devTransport">-</dd><dt>Python analyse</dt><dd id="devPython">-</dd><dt>Propriété processus</dt><dd id="devOwnership">-</dd></dl><div class="actions"><button data-action="dev-server-start" class="primary">Démarrer serveur</button><button data-action="dev-server-restart">Redémarrer serveur</button><button data-action="dev-server-stop" data-destructive="1" class="danger">Arrêter serveur</button><button data-action="dev-caddy-start">Démarrer Caddy</button><a class="btn primary" href="http://127.0.0.1:8502/fr/catalog" target="_blank" rel="noreferrer">Ouvrir DEV</a></div></article>
     <article class="card target prod"><h2>PROD · exploitation protégée</h2><div class="statusrow"><span id="prodDot" class="dot"></span><strong id="prodState">-</strong><span id="prodMode" class="mode">-</span></div><dl class="kv"><dt>Répertoire</dt><dd id="prodRoot">-</dd><dt>APP_ENV</dt><dd>prod</dd><dt>Serveur :8511</dt><dd id="prodBackend">-</dd><dt>Passerelle :8510</dt><dd id="prodGateway">-</dd><dt>Caddy :8501</dt><dd id="prodCaddy">-</dd><dt>URL serveur</dt><dd id="prodTransport">-</dd><dt>Python analyse</dt><dd id="prodPython">-</dd><dt>Propriété processus</dt><dd id="prodOwnership">-</dd></dl><div class="actions"><button data-action="prod-start" class="primary">Démarrer PROD</button><button data-action="prod-restart" data-destructive="1">Redémarrer PROD</button><button data-action="prod-stop" data-destructive="1" class="danger">Arrêter PROD</button><button data-action="prod-maintenance-off">Mode normal</button><button data-action="prod-maintenance-on" class="warn">Maintenance</button><a class="btn primary" href="https://ezscore.logandplay.com/fr/catalog" target="_blank" rel="noreferrer">Ouvrir PROD</a></div></article>
   </section>
   <section class="grid2" style="margin-top:14px">
     <article class="card target lab">
-      <h2>LAB · expérimentation isolée</h2>
+      <h2>LAB · V__LAB_VERSION__ · expérimentation isolée</h2>
       <div class="statusrow"><span id="labDot" class="dot"></span><strong id="labState">-</strong></div>
       <dl class="kv">
         <dt>Répertoire</dt><dd id="labRoot">-</dd>
@@ -862,7 +877,7 @@ main{padding:20px;max-width:1600px;margin:auto}.view{display:none}.view.active{d
       </div>
     </article>
     <article class="card target lab">
-      <h2>EZStudioLab_assistant · nœuds distribués</h2>
+      <h2>EZStudioLab_assistant · V__ASSISTANT_VERSION__ · nœuds distribués</h2>
       <div class="statusrow"><span id="assistantDot" class="dot"></span><strong id="assistantState">-</strong></div>
       <div class="muted" id="assistantMeta" style="margin-top:6px">Inventaire en lecture seule.</div>
       <dl class="kv" style="margin-top:10px">
@@ -1418,7 +1433,13 @@ def make_handler(center: ControlCenter, token: str):
             parsed = urlparse(self.path)
             path = parsed.path
             if path == "/":
-                body = HTML.replace("__TOKEN__", token).encode("utf-8")
+                body = (
+                    HTML.replace("__TOKEN__", token)
+                    .replace("__ORCH_VERSION__", VERSION)
+                    .replace("__DEV_VERSION__", DEV_VERSION)
+                    .replace("__LAB_VERSION__", LAB_VERSION)
+                    .replace("__ASSISTANT_VERSION__", ASSISTANT_VERSION)
+                ).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Cache-Control", "no-store")
