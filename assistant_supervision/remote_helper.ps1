@@ -14,6 +14,7 @@ $logs = Join-Path $root "logs"
 $profileRuntime = Join-Path $env:LOCALAPPDATA "EZStudioLab_assistant\runtime"
 $profileStatePath = Join-Path $profileRuntime "profile-review-watch.state.json"
 $secretPath = Join-Path $profileRuntime "analysis-worker-token.dpapi"
+$hiddenLauncherPath = Join-Path $profileRuntime "assistant-worker-hidden.vbs"
 $stdoutPath = Join-Path $logs "assistant.out.log"
 $stderrPath = Join-Path $logs "assistant.err.log"
 $profileStdoutPath = Join-Path $logs "profile-review.out.log"
@@ -53,6 +54,21 @@ function Remove-TaskExact {
     }
 }
 
+function Ensure-HiddenTaskLauncher {
+    $launcher = @'
+Set shell = CreateObject("WScript.Shell")
+If WScript.Arguments.Count <> 1 Then WScript.Quit 64
+cmd = "powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand " & WScript.Arguments(0)
+rc = shell.Run(cmd, 0, True)
+WScript.Quit rc
+'@
+    [System.IO.File]::WriteAllText(
+        $hiddenLauncherPath,
+        $launcher,
+        [System.Text.Encoding]::ASCII
+    )
+}
+
 function Register-PersistentTask {
     param(
         [Parameter(Mandatory=$true)][string]$TaskName,
@@ -63,8 +79,8 @@ function Register-PersistentTask {
     Remove-TaskExact -TaskName $TaskName
 
     $action = New-ScheduledTaskAction `
-        -Execute "powershell.exe" `
-        -Argument ("-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " + $EncodedCommand)
+        -Execute "wscript.exe" `
+        -Argument ('"' + $hiddenLauncherPath + '" "' + $EncodedCommand + '"')
 
     $principal = New-ScheduledTaskPrincipal `
         -UserId $env:USERNAME `
@@ -158,41 +174,23 @@ exit `$process.ExitCode
     return [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($script))
 }
 
-function Wait-ForSingleton {
-    param(
-        [Parameter(Mandatory=$true)][ValidateSet("distributed","profile")][string]$Mode,
-        [int]$Seconds = 10
-    )
-
-    $deadline = (Get-Date).AddSeconds($Seconds)
-    do {
-        $matches = if ($Mode -eq "distributed") {
-            @(Get-DistributedMatches)
-        }
-        else {
-            @(Get-ProfileMatches)
-        }
-
-        if ($matches.Count -eq 1) {
-            return
-        }
-        if ($matches.Count -gt 1) {
-            throw "assistant_${Mode}_duplicate_after_task_start:$($matches.Count)"
-        }
-        Start-Sleep -Milliseconds 250
-    } while ((Get-Date) -lt $deadline)
-
-    throw "assistant_${Mode}_task_start_timeout"
-}
-
 if ($Command -eq "stop") {
     foreach ($taskName in @($distributedTaskName,$profileTaskName,$statusTaskName)) {
         Remove-TaskExact -TaskName $taskName
     }
 
-    $matches = @((Get-DistributedMatches) + (Get-ProfileMatches))
+    $matches = @()
+    $matches += @(Get-DistributedMatches)
+    $matches += @(Get-ProfileMatches)
     foreach ($proc in $matches) {
-        Stop-Process -Id ([int]$proc.ProcessId) -Force -ErrorAction Stop
+        if ($null -eq $proc) {
+            continue
+        }
+        $pidValue = [int]$proc.ProcessId
+        if ($pidValue -le 0) {
+            continue
+        }
+        Stop-Process -Id $pidValue -Force -ErrorAction Stop
     }
 
     Remove-Item -LiteralPath $secretPath -Force -ErrorAction SilentlyContinue
@@ -244,6 +242,7 @@ $pythonw = (Get-Command pythonw.exe -ErrorAction Stop).Source
 
 New-Item -ItemType Directory -Path $logs -Force | Out-Null
 New-Item -ItemType Directory -Path $profileRuntime -Force | Out-Null
+Ensure-HiddenTaskLauncher
 Protect-AssistantToken -Token $token
 $token = $null
 
@@ -253,7 +252,6 @@ if ($distributedMatches.Count -eq 0) {
         -TaskName $distributedTaskName `
         -EncodedCommand $distributedEncoded `
         -Description "Worker distribué persistant EZStudioLab Assistant"
-    Wait-ForSingleton -Mode distributed
 }
 
 if ($profileMatches.Count -eq 0) {
@@ -262,7 +260,6 @@ if ($profileMatches.Count -eq 0) {
         -TaskName $profileTaskName `
         -EncodedCommand $profileEncoded `
         -Description "Profile review watch persistant EZStudioLab Assistant"
-    Wait-ForSingleton -Mode profile
 }
 
 Remove-TaskExact -TaskName $statusTaskName

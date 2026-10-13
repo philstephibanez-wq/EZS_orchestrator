@@ -16,8 +16,7 @@ class V12eAssistantPersistentSupervisionContract(unittest.TestCase):
         self.assertIn("Register-PersistentTask", HELPER)
         self.assertIn("New-ScheduledTaskSettingsSet", HELPER)
         self.assertIn("ExecutionTimeLimit ([TimeSpan]::Zero)", HELPER)
-        self.assertIn("Wait-ForSingleton -Mode distributed", HELPER)
-        self.assertIn("Wait-ForSingleton -Mode profile", HELPER)
+        self.assertNotIn("Wait-ForSingleton", HELPER)
 
     def test_workers_keep_current_modes(self):
         self.assertIn('"distributed-watch"', HELPER)

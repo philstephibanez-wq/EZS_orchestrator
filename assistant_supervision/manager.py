@@ -280,7 +280,7 @@ class AssistantSupervisor:
         token = self._configured_token()
         completed = self._run_remote_helper(
             "start",
-            timeout=30,
+            timeout=75,
             stdin_text=token + "\n",
         )
         if completed.returncode != 0:
@@ -291,7 +291,19 @@ class AssistantSupervisor:
             )
             raise RuntimeError(f"assistant_start_failed:{error[:500]}")
         self._status_cache = None
+        deadline = time.monotonic() + 45.0
         status = self.status(force=True)
+        while time.monotonic() < deadline:
+            distributed_count = int(status.get("process_count") or 0)
+            profile_count = int(status.get("profile_review_count") or 0)
+            if distributed_count == 1 and profile_count == 1:
+                break
+            if distributed_count > 1:
+                raise RuntimeError("assistant_distributed_start_not_singleton")
+            if profile_count > 1:
+                raise RuntimeError("assistant_profile_start_not_singleton")
+            time.sleep(0.5)
+            status = self.status(force=True)
         if int(status.get("process_count") or 0) != 1:
             raise RuntimeError("assistant_distributed_start_not_singleton")
         if int(status.get("profile_review_count") or 0) != 1:

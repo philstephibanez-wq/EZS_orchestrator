@@ -180,6 +180,12 @@ if (-not (Test-Path -LiteralPath (Join-Path $hostRepo 'assistant-supervision.ps1
     throw 'remote_supervision_helper_missing_after_install'
 }}
 
+# Rollback directory is temporary only. Keep it while validation is in progress,
+# then remove it once the new runtime has been validated successfully.
+if (Test-Path -LiteralPath $previous) {{
+    Remove-Item -LiteralPath $previous -Recurse -Force
+}}
+
 Write-Output 'EZS_ASSISTANT_REMOTE_DEPLOY_OK'
 Write-Output "commit=$deployed"
 Write-Output "root=$remoteRoot"
