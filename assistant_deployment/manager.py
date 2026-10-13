@@ -320,28 +320,48 @@ def deploy(plan: DeployPlan) -> dict:
             archive = Path(tmp) / remote_archive_name
             _build_bundle(plan, archive)
 
-            copied = subprocess.run(
-                ["scp", str(archive), f"{plan.node}:{remote_archive_name}"],
+            try:
+                copied = subprocess.run(
+                    [
+                        "scp",
+                        str(archive),
+                        f"{plan.node}:{remote_archive_name}",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=120,
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise RuntimeError("assistant_scp_timeout") from exc
+            if copied.returncode != 0:
+                raise RuntimeError(
+                    f"assistant_scp_failed:{copied.stderr.strip()}"
+                )
+
+        remote = _remote_script(plan, remote_archive_name)
+        encoded = base64.b64encode(remote.encode("utf-16le")).decode("ascii")
+        try:
+            installed = subprocess.run(
+                [
+                    "ssh",
+                    plan.node,
+                    "powershell",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-EncodedCommand",
+                    encoded,
+                ],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
+                timeout=120,
             )
-            if copied.returncode != 0:
-                raise RuntimeError(f"assistant_scp_failed:{copied.stderr.strip()}")
-
-        remote = _remote_script(plan, remote_archive_name)
-        encoded = base64.b64encode(remote.encode("utf-16le")).decode("ascii")
-        installed = subprocess.run(
-            [
-                "ssh", plan.node, "powershell", "-NoProfile",
-                "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded,
-            ],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError("assistant_remote_install_timeout") from exc
         if installed.returncode != 0:
             raise RuntimeError(
                 "assistant_remote_install_failed:"

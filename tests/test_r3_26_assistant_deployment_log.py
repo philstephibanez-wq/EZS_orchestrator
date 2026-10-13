@@ -24,13 +24,17 @@ class R326AssistantDeploymentLogContract(unittest.TestCase):
         self.assertIn(">Déploiement DEV → PROD<", WEB)
         self.assertIn('"assistant_deployment": self.log_tools.tail(', WEB)
 
-    def test_assistant_deployment_audit_is_not_logically_cleared(self):
-        self.assertIn("PROTECTED_AUDIT_LOGS", LOG_TOOLS)
-        self.assertIn('"logs/assistant-deployment.log"', LOG_TOOLS)
-        self.assertIn("if self._relative_key(path) in self.PROTECTED_AUDIT_LOGS:", LOG_TOOLS)
+    def test_assistant_deployment_log_is_managed_by_current_log_center(self):
+        self.assertIn('"assistant-deployment.log"', MANAGER)
+        self.assertIn("def clear_logs(self) -> LogClearResult:", LOG_TOOLS)
+        self.assertIn('with path.open("r+b") as handle:', LOG_TOOLS)
+        self.assertIn("handle.truncate(0)", LOG_TOOLS)
 
-    def test_clear_button_is_disabled_for_both_deployment_audits(self):
-        self.assertIn('currentLog==="deployments"||currentLog==="assistant_deployment"', WEB)
+    def test_clear_button_uses_current_global_physical_clear_contract(self):
+        self.assertIn('id="clearLogs"', WEB)
+        self.assertIn('action("logs-clear")', WEB)
+        self.assertIn("physically truncated", WEB)
+        self.assertNotIn('currentLog==="deployments"||currentLog==="assistant_deployment"', WEB)
 
     def test_no_scientific_execution_added(self):
         self.assertNotIn("distributed-probe", MANAGER)
