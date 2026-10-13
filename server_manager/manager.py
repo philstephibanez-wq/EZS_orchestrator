@@ -169,6 +169,53 @@ class ServerManager:
         )
         return self.view(target, env)
 
+    def _clear_framework_cache(
+        self,
+        target: Target,
+        env: str,
+    ) -> None:
+        # Clear disposable Symfony cache before DEV/LAB launch only.
+        if target not in {Target.DEV, Target.LAB}:
+            return
+
+        spec = self.spec(target)
+        console = spec.root / "bin" / "console"
+        if not console.is_file():
+            raise RuntimeError(
+                f"symfony_console_missing:{target.value}:{console}"
+            )
+
+        php_path = self.config.web_php_for(target)
+        if php_path.is_absolute() and not php_path.is_file():
+            raise RuntimeError(
+                f"PHP executable missing for {target.value}: {php_path}"
+            )
+
+        completed = subprocess.run(
+            [
+                str(php_path),
+                str(console),
+                "cache:clear",
+                f"--env={env}",
+                "--no-interaction",
+            ],
+            cwd=str(spec.root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+        )
+        if completed.returncode != 0:
+            detail = (
+                completed.stderr.strip()
+                or completed.stdout.strip()
+                or f"rc={completed.returncode}"
+            )
+            raise RuntimeError(
+                f"symfony_cache_clear_failed:{target.value}:{detail[:500]}"
+            )
+
     def start(
         self,
         target: Target,
@@ -183,6 +230,8 @@ class ServerManager:
         existing = listener_pid(spec.backend_port)
         if existing:
             return self.adopt(target, env)
+
+        self._clear_framework_cache(target, env)
 
         php_path = self.config.web_php_for(target)
         if php_path.is_absolute() and not php_path.is_file():
