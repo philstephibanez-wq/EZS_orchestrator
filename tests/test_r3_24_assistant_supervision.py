@@ -11,7 +11,9 @@ class R324AssistantSupervisionContract(unittest.TestCase):
     def test_controlled_runtime(self):
         self.assertIn("def start(self) -> dict:", SUP)
         self.assertIn("def stop(self) -> dict:", SUP)
-        self.assertIn("Start-Process", HELPER)
+        self.assertIn("Register-ScheduledTask", HELPER)
+        self.assertIn("Start-ScheduledTask", HELPER)
+        self.assertIn("Stop-ScheduledTask", HELPER)
         self.assertIn("Stop-Process -Id", HELPER)
         self.assertNotIn("Stop-Process -Name", HELPER)
 
@@ -23,6 +25,9 @@ class R324AssistantSupervisionContract(unittest.TestCase):
     def test_secret_not_command_line(self):
         self.assertIn("[Console]::In.ReadLine()", HELPER)
         self.assertIn("stdin_text=token +", SUP)
+        self.assertIn("ConvertFrom-SecureString", HELPER)
+        self.assertIn("ConvertTo-SecureString", HELPER)
+        self.assertIn("analysis-worker-token.dpapi", HELPER)
         self.assertNotIn("'--token'", SUP)
         self.assertNotIn('"--token"', HELPER)
 
