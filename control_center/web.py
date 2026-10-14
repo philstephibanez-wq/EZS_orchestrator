@@ -898,6 +898,7 @@ main{padding:20px;max-width:1600px;margin:auto}.view{display:none}.view.active{d
           <dt>Build déployé</dt><dd id="assistantDeployedCommit">-</dd>
         </dl>
       </details>
+      <div id="assistantDeployNotice" class="muted" style="margin-top:10px"></div>
       <div class="actions">
         <button id="assistantStart" class="primary">Démarrer assistant</button>
         <button id="assistantStop" class="danger">Arrêter assistant</button>
@@ -1019,7 +1020,7 @@ syncCollapseControl();
 function syncActionButtons(){
  document.querySelectorAll('button[data-action]').forEach(b=>{const destructive=b.dataset.destructive==="1";b.disabled=busy||(destructive&&analysisActive)});
  if(deployData)$("deployApply").disabled=busy||analysisActive||!deployData.ok;
- if($("assistantDeploy"))$("assistantDeploy").disabled=busy||assistantDeployData?.state==="UP_TO_DATE"||assistantDeployData?.state==="UNREACHABLE";
+ if($("assistantDeploy"))$("assistantDeploy").disabled=busy||assistantDeployData?.state==="UP_TO_DATE"||assistantDeployData?.state==="UNREACHABLE"||assistantDeployData?.state==="LOCAL_CHANGES";
 }
 let assistantDeployData=null,assistantDeployRefreshInFlight=false;
 function renderAssistantDeployment(payload){
@@ -1033,8 +1034,22 @@ function renderAssistantDeployment(payload){
  txt("assistantDeployedCommit",(assistantDeployData.deployed_commit||"").slice(0,12)||"-");
  const label=state==="UP_TO_DATE"?"À JOUR":state==="LOCAL_CHANGES"?"MODIFICATIONS LOCALES":state==="UPDATE_AVAILABLE"?"MISE À JOUR DISPONIBLE":state==="NOT_DEPLOYED"?"NON DÉPLOYÉ":state==="UNREACHABLE"?"XPS INJOIGNABLE":"ERREUR";
  txt("assistantDeployState",label);
+ const sourceLabel=sourceVersion==="-"?"la version locale":`v${String(sourceVersion).replace(/^v/i,"")}`;
+ const deployedLabel=deployedVersion==="-"?"la version déployée":`v${String(deployedVersion).replace(/^v/i,"")}`;
+ const notices={
+  LOCAL_CHANGES:`⚠ Déploiement impossible : ${sourceLabel} contient des modifications locales non publiées. Commit/push Assistant requis, puis mise à jour du gitlink LAB avant déploiement.`,
+  UPDATE_AVAILABLE:`✓ ${sourceLabel} est publiée et prête à être déployée vers XPS. Version actuellement déployée : ${deployedLabel}.`,
+  UP_TO_DATE:`✓ ${sourceLabel} est déjà déployée sur XPS.`,
+  NOT_DEPLOYED:`Assistant non déployé sur XPS.`,
+  UNREACHABLE:`⚠ XPS est injoignable : déploiement indisponible.`,
+  ERROR:`⚠ État de déploiement indisponible : ${assistantDeployData.error||"erreur inconnue"}.`
+ };
+ txt("assistantDeployNotice",notices[state]||"");
  const btn=$("assistantDeploy");
- if(btn)btn.disabled=busy||state==="UP_TO_DATE"||state==="UNREACHABLE"||state==="LOCAL_CHANGES";
+ if(btn){
+  btn.disabled=busy||state==="UP_TO_DATE"||state==="UNREACHABLE"||state==="LOCAL_CHANGES";
+  btn.title=state==="LOCAL_CHANGES"?"Commit/push Assistant puis mise à jour du gitlink LAB requis avant déploiement":"";
+ }
 }
 async function refreshAssistantDeployment(){
  if(assistantDeployRefreshInFlight)return;
