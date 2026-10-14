@@ -23,7 +23,7 @@ from control_center.job_history import JobHistory
 from control_center.log_tools import LogTools
 from control_center.singleton import ControlCenterSingleton, ControlCenterSingletonBusy
 from deployment.manager import DeploymentManager
-from assistant_deployment.manager import build_plan as build_assistant_deploy_plan, deploy as deploy_assistant_node, deployment_status as get_assistant_deployment_status
+from assistant_deployment.manager import build_plan as build_assistant_deploy_plan, build_status_plan as build_assistant_status_plan, deploy as deploy_assistant_node, deployment_status as get_assistant_deployment_status
 from assistant_supervision.manager import AssistantSupervisor
 from gateway_manager.manager import GatewayManager
 from prod_lifecycle.manager import ProdLifecycleManager
@@ -729,12 +729,17 @@ class ControlCenter:
 
     def assistant_deployment_status(self) -> dict:
         try:
-            return get_assistant_deployment_status(build_assistant_deploy_plan())
+            return get_assistant_deployment_status(build_assistant_status_plan())
         except Exception as exc:
             return {
                 "ok": False,
                 "schema": "ezs.assistant-deployment.status.v1",
                 "state": "ERROR",
+                "source_version": _read_version(
+                    Path(r"H:\EZStudio_lab\EZStudioLab_assistant") / "VERSION"
+                ),
+                "deployed_version": None,
+                "source_dirty": None,
                 "source_commit": None,
                 "deployed_commit": None,
                 "node": "steph@192.168.1.81",
@@ -881,11 +886,18 @@ main{padding:20px;max-width:1600px;margin:auto}.view{display:none}.view.active{d
       <div class="statusrow"><span id="assistantDot" class="dot"></span><strong id="assistantState">-</strong></div>
       <div class="muted" id="assistantMeta" style="margin-top:6px">Inventaire en lecture seule.</div>
       <dl class="kv" style="margin-top:10px">
-        <dt>Version source</dt><dd id="assistantSourceCommit">-</dd>
-        <dt>Version déployée</dt><dd id="assistantDeployedCommit">-</dd>
+        <dt>Version source</dt><dd id="assistantSourceVersion">-</dd>
+        <dt>Version déployée</dt><dd id="assistantDeployedVersion">-</dd>
         <dt>État déploiement</dt><dd id="assistantDeployState">-</dd>
         <dt>Processus assistant XPS</dt><dd id="assistantRuntimeState">-</dd>
       </dl>
+      <details style="margin-top:8px">
+        <summary class="muted">Détails techniques Git</summary>
+        <dl class="kv" style="margin-top:8px">
+          <dt>Build source</dt><dd id="assistantSourceCommit">-</dd>
+          <dt>Build déployé</dt><dd id="assistantDeployedCommit">-</dd>
+        </dl>
+      </details>
       <div class="actions">
         <button id="assistantStart" class="primary">Démarrer assistant</button>
         <button id="assistantStop" class="danger">Arrêter assistant</button>
@@ -1013,12 +1025,16 @@ let assistantDeployData=null,assistantDeployRefreshInFlight=false;
 function renderAssistantDeployment(payload){
  assistantDeployData=payload||{};
  const state=assistantDeployData.state||"ERROR";
+ const sourceVersion=assistantDeployData.source_version||"-";
+ const deployedVersion=assistantDeployData.deployed_version||"-";
+ txt("assistantSourceVersion",sourceVersion==="-"?"-":`v${String(sourceVersion).replace(/^v/i,"")}`);
+ txt("assistantDeployedVersion",deployedVersion==="-"?"-":`v${String(deployedVersion).replace(/^v/i,"")}`);
  txt("assistantSourceCommit",(assistantDeployData.source_commit||"").slice(0,12)||"-");
  txt("assistantDeployedCommit",(assistantDeployData.deployed_commit||"").slice(0,12)||"-");
- const label=state==="UP_TO_DATE"?"À JOUR":state==="UPDATE_AVAILABLE"?"MISE À JOUR DISPONIBLE":state==="NOT_DEPLOYED"?"NON DÉPLOYÉ":state==="UNREACHABLE"?"XPS INJOIGNABLE":"ERREUR";
+ const label=state==="UP_TO_DATE"?"À JOUR":state==="LOCAL_CHANGES"?"MODIFICATIONS LOCALES":state==="UPDATE_AVAILABLE"?"MISE À JOUR DISPONIBLE":state==="NOT_DEPLOYED"?"NON DÉPLOYÉ":state==="UNREACHABLE"?"XPS INJOIGNABLE":"ERREUR";
  txt("assistantDeployState",label);
  const btn=$("assistantDeploy");
- if(btn)btn.disabled=busy||state==="UP_TO_DATE"||state==="UNREACHABLE";
+ if(btn)btn.disabled=busy||state==="UP_TO_DATE"||state==="UNREACHABLE"||state==="LOCAL_CHANGES";
 }
 async function refreshAssistantDeployment(){
  if(assistantDeployRefreshInFlight)return;

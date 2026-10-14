@@ -122,6 +122,42 @@ def build_plan(
     )
 
 
+def build_status_plan(
+    lab_root: Path = DEFAULT_LAB_ROOT,
+    source: Path = DEFAULT_SOURCE,
+    node: str = DEFAULT_NODE,
+    remote_root: str = DEFAULT_REMOTE_ROOT,
+    remote_host_repo: str = DEFAULT_REMOTE_HOST_REPO,
+) -> DeployPlan:
+    """Build a read-only deployment view without requiring a clean source tree."""
+    lab_root = lab_root.resolve()
+    source = source.resolve()
+
+    if not (lab_root / ".git").exists():
+        raise RuntimeError(f"lab_repo_missing:{lab_root}")
+    if not source.is_dir():
+        raise RuntimeError(f"assistant_source_missing:{source}")
+    if not (source / ".git").exists():
+        raise RuntimeError(f"assistant_git_missing:{source}")
+
+    source_commit = _git(["rev-parse", "HEAD"], source)
+    tree_line = _git(
+        ["ls-tree", "HEAD", "EZStudioLab_assistant"],
+        lab_root,
+    )
+    parts = tree_line.split()
+    if len(parts) < 3 or parts[1] != "commit":
+        raise RuntimeError("assistant_parent_gitlink_missing")
+
+    return DeployPlan(
+        source=str(source),
+        source_commit=source_commit,
+        parent_gitlink_commit=parts[2],
+        node=node,
+        remote_root=remote_root,
+        remote_host_repo=remote_host_repo,
+    )
+
 def _remote_script(plan: DeployPlan, remote_archive: str) -> str:
     commit = plan.source_commit
     remote_root = plan.remote_root
@@ -303,25 +339,115 @@ def _remote_deployed_commit(plan: DeployPlan) -> tuple[bool, str | None, str | N
     )
     return False, None, error[:500]
 
+def _version_from_file(path: Path) -> str | None:
+    try:
+        value = path.read_text(encoding="utf-8-sig").strip()
+    except OSError:
+        return None
+    return value or None
+
+
+def _source_version(plan: DeployPlan) -> str | None:
+    return _version_from_file(Path(plan.source) / "VERSION")
+
+
+def _remote_deployed_version(
+    plan: DeployPlan,
+) -> tuple[bool, str | None, str | None]:
+    script = (
+        "$ErrorActionPreference = 'Stop'\n"
+        f"$path = '{plan.remote_root}\\VERSION'\n"
+        "if (Test-Path -LiteralPath $path -PathType Leaf) {\n"
+        "    Write-Output ((Get-Content -LiteralPath $path -Raw).Trim())\n"
+        "    exit 0\n"
+        "}\n"
+        "exit 3\n"
+    )
+    encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
+    try:
+        completed = subprocess.run(
+            [
+                "ssh",
+                plan.node,
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-EncodedCommand",
+                encoded,
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        return False, None, "ssh_timeout"
+    except OSError as exc:
+        return False, None, f"{type(exc).__name__}:{exc}"[:500]
+
+    if completed.returncode == 0:
+        rows = [
+            line.strip()
+            for line in completed.stdout.splitlines()
+            if line.strip()
+        ]
+        value = rows[-1] if rows else ""
+        if not value:
+            return False, None, "remote_version_output_invalid"
+        return True, value, None
+
+    if completed.returncode == 3:
+        return True, None, None
+
+    error = (
+        completed.stderr.strip()
+        or completed.stdout.strip()
+        or f"ssh_rc={completed.returncode}"
+    )
+    return False, None, error[:500]
+
+
 def deployment_status(plan: DeployPlan) -> dict:
+    source_version = _source_version(plan)
+    source_dirty = bool(_git(["status", "--porcelain"], Path(plan.source)))
     reachable, deployed_commit, error = _remote_deployed_commit(plan)
+
+    deployed_version = None
+    version_error = None
+    if reachable:
+        version_reachable, deployed_version, version_error = (
+            _remote_deployed_version(plan)
+        )
+        if not version_reachable and version_error is None:
+            version_error = "remote_version_unreachable"
+
     if not reachable:
         state = "UNREACHABLE"
     elif deployed_commit is None:
         state = "NOT_DEPLOYED"
+    elif source_dirty:
+        state = "LOCAL_CHANGES"
     elif deployed_commit == plan.source_commit:
         state = "UP_TO_DATE"
     else:
         state = "UPDATE_AVAILABLE"
+
     return {
         "ok": reachable,
         "schema": "ezs.assistant-deployment.status.v1",
         "state": state,
+        "source_version": source_version,
+        "deployed_version": deployed_version,
+        "source_dirty": source_dirty,
         "source_commit": plan.source_commit,
         "deployed_commit": deployed_commit,
         "node": plan.node,
         "remote_root": plan.remote_root,
         "error": error,
+        "version_error": version_error,
     }
 
 def deploy(plan: DeployPlan) -> dict:
