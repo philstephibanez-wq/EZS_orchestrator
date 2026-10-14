@@ -21,12 +21,23 @@ ASSISTANT_DEPLOYMENT_LOG = Path(__file__).resolve().parents[1] / "logs" / "assis
 SUPERVISION_HELPER = Path(__file__).resolve().parents[1] / "assistant_supervision" / "remote_helper.ps1"
 
 RUNTIME_FILES = (
+    Path("python/engine.py"),
     Path("python/ezstudio/__init__.py"),
+    Path("python/ezstudio/pipeline/__init__.py"),
     Path("python/ezstudio/distributed/__init__.py"),
     Path("python/ezstudio/distributed/capabilities.py"),
     Path("python/ezstudio/distributed/model_resolver.py"),
     Path("python/ezstudio/distributed/worker_protocol.py"),
 )
+
+RUNTIME_DIRECTORIES = (
+    Path("python/ezstudio/pipeline/profile"),
+    Path("python/ezstudio/runtime"),
+    Path("presets/profile"),
+)
+
+RUNTIME_EXCLUDED_PARTS = {"__pycache__"}
+RUNTIME_EXCLUDED_SUFFIXES = {".pyc", ".pyo"}
 
 
 @dataclass(frozen=True)
@@ -98,6 +109,13 @@ def build_plan(
 
     if _git(["status", "--porcelain"], source):
         raise RuntimeError("assistant_working_tree_not_clean")
+
+    runtime_scope = [
+        str(path)
+        for path in (*RUNTIME_FILES, *RUNTIME_DIRECTORIES)
+    ]
+    if _git(["status", "--porcelain", "--", *runtime_scope], lab_root):
+        raise RuntimeError("lab_runtime_dependencies_not_clean")
 
     source_commit = _git(["rev-parse", "HEAD"], source)
     tree_line = _git(["ls-tree", "HEAD", "EZStudioLab_assistant"], lab_root)
@@ -212,6 +230,18 @@ if ($deployed -ne '{commit}') {{
 if (-not (Test-Path -LiteralPath (Join-Path $hostRepo 'python\\ezstudio\\distributed\\capabilities.py') -PathType Leaf)) {{
     throw 'remote_runtime_missing_after_install'
 }}
+if (-not (Test-Path -LiteralPath (Join-Path $hostRepo 'python\\ezstudio\\pipeline\\profile\\runner.py') -PathType Leaf)) {{
+    throw 'remote_profile_runner_missing_after_install'
+}}
+if (-not (Test-Path -LiteralPath (Join-Path $hostRepo 'python\\ezstudio\\pipeline\\profile\\passt_worker.py') -PathType Leaf)) {{
+    throw 'remote_profile_passt_worker_missing_after_install'
+}}
+if (-not (Test-Path -LiteralPath (Join-Path $hostRepo 'python\\engine.py') -PathType Leaf)) {{
+    throw 'remote_profile_shared_engine_missing_after_install'
+}}
+if (-not (Test-Path -LiteralPath (Join-Path $hostRepo 'presets\\profile\\profile-r3b35c-compat.v2b.json') -PathType Leaf)) {{
+    throw 'remote_profile_preset_missing_after_install'
+}}
 if (-not (Test-Path -LiteralPath (Join-Path $hostRepo 'assistant-supervision.ps1') -PathType Leaf)) {{
     throw 'remote_supervision_helper_missing_after_install'
 }}
@@ -262,6 +292,32 @@ def _build_bundle(plan: DeployPlan, destination: Path) -> None:
         target_file = bundle_root / "runtime" / relative
         target_file.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source_file, target_file)
+
+    for relative_dir in RUNTIME_DIRECTORIES:
+        source_dir = lab_root / relative_dir
+        if not source_dir.is_dir():
+            raise RuntimeError(
+                f"assistant_runtime_dependency_dir_missing:{source_dir}"
+            )
+        for source_file in sorted(source_dir.rglob("*")):
+            if not source_file.is_file():
+                continue
+            rel_from_dir = source_file.relative_to(source_dir)
+            if any(
+                part in RUNTIME_EXCLUDED_PARTS
+                for part in rel_from_dir.parts
+            ):
+                continue
+            if source_file.suffix.lower() in RUNTIME_EXCLUDED_SUFFIXES:
+                continue
+            target_file = (
+                bundle_root
+                / "runtime"
+                / relative_dir
+                / rel_from_dir
+            )
+            target_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_file, target_file)
 
     if not SUPERVISION_HELPER.is_file():
         raise RuntimeError("assistant_supervision_helper_missing")
