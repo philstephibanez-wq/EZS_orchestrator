@@ -23,7 +23,9 @@ class JobTransport:
 
     def queue(self, target: Target) -> list[dict]:
         endpoint = self.registry.endpoint(target)
-        data = endpoint.client().get("/internal/analysis/desktop/jobs/queue")
+        data = endpoint.client().get(
+            "/internal/analysis/desktop/jobs/queue?_ezs_profile=0"
+        )
         return list((data or {}).get("jobs") or [])
 
     def distributed_workers(self, target: Target) -> list[dict]:

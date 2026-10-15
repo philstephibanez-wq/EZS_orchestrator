@@ -136,7 +136,9 @@ class GatewayManager:
     def view(self) -> GatewayView:
         listener = listener_pid(self.port)
         stored = self._read_pid()
-        pid = listener or stored
+        pid = listener or (
+            stored if pid_alive(stored) else None
+        )
         alive = pid_alive(pid)
         owned = self._owned(pid)
         payload = self._status_payload() if alive else None

@@ -221,7 +221,9 @@ class CaddyManager:
         meta = self._read_metadata(target)
         stored = int(meta.get("pid", 0) or 0) or None
         listener = listener_pid(int(self._spec(target).public_port))
-        pid = listener or stored
+        pid = listener or (
+            stored if self._pid_alive(stored) else None
+        )
         alive = self._pid_alive(pid)
         if not pid:
             ownership = "stopped"

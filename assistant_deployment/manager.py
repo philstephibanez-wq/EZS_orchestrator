@@ -521,12 +521,23 @@ def deploy(plan: DeployPlan) -> dict:
             archive = Path(tmp) / remote_archive_name
             _build_bundle(plan, archive)
 
+            remote_script_name = (
+                f"EZStudioLab_assistant-install-{short}.ps1"
+            )
+            remote_script_path = Path(tmp) / remote_script_name
+            remote_script_path.write_text(
+                _remote_script(plan, remote_archive_name),
+                encoding="utf-8-sig",
+                newline="\r\n",
+            )
+
             try:
                 copied = subprocess.run(
                     [
                         "scp",
                         str(archive),
-                        f"{plan.node}:{remote_archive_name}",
+                        str(remote_script_path),
+                        f"{plan.node}:.",
                     ],
                     capture_output=True,
                     text=True,
@@ -541,33 +552,61 @@ def deploy(plan: DeployPlan) -> dict:
                     f"assistant_scp_failed:{copied.stderr.strip()}"
                 )
 
-        remote = _remote_script(plan, remote_archive_name)
-        encoded = base64.b64encode(remote.encode("utf-16le")).decode("ascii")
-        try:
-            installed = subprocess.run(
-                [
-                    "ssh",
-                    plan.node,
-                    "powershell",
-                    "-NoProfile",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-EncodedCommand",
-                    encoded,
-                ],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=120,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise RuntimeError("assistant_remote_install_timeout") from exc
-        if installed.returncode != 0:
-            raise RuntimeError(
-                "assistant_remote_install_failed:"
-                + (installed.stderr.strip() or installed.stdout.strip())
-            )
+            try:
+                installed = subprocess.run(
+                    [
+                        "ssh",
+                        plan.node,
+                        "powershell",
+                        "-NoProfile",
+                        "-ExecutionPolicy",
+                        "Bypass",
+                        "-File",
+                        f".\\{remote_script_name}",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=120,
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise RuntimeError(
+                    "assistant_remote_install_timeout"
+                ) from exc
+            finally:
+                cleanup_command = (
+                    "$ErrorActionPreference='SilentlyContinue';"
+                    f"Remove-Item -LiteralPath '.\\{remote_script_name}' "
+                    "-Force -ErrorAction SilentlyContinue;"
+                    f"Remove-Item -LiteralPath '.\\{remote_archive_name}' "
+                    "-Force -ErrorAction SilentlyContinue"
+                )
+                subprocess.run(
+                    [
+                        "ssh",
+                        plan.node,
+                        "powershell",
+                        "-NoProfile",
+                        "-NonInteractive",
+                        "-Command",
+                        cleanup_command,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=30,
+                )
+
+            if installed.returncode != 0:
+                raise RuntimeError(
+                    "assistant_remote_install_failed:"
+                    + (
+                        installed.stderr.strip()
+                        or installed.stdout.strip()
+                    )
+                )
 
         result = {
             "ok": True,

@@ -315,24 +315,43 @@ class ControlCenter:
                     "log_key": log_key,
                 })
 
-        for label, queue, log_key in (
+        for label, queue, log_key, backend_alive in (
             (
                 "DEV",
                 ((snapshot.get("dev") or {}).get("queue") or {}),
                 "dev_server_error",
+                bool(
+                    ((snapshot.get("dev") or {}).get("server") or {}).get(
+                        "process_alive"
+                    )
+                ),
             ),
             (
                 "PROD",
                 ((snapshot.get("prod") or {}).get("queue") or {}),
                 "prod_server_error",
+                bool(
+                    (
+                        (
+                            (snapshot.get("prod") or {}).get("lifecycle")
+                            or {}
+                        ).get("backend")
+                        or {}
+                    ).get("process_alive")
+                ),
             ),
             (
                 "LAB",
                 ((snapshot.get("lab") or {}).get("queue") or {}),
                 "lab_server_error",
+                bool(
+                    ((snapshot.get("lab") or {}).get("server") or {}).get(
+                        "process_alive"
+                    )
+                ),
             ),
         ):
-            if queue.get("ok") is False:
+            if backend_alive and queue.get("ok") is False:
                 issues.append({
                     "severity": "error",
                     "code": "queue_error",

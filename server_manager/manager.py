@@ -96,7 +96,9 @@ class ServerManager:
         )
         stored_pid = self._read_pid(target)
         listener = listener_pid(spec.backend_port)
-        pid = listener or stored_pid
+        pid = listener or (
+            stored_pid if pid_alive(stored_pid) else None
+        )
         alive = pid_alive(pid)
 
         if not pid:
