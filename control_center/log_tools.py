@@ -198,7 +198,10 @@ class LogTools:
                     block = "\n".join(lowered_lines[start:end + 1])
                     if any(term in block for term in benign):
                         continue
-                elif "traceback (most recent call last)" in lowered:
+                elif (
+                    "traceback (most recent call last)" in lowered
+                    or "exception occurred during processing of request" in lowered
+                ):
                     context = "\n".join(lowered_lines[index:index + 32])
                     if any(term in context for term in benign):
                         continue

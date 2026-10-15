@@ -155,12 +155,17 @@ class GatewayHandler(BaseHTTPRequestHandler):
             self.close_connection = True
         self.end_headers()
         if self.command != "HEAD":
-            while True:
-                chunk = response.read(64 * 1024)
-                if not chunk:
-                    break
-                self.wfile.write(chunk)
-                self.wfile.flush()
+            try:
+                while True:
+                    chunk = response.read(64 * 1024)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                # Client disconnected after the upstream response had started.
+                # This is normal network lifecycle, not a gateway failure.
+                pass
         conn.close()
 
     do_GET = _proxy
