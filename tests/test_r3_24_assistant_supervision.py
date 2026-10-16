@@ -31,12 +31,12 @@ class R324AssistantSupervisionContract(unittest.TestCase):
         self.assertNotIn("'--token'", SUP)
         self.assertNotIn('"--token"', HELPER)
 
-    def test_interactive_tray_window(self):
-        self.assertIn("status_window.pyw", HELPER)
-        self.assertIn("pythonw.exe", HELPER)
+    def test_no_legacy_python_status_ui(self):
+        self.assertNotIn("status_window.pyw", HELPER)
+        self.assertNotIn("pythonw.exe", HELPER)
+        self.assertNotIn("$statusTaskName", HELPER)
+        self.assertIn('"EZStudioLab Assistant Status"', HELPER)
         self.assertIn("Unregister-ScheduledTask", HELPER)
-        self.assertNotIn("status_window.ps1", HELPER)
-        self.assertIn("Interactive", HELPER)
         self.assertIn("Start-ScheduledTask", HELPER)
 
     def test_operator_buttons(self):

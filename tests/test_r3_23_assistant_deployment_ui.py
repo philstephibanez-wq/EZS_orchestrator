@@ -28,7 +28,8 @@ class R323AssistantDeploymentUiContract(unittest.TestCase):
         self.assertIn('"UPDATE_AVAILABLE"', MANAGER)
         self.assertIn('"NOT_DEPLOYED"', MANAGER)
         self.assertIn('"UNREACHABLE"', MANAGER)
-        self.assertIn("DEPLOYED_COMMIT.txt", MANAGER)
+        self.assertIn("git -C $root rev-parse HEAD", MANAGER)
+        self.assertNotIn("DEPLOYED_COMMIT.txt", MANAGER)
 
     def test_deploy_uses_existing_orchestrator_manager(self):
         self.assertIn("deploy as deploy_assistant_node", WEB)
@@ -39,7 +40,11 @@ class R323AssistantDeploymentUiContract(unittest.TestCase):
         self.assertNotIn('data-action="assistant-claim"', WEB)
         self.assertNotIn("/distributed/jobs/claim", WEB)
         self.assertNotIn("distributed-probe", MANAGER)
-        self.assertNotIn("distributed-watch", MANAGER)
+        # Post-deploy validation may inspect the distributed worker process.
+        # Deployment still must not claim jobs or start scientific execution.
+        self.assertIn("distributed-watch", MANAGER)
+        self.assertNotIn("/distributed/jobs/claim", MANAGER)
+        self.assertIn('"scientific_execution_started": False', MANAGER)
 
     def test_no_three_second_ssh_poll(self):
         self.assertIn("refreshAssistantDeployment()", WEB)

@@ -7,36 +7,29 @@ import assistant_deployment.manager as manager
 
 
 class AssistantInstallerTransportV12jContract(unittest.TestCase):
-    def test_remote_installer_is_transferred_as_ps1(self):
+    def test_runtime_bundle_is_transferred_separately(self):
         source = inspect.getsource(manager.deploy)
-        self.assertIn("remote_script_name =", source)
-        self.assertIn("remote_script_path.write_text(", source)
-        self.assertIn('"utf-8-sig"', source)
-        self.assertIn("str(remote_script_path)", source)
-        self.assertIn('f"{plan.node}:."', source)
+        self.assertIn("runtime-", source)
+        self.assertIn("str(archive)", source)
+        self.assertIn("remote_script_path", source)
 
-    def test_installation_uses_powershell_file_not_encoded_command(self):
-        source = inspect.getsource(manager.deploy)
-        self.assertIn('"-File"', source)
-        self.assertNotIn('"EncodedCommand"', source)
-        self.assertNotIn("base64.b64encode(remote.encode", source)
-
-    def test_existing_remote_script_and_atomic_install_remain_canonical(self):
+    def test_application_deploy_is_clean_git_clone(self):
         source = inspect.getsource(manager._remote_script)
-        self.assertIn(".__new", source)
-        self.assertIn(".__previous", source)
-        self.assertIn("remote_commit_mismatch", source)
-        self.assertIn("remote_profile_runner_missing_after_install", source)
-        self.assertIn("remote_profile_passt_worker_missing_after_install", source)
-        self.assertIn("remote_profile_shared_engine_missing_after_install", source)
-        self.assertIn("remote_profile_preset_missing_after_install", source)
+        self.assertIn("git clone --branch main --single-branch", source)
+        self.assertIn("git -C $staging rev-parse HEAD", source)
+        self.assertIn("git -C $remoteRoot status --porcelain", source)
 
-    def test_remote_temp_cleanup_is_bounded(self):
-        source = inspect.getsource(manager.deploy)
-        self.assertIn("cleanup_command =", source)
-        self.assertIn("remote_script_name", source)
-        self.assertIn("remote_archive_name", source)
-        self.assertIn('"-Command"', source)
+    def test_composer_runs_only_when_vendor_cannot_be_reused(self):
+        source = inspect.getsource(manager._remote_script)
+        self.assertIn("COMPOSER_LOCK_IDENTICAL reuse_vendor", source)
+        self.assertIn("composer install --no-interaction --prefer-dist --no-progress", source)
+        self.assertIn("if ($reuseVendor)", source)
+
+    def test_runtime_is_external_to_clone(self):
+        self.assertEqual(
+            r"C:\EZStudioLab_assistant\runtime",
+            manager.DEFAULT_REMOTE_HOST_REPO,
+        )
 
 
 if __name__ == "__main__":

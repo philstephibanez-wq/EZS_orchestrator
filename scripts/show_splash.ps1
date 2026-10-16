@@ -54,7 +54,13 @@ $title.ForeColor = [System.Drawing.Color]::FromArgb(237, 245, 244)
 $body.Controls.Add($title)
 
 $version = New-Object System.Windows.Forms.Label
-$version.Text = "V1.0"
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$versionFile = Join-Path $repoRoot "VERSION"
+$displayVersion = "?"
+if (Test-Path -LiteralPath $versionFile -PathType Leaf) {
+    $displayVersion = (Get-Content -LiteralPath $versionFile -Raw).Trim()
+}
+$version.Text = "V$displayVersion"
 $version.AutoSize = $true
 $version.Left = 135
 $version.Top = 96

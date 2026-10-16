@@ -12,6 +12,7 @@ from pathlib import Path
 
 DEFAULT_NODE = "steph@192.168.1.81"
 DEFAULT_REMOTE_ROOT = r"C:\EZStudioLab_assistant"
+DEFAULT_REMOTE_RUNTIME = r"C:\EZStudioLab_assistant\runtime"
 
 
 @dataclass(frozen=True)
@@ -22,6 +23,9 @@ class AssistantRemoteStatus:
     process_count: int
     profile_review_running: bool
     profile_review_count: int
+    web_running: bool
+    web_listener_count: int
+    web_version: str | None
     deployed_commit: str | None
     node: str
     remote_root: str
@@ -40,6 +44,9 @@ class AssistantRemoteStatus:
             "process_count": self.process_count,
             "profile_review_running": self.profile_review_running,
             "profile_review_count": self.profile_review_count,
+            "web_running": self.web_running,
+            "web_listener_count": self.web_listener_count,
+            "web_version": self.web_version,
             "deployed_commit": self.deployed_commit,
             "node": self.node,
             "remote_root": self.remote_root,
@@ -56,9 +63,11 @@ class AssistantSupervisor:
         node: str = DEFAULT_NODE,
         remote_root: str = DEFAULT_REMOTE_ROOT,
         cache_seconds: float = 4.0,
+        remote_runtime: str = DEFAULT_REMOTE_RUNTIME,
     ) -> None:
         self.node = node
         self.remote_root = remote_root
+        self.remote_runtime = remote_runtime
         self.log_root = remote_root + r"\logs"
         self.cache_seconds = float(cache_seconds)
         self._lock = threading.Lock()
@@ -74,6 +83,11 @@ class AssistantSupervisor:
         timeout: int = 15,
         stdin_text: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
+        if stdin_text is not None:
+            raise ValueError("assistant_remote_ps_stdin_payload_not_supported")
+        # Keep the SSH command line short. The status probe is intentionally
+        # sizeable and can exceed the Windows command-line limit when sent as
+        # PowerShell -EncodedCommand.
         return subprocess.run(
             [
                 "ssh",
@@ -83,10 +97,10 @@ class AssistantSupervisor:
                 "-NonInteractive",
                 "-ExecutionPolicy",
                 "Bypass",
-                "-EncodedCommand",
-                self._encoded(script),
+                "-Command",
+                "-",
             ],
-            input=stdin_text,
+            input=script,
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -102,7 +116,7 @@ class AssistantSupervisor:
     ) -> subprocess.CompletedProcess[str]:
         if command not in {"start", "stop"}:
             raise ValueError("assistant_remote_helper_command_invalid")
-        helper = self.remote_root + r"\runtime\assistant-supervision.ps1"
+        helper = self.remote_runtime + r"\assistant-supervision.ps1"
         return subprocess.run(
             [
                 "ssh",
@@ -155,11 +169,69 @@ class AssistantSupervisor:
 
         script = f"""$ErrorActionPreference = 'Stop'
     $root = '{self.remote_root}'
-    $commitPath = Join-Path $root 'DEPLOYED_COMMIT.txt'
     $stdoutPath = Join-Path $root 'logs\\assistant.out.log'
     $stderrPath = Join-Path $root 'logs\\assistant.err.log'
     $profileStdoutPath = Join-Path $root 'logs\\profile-review.out.log'
     $profileStderrPath = Join-Path $root 'logs\\profile-review.err.log'
+    $versionPath = Join-Path $root 'VERSION'
+    $webRuntime = Join-Path $root 'runtime\\web'
+    $caddyPidPath = Join-Path $webRuntime 'caddy.pid'
+    $phpPidPath = Join-Path $webRuntime 'php.pid'
+
+    function Get-PortOwner([int]$Port) {{
+        $listener = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($null -eq $listener) {{ return $null }}
+        return [int]$listener.OwningProcess
+    }}
+
+    function Test-AssistantPortOwner(
+        [int]$Port,
+        [string]$ExpectedName,
+        [string]$PidPath
+    ) {{
+        $owner = Get-PortOwner $Port
+        if ($null -eq $owner) {{ return $false }}
+
+        $processInfo = Get-CimInstance Win32_Process -Filter "ProcessId=$owner" -ErrorAction SilentlyContinue
+        if ($null -eq $processInfo) {{ return $false }}
+        if ([string]$processInfo.Name -ne $ExpectedName) {{ return $false }}
+
+        $cmd = [string]$processInfo.CommandLine
+        if (
+            -not [string]::IsNullOrWhiteSpace($cmd) -and
+            $cmd.IndexOf($root, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+        ) {{
+            return $true
+        }}
+
+        if (Test-Path -LiteralPath $PidPath -PathType Leaf) {{
+            try {{ $persisted = [int](Get-Content -LiteralPath $PidPath -Raw) }}
+            catch {{ return $false }}
+            return $persisted -eq $owner
+        }}
+
+        return $false
+    }}
+
+    $owner8712 = Get-PortOwner 8712
+    $owner8713 = Get-PortOwner 8713
+    $assistant8712 = Test-AssistantPortOwner 8712 'caddy.exe' $caddyPidPath
+    $assistant8713 = Test-AssistantPortOwner 8713 'php.exe' $phpPidPath
+
+    $webPorts = @(
+        if ($null -ne $owner8712) {{ 8712 }}
+        if ($null -ne $owner8713) {{ 8713 }}
+    )
+    $webRunning = ($assistant8712 -and $assistant8713)
+    $webForeign = (
+        ($null -ne $owner8712 -and -not $assistant8712) -or
+        ($null -ne $owner8713 -and -not $assistant8713)
+    )
+    $webVersion = $null
+    if (Test-Path -LiteralPath $versionPath -PathType Leaf) {{
+        $webVersion = (Get-Content -LiteralPath $versionPath -Raw).Trim()
+    }}
     $distributedMatches = @(
         Get-CimInstance Win32_Process | Where-Object {{
             $_.CommandLine -and
@@ -175,12 +247,22 @@ class AssistantSupervisor:
         }}
     )
     $commit = $null
-    if (Test-Path -LiteralPath $commitPath -PathType Leaf) {{
-        $commit = (Get-Content -LiteralPath $commitPath -Raw).Trim()
+    if (Test-Path -LiteralPath (Join-Path $root '.git') -PathType Container) {{
+        $commit = (& git -C $root rev-parse HEAD 2>$null)
+        if ($LASTEXITCODE -eq 0 -and $null -ne $commit) {{
+            $commit = ([string]$commit).Trim()
+        }}
+        else {{
+            $commit = $null
+        }}
     }}
     [pscustomobject]@{{
         process_count = [int]$distributedMatches.Count
         profile_review_count = [int]$profileMatches.Count
+        web_running = [bool]$webRunning
+        web_foreign = [bool]$webForeign
+        web_listener_count = [int]$webPorts.Count
+        web_version = $webVersion
         deployed_commit = $commit
         stdout_log = $stdoutPath
         stderr_log = $stderrPath
@@ -212,9 +294,24 @@ class AssistantSupervisor:
                     raw = json.loads(rows[-1])
                     distributed_count = int(raw.get("process_count") or 0)
                     profile_count = int(raw.get("profile_review_count") or 0)
-                    if distributed_count == 1 and profile_count == 1:
+                    web_running = bool(raw.get("web_running"))
+                    web_foreign = bool(raw.get("web_foreign"))
+                    web_listener_count = int(raw.get("web_listener_count") or 0)
+                    web_version = str(raw.get("web_version") or "").strip() or None
+                    if web_foreign:
+                        state = "FOREIGN"
+                    elif (
+                        distributed_count == 1
+                        and profile_count == 1
+                        and web_running
+                        and web_listener_count == 2
+                    ):
                         state = "RUNNING"
-                    elif distributed_count == 0 and profile_count == 0:
+                    elif (
+                        distributed_count == 0
+                        and profile_count == 0
+                        and web_listener_count == 0
+                    ):
                         state = "STOPPED"
                     else:
                         state = "DEGRADED"
@@ -225,6 +322,9 @@ class AssistantSupervisor:
                         process_count=distributed_count,
                         profile_review_running=profile_count > 0,
                         profile_review_count=profile_count,
+                        web_running=web_running,
+                        web_listener_count=web_listener_count,
+                        web_version=web_version,
                         deployed_commit=(
                             str(raw.get("deployed_commit") or "").strip()
                             or None
@@ -266,6 +366,9 @@ class AssistantSupervisor:
             process_count=0,
             profile_review_running=False,
             profile_review_count=0,
+            web_running=False,
+            web_listener_count=0,
+            web_version=None,
             deployed_commit=None,
             node=self.node,
             remote_root=self.remote_root,
@@ -276,8 +379,41 @@ class AssistantSupervisor:
             error=error,
         ).as_dict()
 
+    def _repair_partial_web(self) -> None:
+        # Repair a recognized partial Web pair before invoking the remote helper.
+        # Only Caddy/PHP are touched; distributed/profile workers stay alive.
+        script = (
+            "$ErrorActionPreference = 'Stop'\n"
+            f"$root = '{self.remote_root}'\n"
+            "$stopCmd = Join-Path $root 'scripts\\stop.cmd'\n"
+            "$listeners = @(Get-NetTCPConnection -State Listen -LocalPort 8712,8713 -ErrorAction SilentlyContinue)\n"
+            "$ports = @($listeners | Select-Object -ExpandProperty LocalPort -Unique)\n"
+            "$has8712 = ($ports -contains 8712)\n"
+            "$has8713 = ($ports -contains 8713)\n"
+            "if ($has8712 -xor $has8713) {\n"
+            "    if (-not (Test-Path -LiteralPath $stopCmd -PathType Leaf)) { throw 'assistant_web_stop_missing' }\n"
+            "    & $stopCmd\n"
+            "    if ($LASTEXITCODE -ne 0) { throw \"assistant_web_partial_repair_stop_failed:$LASTEXITCODE\" }\n"
+            "    Start-Sleep -Milliseconds 400\n"
+            "    $remaining = @(Get-NetTCPConnection -State Listen -LocalPort 8712,8713 -ErrorAction SilentlyContinue)\n"
+            "    if ($remaining.Count -ne 0) { throw 'assistant_web_partial_repair_incomplete' }\n"
+            "    Write-Output 'EZS_ASSISTANT_WEB_PARTIAL_REPAIR_READY'\n"
+            "}\n"
+        )
+        completed = self._run_ps(script, timeout=20)
+        if completed.returncode != 0:
+            error = (
+                completed.stderr.strip()
+                or completed.stdout.strip()
+                or f"ssh_rc={completed.returncode}"
+            )
+            raise RuntimeError(
+                f"assistant_web_partial_repair_failed:{error[:500]}"
+            )
+
     def start(self) -> dict:
         token = self._configured_token()
+        self._repair_partial_web()
         completed = self._run_remote_helper(
             "start",
             timeout=75,
@@ -296,7 +432,8 @@ class AssistantSupervisor:
         while time.monotonic() < deadline:
             distributed_count = int(status.get("process_count") or 0)
             profile_count = int(status.get("profile_review_count") or 0)
-            if distributed_count == 1 and profile_count == 1:
+            web_running = bool(status.get("web_running"))
+            if distributed_count == 1 and profile_count == 1 and web_running:
                 break
             if distributed_count > 1:
                 raise RuntimeError("assistant_distributed_start_not_singleton")
@@ -308,12 +445,19 @@ class AssistantSupervisor:
             raise RuntimeError("assistant_distributed_start_not_singleton")
         if int(status.get("profile_review_count") or 0) != 1:
             raise RuntimeError("assistant_profile_start_not_singleton")
+        if not bool(status.get("web_running")):
+            raise RuntimeError("assistant_web_start_not_running")
+        if int(status.get("web_listener_count") or 0) != 2:
+            raise RuntimeError("assistant_web_start_not_singleton")
         return {
             "ok": True,
             "schema": "ezs.assistant-supervision.start.v1",
             "state": status.get("state"),
             "process_count": status.get("process_count"),
             "profile_review_count": status.get("profile_review_count"),
+            "web_running": status.get("web_running"),
+            "web_listener_count": status.get("web_listener_count"),
+            "web_version": status.get("web_version"),
             "deployed_commit": status.get("deployed_commit"),
         }
 
@@ -330,6 +474,8 @@ class AssistantSupervisor:
         status = self.status(force=True)
         if status.get("process_running") or status.get("profile_review_running"):
             raise RuntimeError("assistant_stop_process_still_running")
+        if status.get("web_running") or int(status.get("web_listener_count") or 0) != 0:
+            raise RuntimeError("assistant_web_stop_still_running")
         return {
             "ok": True,
             "schema": "ezs.assistant-supervision.stop.v1",

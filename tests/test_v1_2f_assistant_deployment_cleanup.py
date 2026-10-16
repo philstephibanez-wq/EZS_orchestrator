@@ -8,36 +8,60 @@ DEPLOY = (ROOT / "assistant_deployment" / "manager.py").read_text(encoding="utf-
 
 
 class V12fAssistantDeploymentCleanupContract(unittest.TestCase):
-    def test_previous_is_removed_only_after_remote_validation(self):
+    def test_previous_is_kept_until_live_runtime_validation(self):
         move_current = DEPLOY.index(
             "Move-Item -LiteralPath $remoteRoot -Destination $previous"
         )
-        commit_verify = DEPLOY.index("remote_commit_mismatch:$deployed")
-        helper_verify = DEPLOY.index(
-            "remote_supervision_helper_missing_after_install"
-        )
+        staged = DEPLOY.index("EZS_ASSISTANT_REMOTE_DEPLOY_STAGED_OK")
+        finalize = DEPLOY.index("def finalize_deployment(plan: DeployPlan)")
         cleanup = DEPLOY.index(
-            "Remove-Item -LiteralPath $previous -Recurse -Force",
-            helper_verify,
+            "Remove-Item -LiteralPath $legacy -Recurse -Force",
+            finalize,
         )
-        success = DEPLOY.index("EZS_ASSISTANT_REMOTE_DEPLOY_OK", cleanup)
+        self.assertLess(move_current, staged)
+        self.assertLess(staged, finalize)
+        self.assertLess(finalize, cleanup)
 
-        self.assertLess(move_current, commit_verify)
-        self.assertLess(commit_verify, helper_verify)
-        self.assertLess(helper_verify, cleanup)
-        self.assertLess(cleanup, success)
+    def test_finalize_requires_web_workers_and_runtime_state(self):
+        self.assertIn("assistant_finalize_web_not_running", DEPLOY)
+        self.assertIn("assistant_finalize_distributed_not_singleton", DEPLOY)
+        self.assertIn("assistant_finalize_profile_not_singleton", DEPLOY)
+        self.assertIn("assistant_finalize_state_missing", DEPLOY)
+        self.assertIn("assistant_finalize_web_runtime_missing", DEPLOY)
 
-    def test_previous_is_not_a_persistent_deployment_artifact(self):
-        self.assertEqual(
-            DEPLOY.count("Move-Item -LiteralPath $remoteRoot -Destination $previous"),
-            1,
+    def test_failed_live_validation_has_rollback(self):
+        self.assertIn("def rollback_deployment(plan: DeployPlan)", DEPLOY)
+        self.assertIn("assistant_rollback_previous_missing", DEPLOY)
+        self.assertIn("EZS_ASSISTANT_REMOTE_DEPLOY_ROLLBACK_OK", DEPLOY)
+
+    def test_runtime_is_staged_inside_single_root_clone(self):
+        self.assertIn(
+            'DEFAULT_REMOTE_HOST_REPO = r"C:\\EZStudioLab_assistant\\runtime"',
+            DEPLOY,
         )
-        self.assertGreaterEqual(
-            DEPLOY.count("Remove-Item -LiteralPath $previous -Recurse -Force"),
-            2,
+        self.assertIn("$runtimeStaging = Join-Path $staging 'runtime'", DEPLOY)
+        self.assertIn(
+            "Expand-Archive -LiteralPath $archive -DestinationPath $runtimeStaging -Force",
+            DEPLOY,
         )
-        self.assertNotIn(".__previous.", DEPLOY)
-        self.assertNotIn(".__backup", DEPLOY)
+
+    def test_persistent_state_is_migrated_inside_single_root(self):
+        self.assertIn("$stateTarget = Join-Path $runtimeRoot 'state'", DEPLOY)
+        self.assertIn("$legacyStateRuntime", DEPLOY)
+
+        # Validate generated PowerShell rather than Python source escaping.
+        from assistant_deployment.manager import DeployPlan, _remote_script
+
+        plan = DeployPlan(
+            source=r"H:\\EZStudioLab_assistant",
+            source_commit="a" * 40,
+            parent_gitlink_commit="a" * 40,
+            node="test@example",
+            remote_root=r"C:\\EZStudioLab_assistant",
+            remote_host_repo=r"C:\\EZStudioLab_assistant\\runtime",
+        )
+        rendered = _remote_script(plan, "runtime.zip")
+        self.assertIn("(Join-Path $previous 'runtime\\state')", rendered)
 
 
 if __name__ == "__main__":

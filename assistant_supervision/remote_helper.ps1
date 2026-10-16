@@ -7,11 +7,10 @@
 $ErrorActionPreference = "Stop"
 
 $hostRepo = $PSScriptRoot
-$root = Split-Path -Parent $hostRepo
+$root = "C:\EZStudioLab_assistant"
 $app = Join-Path $root "app\main.py"
-$statusWindow = Join-Path $root "app\status_window.pyw"
 $logs = Join-Path $root "logs"
-$profileRuntime = Join-Path $env:LOCALAPPDATA "EZStudioLab_assistant\runtime"
+$profileRuntime = Join-Path $root "runtime\state"
 $profileStatePath = Join-Path $profileRuntime "profile-review-watch.state.json"
 $secretPath = Join-Path $profileRuntime "analysis-worker-token.dpapi"
 $hiddenLauncherPath = Join-Path $profileRuntime "assistant-worker-hidden.vbs"
@@ -19,10 +18,12 @@ $stdoutPath = Join-Path $logs "assistant.out.log"
 $stderrPath = Join-Path $logs "assistant.err.log"
 $profileStdoutPath = Join-Path $logs "profile-review.out.log"
 $profileStderrPath = Join-Path $logs "profile-review.err.log"
+$webStartPath = Join-Path $root "scripts\start.cmd"
+$webStopPath = Join-Path $root "scripts\stop.cmd"
 
 $distributedTaskName = "EZStudioLab Assistant Distributed"
 $profileTaskName = "EZStudioLab Assistant Profile"
-$statusTaskName = "EZStudioLab Assistant Status"
+$webTaskName = "EZStudioLab Assistant Web"
 
 function Get-DistributedMatches {
     @(
@@ -116,6 +117,47 @@ function Protect-AssistantToken {
     )
 }
 
+function New-WebEncodedCommand {
+    $script = @"
+`$ErrorActionPreference = 'Stop'
+`$cipher = ([System.IO.File]::ReadAllText('$secretPath',[System.Text.Encoding]::ASCII)).Trim()
+`$secure = ConvertTo-SecureString `$cipher
+`$credential = New-Object System.Management.Automation.PSCredential('assistant-token',`$secure)
+`$env:EZSTUDIOLAB_ASSISTANT_TOKEN = `$credential.GetNetworkCredential().Password
+`$env:EZSTUDIOLAB_ASSISTANT_BASE_URL = 'http://EZSTUDIO-MAIN:8702'
+`$env:EZSTUDIOLAB_ASSISTANT_NODE_ID = 'EZStudioLab_assistant-EZSTUDIO-XPS'
+`$env:EZSTUDIO_SHARED_MODEL_ROOT = '\\EZSTUDIO-MAIN\EZModels'
+`$env:EZSTUDIOLAB_ASSISTANT_STATUS_FILE = '$logs\assistant.status.json'
+
+# Scheduled tasks do not reliably inherit a refreshed user PATH/environment.
+# Re-read the persistent PHP override explicitly at every Web task launch.
+`$phpOverride = [Environment]::GetEnvironmentVariable('EZS_ASSISTANT_PHP','User')
+if ([string]::IsNullOrWhiteSpace(`$phpOverride)) {
+    `$phpOverride = [Environment]::GetEnvironmentVariable('EZS_ASSISTANT_PHP','Machine')
+}
+if (-not [string]::IsNullOrWhiteSpace(`$phpOverride)) {
+    `$env:EZS_ASSISTANT_PHP = `$phpOverride
+}
+
+& '$webStartPath'
+if (`$LASTEXITCODE -ne 0) {
+    throw "assistant_web_start_failed:`$LASTEXITCODE"
+}
+
+Start-Sleep -Milliseconds 800
+
+while (`$true) {
+    `$listeners = @(Get-NetTCPConnection -State Listen -LocalPort 8712,8713 -ErrorAction SilentlyContinue)
+    `$ports = @(`$listeners | Select-Object -ExpandProperty LocalPort -Unique)
+    if (-not (`$ports -contains 8712) -or -not (`$ports -contains 8713)) {
+        throw 'assistant_web_listener_lost'
+    }
+    Start-Sleep -Seconds 10
+}
+"@
+    return [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($script))
+}
+
 function New-WorkerEncodedCommand {
     param(
         [Parameter(Mandatory=$true)]
@@ -175,7 +217,7 @@ exit `$process.ExitCode
 }
 
 if ($Command -eq "stop") {
-    foreach ($taskName in @($distributedTaskName,$profileTaskName,$statusTaskName)) {
+    foreach ($taskName in @($distributedTaskName,$profileTaskName,$webTaskName,"EZStudioLab Assistant Status")) {
         Remove-TaskExact -TaskName $taskName
     }
 
@@ -191,6 +233,20 @@ if ($Command -eq "stop") {
             continue
         }
         Stop-Process -Id $pidValue -Force -ErrorAction Stop
+    }
+
+    if (Test-Path -LiteralPath $webStopPath -PathType Leaf) {
+        & $webStopPath
+        if ($LASTEXITCODE -ne 0) {
+            throw "assistant_web_stop_failed:$LASTEXITCODE"
+        }
+    }
+
+    Start-Sleep -Milliseconds 400
+    $webListeners = @(Get-NetTCPConnection -State Listen -LocalPort 8712,8713 -ErrorAction SilentlyContinue)
+    if ($webListeners.Count -ne 0) {
+        $owners = ($webListeners | ForEach-Object { "$($_.LocalPort):$($_.OwningProcess)" }) -join ","
+        throw "assistant_web_stop_incomplete:$owners"
     }
 
     Remove-Item -LiteralPath $secretPath -Force -ErrorAction SilentlyContinue
@@ -215,11 +271,14 @@ if ($Command -eq "stop") {
 if (-not (Test-Path -LiteralPath $app -PathType Leaf)) {
     throw "assistant_app_missing"
 }
-if (-not (Test-Path -LiteralPath $statusWindow -PathType Leaf)) {
-    throw "assistant_status_window_missing"
-}
 if (-not (Test-Path -LiteralPath (Join-Path $hostRepo "python\ezstudio\distributed\capabilities.py") -PathType Leaf)) {
     throw "assistant_runtime_missing"
+}
+if (-not (Test-Path -LiteralPath $webStartPath -PathType Leaf)) {
+    throw "assistant_web_start_missing"
+}
+if (-not (Test-Path -LiteralPath $webStopPath -PathType Leaf)) {
+    throw "assistant_web_stop_missing"
 }
 
 $distributedMatches = @(Get-DistributedMatches)
@@ -237,13 +296,56 @@ if ([string]::IsNullOrWhiteSpace($token)) {
     throw "assistant_token_stdin_missing"
 }
 
-$python = (Get-Command python -ErrorAction Stop).Source
-$pythonw = (Get-Command pythonw.exe -ErrorAction Stop).Source
-
 New-Item -ItemType Directory -Path $logs -Force | Out-Null
 New-Item -ItemType Directory -Path $profileRuntime -Force | Out-Null
 Ensure-HiddenTaskLauncher
 Protect-AssistantToken -Token $token
+
+# Repair a recognized partial Web instance without stopping distributed/profile
+# workers. Typical case: PHP 8713 was killed while Caddy 8712 is still alive.
+$preWebListeners = @(Get-NetTCPConnection -State Listen -LocalPort 8712,8713 -ErrorAction SilentlyContinue)
+$preWebPorts = @($preWebListeners | Select-Object -ExpandProperty LocalPort -Unique)
+$webHas8712 = ($preWebPorts -contains 8712)
+$webHas8713 = ($preWebPorts -contains 8713)
+
+if ($webHas8712 -xor $webHas8713) {
+    & $webStopPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "assistant_web_partial_repair_stop_failed:$LASTEXITCODE"
+    }
+
+    Start-Sleep -Milliseconds 400
+    $remainingWebListeners = @(Get-NetTCPConnection -State Listen -LocalPort 8712,8713 -ErrorAction SilentlyContinue)
+    if ($remainingWebListeners.Count -ne 0) {
+        $owners = ($remainingWebListeners | ForEach-Object { "$($_.LocalPort):$($_.OwningProcess)" }) -join ","
+        throw "assistant_web_partial_repair_incomplete:$owners"
+    }
+
+    Write-Output "EZS_ASSISTANT_WEB_PARTIAL_REPAIR_READY"
+}
+
+$webEncoded = New-WebEncodedCommand
+Register-PersistentTask `
+    -TaskName $webTaskName `
+    -EncodedCommand $webEncoded `
+    -Description "Web persistant EZStudioLab Assistant"
+
+$deadline = [DateTime]::UtcNow.AddSeconds(20)
+do {
+    Start-Sleep -Milliseconds 250
+    $webListeners = @(Get-NetTCPConnection -State Listen -LocalPort 8712,8713 -ErrorAction SilentlyContinue)
+    $webPorts = @($webListeners | Select-Object -ExpandProperty LocalPort -Unique)
+    if (($webPorts -contains 8712) -and ($webPorts -contains 8713)) {
+        break
+    }
+} while ([DateTime]::UtcNow -lt $deadline)
+
+if (-not ($webPorts -contains 8712) -or -not ($webPorts -contains 8713)) {
+    throw "assistant_web_start_listener_missing"
+}
+
+$python = (Get-Command python -ErrorAction Stop).Source
+
 $token = $null
 
 if ($distributedMatches.Count -eq 0) {
@@ -261,27 +363,5 @@ if ($profileMatches.Count -eq 0) {
         -EncodedCommand $profileEncoded `
         -Description "Profile review watch persistant EZStudioLab Assistant"
 }
-
-Remove-TaskExact -TaskName $statusTaskName
-$statusAction = New-ScheduledTaskAction `
-    -Execute $pythonw `
-    -Argument ('"' + $statusWindow + '" --root "' + $root + '"')
-$statusPrincipal = New-ScheduledTaskPrincipal `
-    -UserId $env:USERNAME `
-    -LogonType Interactive `
-    -RunLevel Limited
-$statusSettings = New-ScheduledTaskSettingsSet `
-    -MultipleInstances IgnoreNew `
-    -ExecutionTimeLimit ([TimeSpan]::Zero) `
-    -AllowStartIfOnBatteries `
-    -DontStopIfGoingOnBatteries
-Register-ScheduledTask `
-    -TaskName $statusTaskName `
-    -Action $statusAction `
-    -Principal $statusPrincipal `
-    -Settings $statusSettings `
-    -Description "Fenêtre locale de statut EZStudioLab Assistant" `
-    -Force | Out-Null
-Start-ScheduledTask -TaskName $statusTaskName
 
 Write-Output "EZS_ASSISTANT_SUPERVISION_START_OK"

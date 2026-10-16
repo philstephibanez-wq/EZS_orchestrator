@@ -23,7 +23,7 @@ from control_center.job_history import JobHistory
 from control_center.log_tools import LogTools
 from control_center.singleton import ControlCenterSingleton, ControlCenterSingletonBusy
 from deployment.manager import DeploymentManager
-from assistant_deployment.manager import build_plan as build_assistant_deploy_plan, build_status_plan as build_assistant_status_plan, deploy as deploy_assistant_node, deployment_status as get_assistant_deployment_status
+from assistant_deployment.manager import build_plan as build_assistant_deploy_plan, build_status_plan as build_assistant_status_plan, deploy as deploy_assistant_node, deployment_status as get_assistant_deployment_status, finalize_deployment as finalize_assistant_deployment, rollback_deployment as rollback_assistant_deployment
 from assistant_supervision.manager import AssistantSupervisor
 from gateway_manager.manager import GatewayManager
 from prod_lifecycle.manager import ProdLifecycleManager
@@ -51,7 +51,7 @@ VERSION = _read_version(Path(__file__).resolve().parents[1] / "VERSION")
 DEV_VERSION = _read_version(Path(r"H:\EZScore_dev") / "VERSION")
 LAB_VERSION = _read_version(Path(r"H:\EZStudio_lab") / "VERSION")
 ASSISTANT_VERSION = _read_version(
-    Path(r"H:\EZStudio_lab\EZStudioLab_assistant") / "VERSION"
+    Path(r"H:\EZStudioLab_assistant") / "VERSION"
 )
 
 
@@ -713,16 +713,24 @@ class ControlCenter:
         online = [w for w in workers if isinstance(w, dict) and w.get("online")]
         states = {str(w.get("state") or "").lower() for w in online}
 
+        # Runtime truth comes from the XPS process/listener probe. Inventory
+        # heartbeats may enrich RUNNING but can never promote STOPPED/DEGRADED.
+        remote_state = str(remote.get("state") or "ERROR").upper()
         if not remote.get("ok"):
             state = "ERROR"
-        elif online and states.intersection({"running", "busy", "claimed", "processing"}):
-            state = "BUSY"
-        elif online:
-            state = "ONLINE"
-        elif remote.get("process_running"):
-            state = "STALE"
-        else:
+        elif remote_state == "RUNNING":
+            if states.intersection({"running", "busy", "claimed", "processing"}):
+                state = "BUSY"
+            else:
+                state = "ONLINE"
+        elif remote_state == "DEGRADED":
+            state = "DEGRADED"
+        elif remote_state == "FOREIGN":
+            state = "FOREIGN"
+        elif remote_state == "STOPPED":
             state = "STOPPED"
+        else:
+            state = "ERROR"
 
         return {
             **remote,
@@ -755,7 +763,7 @@ class ControlCenter:
                 "schema": "ezs.assistant-deployment.status.v1",
                 "state": "ERROR",
                 "source_version": _read_version(
-                    Path(r"H:\EZStudio_lab\EZStudioLab_assistant") / "VERSION"
+                    Path(r"H:\EZStudioLab_assistant") / "VERSION"
                 ),
                 "deployed_version": None,
                 "source_dirty": None,
@@ -770,8 +778,41 @@ class ControlCenter:
         with self.action_lock:
             plan = build_assistant_deploy_plan()
             result = deploy_assistant_node(plan)
+            runtime = None
+            try:
+                runtime = self.assistant_supervision.start()
+                if str(runtime.get("state") or "").upper() != "RUNNING":
+                    raise RuntimeError(
+                        f"assistant_post_deploy_runtime_not_running:{runtime.get('state')}"
+                    )
+                finalize_assistant_deployment(plan)
+            except Exception as exc:
+                rollback_error = None
+                restart_error = None
+                try:
+                    rollback_assistant_deployment(plan)
+                except Exception as rollback_exc:
+                    rollback_error = f"{type(rollback_exc).__name__}:{rollback_exc}"
+                else:
+                    try:
+                        self.assistant_supervision.start()
+                    except Exception as restart_exc:
+                        restart_error = f"{type(restart_exc).__name__}:{restart_exc}"
+                detail = f"{type(exc).__name__}:{exc}"
+                if rollback_error:
+                    detail += f"; rollback={rollback_error}"
+                if restart_error:
+                    detail += f"; rollback_restart={restart_error}"
+                raise RuntimeError(
+                    f"assistant_post_deploy_validation_failed:{detail[:1200]}"
+                ) from exc
+
             self._invalidate_snapshot()
-            return result
+            return {
+                **result,
+                "runtime": runtime,
+                "finalized": True,
+            }
 
     def acknowledge_incident(self, incident_id: str) -> dict:
         return {
@@ -1086,11 +1127,17 @@ let assistantSupervisionData=null,assistantSupervisionRefreshInFlight=false;
 function renderAssistantSupervision(payload){
  assistantSupervisionData=payload||{};
  const state=assistantSupervisionData.state||"ERROR";
- const labels={STOPPED:"ARRÊTÉ",ONLINE:"EN LIGNE",BUSY:"OCCUPÉ",STALE:"PÉRIMÉ",ERROR:"ERREUR"};
- txt("assistantRuntimeState",labels[state]||state);
- const running=!!assistantSupervisionData.process_running;
- if($("assistantStart"))$("assistantStart").disabled=busy||running;
- if($("assistantStop"))$("assistantStop").disabled=busy||!running;
+ const labels={STOPPED:"ARRÊTÉ",ONLINE:"EN LIGNE",BUSY:"OCCUPÉ",DEGRADED:"DÉGRADÉ",FOREIGN:"PORT ÉTRANGER",ERROR:"ERREUR"};
+ const label=labels[state]||state;
+ txt("assistantRuntimeState",label);
+ txt("assistantState",label);
+ dot($("assistantDot"),state==="ONLINE"||state==="BUSY",state==="DEGRADED");
+ const running=state==="ONLINE"||state==="BUSY";
+ const degraded=state==="DEGRADED";
+ const blocked=state==="FOREIGN";
+ const active=running||degraded;
+ if($("assistantStart"))$("assistantStart").disabled=busy||running||blocked;
+ if($("assistantStop"))$("assistantStop").disabled=busy||!active;
 }
 async function refreshAssistantSupervision(){
  if(assistantSupervisionRefreshInFlight)return;
@@ -1107,9 +1154,7 @@ async function refreshAssistantSupervision(){
 function renderAssistantWorkers(payload){
  const workers=(payload&&payload.workers)||[];
  const online=workers.filter(w=>!!w.online);
- dot($("assistantDot"),online.length>0,workers.length>0&&online.length===0);
- txt("assistantState",online.length>0?`${online.length} EN LIGNE`:workers.length?`${workers.length} PÉRIMÉ`:"AUCUN NŒUD");
- txt("assistantMeta",payload&&payload.ok?`${workers.length} nœud(s) enregistré(s) · inventaire lecture seule`:`Inventaire indisponible · ${payload?.error??"-"}`);
+ txt("assistantMeta",payload&&payload.ok?`${online.length} worker(s) en ligne · ${workers.length} nœud(s) enregistré(s) · inventaire lecture seule`:`Inventaire indisponible · ${payload?.error??"-"}`);
  const el=$("assistantWorkers");
  el.innerHTML=workers.length?workers.map(w=>{
    const c=w.capabilities||{},g=(c.gpus||[])[0]||{};
@@ -1236,6 +1281,7 @@ $("assistantDeploy").addEventListener("click",async()=>{
  }finally{
   busy=false;
   await refreshAssistantDeployment();
+  await refreshAssistantSupervision();
   await refresh();
   syncActionButtons();
  }
