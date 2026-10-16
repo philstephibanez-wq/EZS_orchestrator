@@ -13,8 +13,8 @@ class V12aAssistantProfileWatchIntegration(unittest.TestCase):
     def test_existing_runtime_deployment_model_is_preserved(self):
         self.assertIn(r'C:\EZStudioLab_assistant', DEPLOY)
         self.assertIn(r'C:\EZStudioLab_assistant\runtime', DEPLOY)
-        self.assertIn('["git", "archive", "--format=zip"', DEPLOY)
-        self.assertNotIn("git clone", DEPLOY)
+        self.assertIn("git clone --branch main --single-branch", DEPLOY)
+        self.assertIn("EZStudioLab_assistant.git", DEPLOY)
         self.assertNotIn("git pull", DEPLOY)
 
     def test_deployment_transport_is_bounded(self):
@@ -33,8 +33,8 @@ class V12aAssistantProfileWatchIntegration(unittest.TestCase):
         self.assertIn("profile-review-watch.state.json", HELPER)
 
     def test_profile_state_survives_runtime_redeploy(self):
-        self.assertIn("$env:LOCALAPPDATA", HELPER)
-        self.assertIn("EZStudioLab_assistant\\runtime", HELPER)
+        self.assertIn('$profileRuntime = Join-Path $root "runtime\\state"', HELPER)
+        self.assertIn("profile-review-watch.state.json", HELPER)
 
     def test_supervision_is_exact_and_secret_stays_off_command_line(self):
         self.assertIn("assistant_duplicate_distributed_processes", HELPER)

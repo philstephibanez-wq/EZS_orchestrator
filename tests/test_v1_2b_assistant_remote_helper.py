@@ -23,7 +23,7 @@ class V12bAssistantRemoteHelperContract(unittest.TestCase):
     def test_helper_is_bundled_and_verified(self):
         self.assertIn("SUPERVISION_HELPER", DEPLOY)
         self.assertIn("assistant-supervision.ps1", DEPLOY)
-        self.assertIn("remote_staging_supervision_helper_missing", DEPLOY)
+        self.assertIn("assistant_runtime_helper_missing", DEPLOY)
         self.assertIn("remote_supervision_helper_missing_after_install", DEPLOY)
 
     def test_token_transport_remains_stdin_only(self):

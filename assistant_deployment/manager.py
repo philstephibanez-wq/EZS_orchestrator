@@ -281,9 +281,17 @@ if (-not (Test-Path -LiteralPath (Join-Path $newVendor 'autoload_runtime.php') -
     throw 'assistant_vendor_missing_after_prepare'
 }}
 
+$dirty = (& git -C $staging status --porcelain)
+if ($LASTEXITCODE -ne 0) {{
+    throw 'assistant_git_status_failed'
+}}
+if (-not [string]::IsNullOrWhiteSpace(($dirty -join ''))) {{
+    throw "assistant_staging_not_clean:$($dirty -join ';')"
+}}
+
 # The local llama-server executes from inside the single Assistant root.
-# Capture its canonical model, stop it before the atomic root rename, then
-# restart it from the new root after persistent runtime assets are moved.
+# Persist pre-deploy AI intent before the swap so rollback can recover it
+# even if candidate AI restart fails.
 $localAIWasRunning = $false
 $localAIModel = $null
 $localAI = @(
@@ -311,7 +319,6 @@ if ($localAI.Count -eq 1) {{
     if ([string]::IsNullOrWhiteSpace($localAIModel)) {{
         throw 'assistant_local_ai_canonical_model_missing'
     }}
-
     try {{
         $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8720/health' -TimeoutSec 5
         if ([string]$health.status -notin @('ok','ready')) {{
@@ -321,11 +328,21 @@ if ($localAI.Count -eq 1) {{
     catch {{
         throw "assistant_local_ai_health_failed:$($_.Exception.Message)"
     }}
+}}
 
+$deployStateDir = Join-Path $remoteRoot 'runtime\\state'
+New-Item -ItemType Directory -Force -Path $deployStateDir | Out-Null
+$deployStatePath = Join-Path $deployStateDir 'assistant-deploy-state.json'
+[pscustomobject]@{{
+    schema = 'ezs.assistant-deploy-state.v1'
+    local_ai_was_running = $localAIWasRunning
+    local_ai_model = $localAIModel
+}} | ConvertTo-Json -Compress | Set-Content -LiteralPath $deployStatePath -Encoding UTF8
+
+if ($localAIWasRunning) {{
     $localAIPid = [int]$localAI[0].ProcessId
     Stop-Process -Id $localAIPid -Force -ErrorAction Stop
     Remove-Item -LiteralPath (Join-Path $remoteRoot 'runtime\\ai\\llama-server.pid') -Force -ErrorAction SilentlyContinue
-
     $deadline = [DateTime]::UtcNow.AddSeconds(15)
     do {{
         Start-Sleep -Milliseconds 250
@@ -335,14 +352,6 @@ if ($localAI.Count -eq 1) {{
         $owners = ($aiListener | Select-Object -ExpandProperty OwningProcess -Unique) -join ','
         throw "assistant_local_ai_stop_incomplete:$owners"
     }}
-}}
-
-$dirty = (& git -C $staging status --porcelain)
-if ($LASTEXITCODE -ne 0) {{
-    throw 'assistant_git_status_failed'
-}}
-if (-not [string]::IsNullOrWhiteSpace(($dirty -join ''))) {{
-    throw "assistant_staging_not_clean:$($dirty -join ';')"
 }}
 
 # Same-volume Directory.Move gives an all-or-nothing root rename.
@@ -977,6 +986,23 @@ if (-not (Test-Path -LiteralPath (Join-Path $runtime 'web') -PathType Container)
     throw 'assistant_finalize_web_runtime_missing'
 }}
 
+$deployStatePath = Join-Path (Join-Path $runtime 'state') 'assistant-deploy-state.json'
+if (Test-Path -LiteralPath $deployStatePath -PathType Leaf) {{
+    $deployState = Get-Content -LiteralPath $deployStatePath -Raw | ConvertFrom-Json
+    if ([bool]$deployState.local_ai_was_running) {{
+        try {{
+            $aiHealth = Invoke-RestMethod -Uri 'http://127.0.0.1:8720/health' -TimeoutSec 5
+            if ([string]$aiHealth.status -notin @('ok','ready')) {{
+                throw "bad_status:$($aiHealth.status)"
+            }}
+        }}
+        catch {{
+            throw "assistant_finalize_local_ai_not_healthy:$($_.Exception.Message)"
+        }}
+    }}
+    Remove-Item -LiteralPath $deployStatePath -Force
+}}
+
 foreach ($legacy in @($legacyRuntime,$legacyWebRuntime,$legacyStateRuntime,$previous)) {{
     if (Test-Path -LiteralPath $legacy) {{
         Remove-Item -LiteralPath $legacy -Recurse -Force
@@ -1001,18 +1027,34 @@ Write-Output 'EZS_ASSISTANT_REMOTE_DEPLOY_FINALIZE_OK'
 
 
 def rollback_deployment(plan: DeployPlan) -> dict:
-    """Restore the previous Assistant root when live validation fails."""
+    """Restore the previous Assistant root when deployment or live validation fails."""
     script = f"""$ErrorActionPreference = 'Stop'
 $root = '{plan.remote_root}'
 $previous = '{plan.remote_root}_OLD'
 $runtime = '{plan.remote_host_repo}'
 $helper = Join-Path $runtime 'assistant-supervision.ps1'
+$deployStatePath = Join-Path (Join-Path $runtime 'state') 'assistant-deploy-state.json'
+
+$rollbackAIWasRunning = $false
+$rollbackAIModel = $null
+if (Test-Path -LiteralPath $deployStatePath -PathType Leaf) {{
+    $deployState = Get-Content -LiteralPath $deployStatePath -Raw | ConvertFrom-Json
+    $rollbackAIWasRunning = [bool]$deployState.local_ai_was_running
+    $rollbackAIModel = [string]$deployState.local_ai_model
+}}
+
 if (Test-Path -LiteralPath $helper -PathType Leaf) {{
     & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper stop
 }}
 
-$rollbackAIWasRunning = $false
-$rollbackAIModel = $null
+foreach ($taskName in @('EZStudioLab Assistant Local AI','EZS_ASSISTANT_LOCAL_AI_RECOVERY')) {{
+    $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    if ($null -ne $task) {{
+        Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+    }}
+}}
+
 $rollbackAI = @(
     Get-CimInstance Win32_Process | Where-Object {{
         $_.Name -eq 'llama-server.exe' -and
@@ -1028,26 +1070,82 @@ if ($rollbackAI.Count -gt 1) {{
 }}
 if ($rollbackAI.Count -eq 1) {{
     $rollbackAIWasRunning = $true
-    $rollbackManifest = Join-Path $root 'runtime\\ai\\cache-manifest.json'
-    if (Test-Path -LiteralPath $rollbackManifest -PathType Leaf) {{
-        $rollbackManifestData = Get-Content -LiteralPath $rollbackManifest -Raw | ConvertFrom-Json
-        $rollbackAIModel = [string]$rollbackManifestData.canonical_model
+    if ([string]::IsNullOrWhiteSpace($rollbackAIModel)) {{
+        $rollbackManifest = Join-Path $root 'runtime\\ai\\cache-manifest.json'
+        if (Test-Path -LiteralPath $rollbackManifest -PathType Leaf) {{
+            $rollbackManifestData = Get-Content -LiteralPath $rollbackManifest -Raw | ConvertFrom-Json
+            $rollbackAIModel = [string]$rollbackManifestData.canonical_model
+        }}
     }}
     Stop-Process -Id ([int]$rollbackAI[0].ProcessId) -Force -ErrorAction Stop
-    Remove-Item -LiteralPath (Join-Path $root 'runtime\\ai\\llama-server.pid') -Force -ErrorAction SilentlyContinue
+}}
 
-    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+$deadline = [DateTime]::UtcNow.AddSeconds(15)
+do {{
+    Start-Sleep -Milliseconds 250
+    $aiListener = @(Get-NetTCPConnection -State Listen -LocalPort 8720 -ErrorAction SilentlyContinue)
+}} while ($aiListener.Count -ne 0 -and [DateTime]::UtcNow -lt $deadline)
+if ($aiListener.Count -ne 0) {{
+    throw 'assistant_rollback_local_ai_stop_incomplete'
+}}
+
+function Start-RollbackLocalAI([string]$activeRoot, [string]$model) {{
+    if ([string]::IsNullOrWhiteSpace($model)) {{
+        $manifest = Join-Path $activeRoot 'runtime\\ai\\cache-manifest.json'
+        if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) {{
+            throw 'assistant_rollback_local_ai_manifest_missing'
+        }}
+        $manifestData = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json
+        $model = [string]$manifestData.canonical_model
+    }}
+    if ([string]::IsNullOrWhiteSpace($model)) {{
+        throw 'assistant_rollback_local_ai_model_missing'
+    }}
+
+    $python = (Get-Command python -ErrorAction Stop).Source
+    $env:EZSTUDIOLAB_LOCAL_AI_MODEL = $model
+    $env:EZSTUDIO_SHARED_MODEL_ROOT = '\\\\EZSTUDIO-MAIN\\EZModels'
+    $env:EZSTUDIOLAB_LOCAL_AI_CACHE_ROOT = Join-Path $activeRoot 'runtime\\models-cache'
+    $env:EZSTUDIOLAB_LOCAL_AI_RUNTIME_ROOT = Join-Path $activeRoot 'runtime\\ai'
+
+    Push-Location $activeRoot
+    try {{
+        $startCode = "import json; from app.local_ai_runtime import local_ai_start; print(json.dumps(local_ai_start(), ensure_ascii=True))"
+        & $python -c $startCode
+        if ($LASTEXITCODE -ne 0) {{
+            throw "assistant_rollback_local_ai_restart_failed:$LASTEXITCODE"
+        }}
+    }}
+    finally {{
+        Pop-Location
+    }}
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(65)
+    $ready = $false
     do {{
-        Start-Sleep -Milliseconds 250
-        $aiListener = @(Get-NetTCPConnection -State Listen -LocalPort 8720 -ErrorAction SilentlyContinue)
-    }} while ($aiListener.Count -ne 0 -and [DateTime]::UtcNow -lt $deadline)
-    if ($aiListener.Count -ne 0) {{
-        throw 'assistant_rollback_local_ai_stop_incomplete'
+        Start-Sleep -Milliseconds 500
+        try {{
+            $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8720/health' -TimeoutSec 2
+            $ready = ([string]$health.status -in @('ok','ready'))
+        }}
+        catch {{
+            $ready = $false
+        }}
+    }} while (-not $ready -and [DateTime]::UtcNow -lt $deadline)
+    if (-not $ready) {{
+        throw 'assistant_rollback_local_ai_restart_health_timeout'
     }}
 }}
 
 if (-not (Test-Path -LiteralPath $previous -PathType Container)) {{
-    throw 'assistant_rollback_previous_missing'
+    if ($rollbackAIWasRunning) {{
+        Start-RollbackLocalAI $root $rollbackAIModel
+    }}
+    if (Test-Path -LiteralPath $deployStatePath -PathType Leaf) {{
+        Remove-Item -LiteralPath $deployStatePath -Force
+    }}
+    Write-Output 'assistant_rollback_no_previous_recovered_current_root'
+    exit 0
 }}
 
 foreach ($runtimeName in @('state','ai','models-cache')) {{
@@ -1067,56 +1165,17 @@ if (Test-Path -LiteralPath $root) {{
 [System.IO.Directory]::Move($previous, $root)
 
 if ($rollbackAIWasRunning) {{
-    if ([string]::IsNullOrWhiteSpace($rollbackAIModel)) {{
-        $rollbackManifest = Join-Path $root 'runtime\\ai\\cache-manifest.json'
-        if (-not (Test-Path -LiteralPath $rollbackManifest -PathType Leaf)) {{
-            throw 'assistant_rollback_local_ai_manifest_missing'
-        }}
-        $rollbackManifestData = Get-Content -LiteralPath $rollbackManifest -Raw | ConvertFrom-Json
-        $rollbackAIModel = [string]$rollbackManifestData.canonical_model
-    }}
-    if ([string]::IsNullOrWhiteSpace($rollbackAIModel)) {{
-        throw 'assistant_rollback_local_ai_model_missing'
-    }}
+    Start-RollbackLocalAI $root $rollbackAIModel
+}}
 
-    $python = (Get-Command python -ErrorAction Stop).Source
-    $env:EZSTUDIOLAB_LOCAL_AI_MODEL = $rollbackAIModel
-    $env:EZSTUDIO_SHARED_MODEL_ROOT = '\\\\EZSTUDIO-MAIN\\EZModels'
-    $env:EZSTUDIOLAB_LOCAL_AI_CACHE_ROOT = Join-Path $root 'runtime\\models-cache'
-    $env:EZSTUDIOLAB_LOCAL_AI_RUNTIME_ROOT = Join-Path $root 'runtime\\ai'
-
-    Push-Location $root
-    try {{
-        $localAIStartCode = "import json; from app.local_ai_runtime import local_ai_start; print(json.dumps(local_ai_start(), ensure_ascii=True))"
-        & $python -c $localAIStartCode
-        if ($LASTEXITCODE -ne 0) {{
-            throw "assistant_rollback_local_ai_restart_failed:$LASTEXITCODE"
-        }}
-    }}
-    finally {{
-        Pop-Location
-    }}
-
-    $deadline = [DateTime]::UtcNow.AddSeconds(65)
-    $localAIReady = $false
-    do {{
-        Start-Sleep -Milliseconds 500
-        try {{
-            $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8720/health' -TimeoutSec 2
-            $localAIReady = ([string]$health.status -in @('ok','ready'))
-        }}
-        catch {{
-            $localAIReady = $false
-        }}
-    }} while (-not $localAIReady -and [DateTime]::UtcNow -lt $deadline)
-    if (-not $localAIReady) {{
-        throw 'assistant_rollback_local_ai_restart_health_timeout'
-    }}
+$restoredDeployState = Join-Path (Join-Path $root 'runtime\\state') 'assistant-deploy-state.json'
+if (Test-Path -LiteralPath $restoredDeployState -PathType Leaf) {{
+    Remove-Item -LiteralPath $restoredDeployState -Force
 }}
 
 Write-Output 'EZS_ASSISTANT_REMOTE_DEPLOY_ROLLBACK_OK'
 """
-    completed = _run_remote_lifecycle_script(plan, script)
+    completed = _run_remote_lifecycle_script(plan, script, timeout=120)
     if completed.returncode != 0:
         error = completed.stderr.strip() or completed.stdout.strip() or f"ssh_rc={completed.returncode}"
         raise RuntimeError(f"assistant_rollback_failed:{error[:500]}")

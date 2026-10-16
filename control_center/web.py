@@ -777,9 +777,10 @@ class ControlCenter:
     def assistant_deployment_apply(self) -> dict:
         with self.action_lock:
             plan = build_assistant_deploy_plan()
-            result = deploy_assistant_node(plan)
+            result = None
             runtime = None
             try:
+                result = deploy_assistant_node(plan)
                 runtime = self.assistant_supervision.start()
                 if str(runtime.get("state") or "").upper() != "RUNNING":
                     raise RuntimeError(
@@ -809,7 +810,7 @@ class ControlCenter:
 
             self._invalidate_snapshot()
             return {
-                **result,
+                **(result or {}),
                 "runtime": runtime,
                 "finalized": True,
             }

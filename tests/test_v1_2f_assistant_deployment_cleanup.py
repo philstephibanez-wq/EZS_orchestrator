@@ -31,7 +31,7 @@ class V12fAssistantDeploymentCleanupContract(unittest.TestCase):
 
     def test_failed_live_validation_has_rollback(self):
         self.assertIn("def rollback_deployment(plan: DeployPlan)", DEPLOY)
-        self.assertIn("assistant_rollback_previous_missing", DEPLOY)
+        self.assertIn("assistant_rollback_no_previous_recovered_current_root", DEPLOY)
         self.assertIn("EZS_ASSISTANT_REMOTE_DEPLOY_ROLLBACK_OK", DEPLOY)
 
     def test_runtime_is_staged_inside_single_root_clone(self):

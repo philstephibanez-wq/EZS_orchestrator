@@ -6,7 +6,7 @@ SCRIPTS = ROOT / 'scripts'
 
 class R334StandardStartStopContract(unittest.TestCase):
     def test_version_remains_1_2m(self):
-        self.assertEqual('1.2o', (ROOT / 'VERSION').read_text(encoding='utf-8-sig').strip())
+        self.assertEqual('1.2p', (ROOT / 'VERSION').read_text(encoding='utf-8-sig').strip())
 
     def test_canonical_start_exists(self):
         path = SCRIPTS / 'start.cmd'

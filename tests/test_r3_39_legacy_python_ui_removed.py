@@ -9,7 +9,7 @@ HELPER = (ROOT / "assistant_supervision" / "remote_helper.ps1").read_text(
 class R339LegacyPythonUiRemoved(unittest.TestCase):
     def test_orchestrator_version_stays_1_2m(self):
         self.assertEqual(
-            "1.2o",
+            "1.2p",
             (ROOT / "VERSION").read_text(encoding="utf-8-sig").strip(),
         )
 
