@@ -10,7 +10,7 @@ DEPLOY = (ROOT / "assistant_deployment" / "manager.py").read_text(encoding="utf-
 class V12fAssistantDeploymentCleanupContract(unittest.TestCase):
     def test_previous_is_kept_until_live_runtime_validation(self):
         move_current = DEPLOY.index(
-            "Move-Item -LiteralPath $remoteRoot -Destination $previous"
+            "[System.IO.Directory]::Move($remoteRoot, $previous)"
         )
         staged = DEPLOY.index("EZS_ASSISTANT_REMOTE_DEPLOY_STAGED_OK")
         finalize = DEPLOY.index("def finalize_deployment(plan: DeployPlan)")
@@ -61,7 +61,11 @@ class V12fAssistantDeploymentCleanupContract(unittest.TestCase):
             remote_host_repo=r"C:\\EZStudioLab_assistant\\runtime",
         )
         rendered = _remote_script(plan, "runtime.zip")
-        self.assertIn("(Join-Path $previous 'runtime\\state')", rendered)
+        self.assertIn(
+            "$persistentSource = Join-Path (Join-Path $previous 'runtime') $runtimeName",
+            rendered,
+        )
+        self.assertIn("'state'", rendered)
 
 
 if __name__ == "__main__":

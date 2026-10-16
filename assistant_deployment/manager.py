@@ -281,6 +281,24 @@ if (-not (Test-Path -LiteralPath (Join-Path $newVendor 'autoload_runtime.php') -
     throw 'assistant_vendor_missing_after_prepare'
 }}
 
+# The local llama-server executes from inside the single Assistant root.
+# A root swap while it is running is unsafe on Windows. Fail closed before
+# touching the active root.
+$localAI = @(
+    Get-CimInstance Win32_Process | Where-Object {{
+        $_.Name -eq 'llama-server.exe' -and
+        $_.CommandLine -and
+        $_.CommandLine.IndexOf(
+            (Join-Path $remoteRoot 'runtime\\ai'),
+            [System.StringComparison]::OrdinalIgnoreCase
+        ) -ge 0
+    }}
+)
+if ($localAI.Count -ne 0) {{
+    $localAIPids = ($localAI | Select-Object -ExpandProperty ProcessId) -join ','
+    throw "assistant_local_ai_running_blocks_deploy:$localAIPids"
+}}
+
 $dirty = (& git -C $staging status --porcelain)
 if ($LASTEXITCODE -ne 0) {{
     throw 'assistant_git_status_failed'
@@ -289,23 +307,46 @@ if (-not [string]::IsNullOrWhiteSpace(($dirty -join ''))) {{
     throw "assistant_staging_not_clean:$($dirty -join ';')"
 }}
 
+# Same-volume Directory.Move gives an all-or-nothing root rename.
+# Do not use Move-Item here: a recursive provider move can leave a
+# partially moved worktree when one child (notably .git) fails.
 if (Test-Path -LiteralPath $remoteRoot) {{
-    Move-Item -LiteralPath $remoteRoot -Destination $previous
+    [System.IO.Directory]::Move($remoteRoot, $previous)
 }}
-Move-Item -LiteralPath $staging -Destination $remoteRoot
+try {{
+    [System.IO.Directory]::Move($staging, $remoteRoot)
+}}
+catch {{
+    if (
+        -not (Test-Path -LiteralPath $remoteRoot) -and
+        (Test-Path -LiteralPath $previous -PathType Container)
+    ) {{
+        [System.IO.Directory]::Move($previous, $remoteRoot)
+    }}
+    throw
+}}
 Remove-Item -LiteralPath $archive -Force
 
-# Preserve persistent runtime state inside the single Assistant root.
-$stateTarget = Join-Path $runtimeRoot 'state'
-$stateSources = @(
-    $legacyStateRuntime,
-    (Join-Path $previous 'runtime\\state')
-)
-foreach ($stateSource in $stateSources) {{
-    if (Test-Path -LiteralPath $stateSource -PathType Container) {{
-        New-Item -ItemType Directory -Force -Path $stateTarget | Out-Null
-        Copy-Item -Path (Join-Path $stateSource '*') -Destination $stateTarget -Recurse -Force -ErrorAction SilentlyContinue
+# Preserve persistent local runtime assets without recopying the GGUF cache.
+foreach ($runtimeName in @('state','ai','models-cache')) {{
+    $persistentSource = Join-Path (Join-Path $previous 'runtime') $runtimeName
+    $persistentTarget = Join-Path $runtimeRoot $runtimeName
+    if (Test-Path -LiteralPath $persistentSource -PathType Container) {{
+        if (Test-Path -LiteralPath $persistentTarget) {{
+            Remove-Item -LiteralPath $persistentTarget -Recurse -Force
+        }}
+        [System.IO.Directory]::Move($persistentSource, $persistentTarget)
     }}
+}}
+
+# Import legacy state only when no canonical state was recovered above.
+$stateTarget = Join-Path $runtimeRoot 'state'
+if (
+    -not (Test-Path -LiteralPath $stateTarget -PathType Container) -and
+    (Test-Path -LiteralPath $legacyStateRuntime -PathType Container)
+) {{
+    New-Item -ItemType Directory -Force -Path $stateTarget | Out-Null
+    Copy-Item -Path (Join-Path $legacyStateRuntime '*') -Destination $stateTarget -Recurse -Force -ErrorAction SilentlyContinue
 }}
 
 $deployed = (& git -C $remoteRoot rev-parse HEAD).Trim()
@@ -474,6 +515,14 @@ def _remote_deployed_commit(
     if completed.returncode == 3:
         return True, None, None
 
+    if completed.returncode == 4:
+        error = (
+            completed.stderr.strip()
+            or completed.stdout.strip()
+            or "remote_git_invalid"
+        )
+        return True, None, ("remote_git_invalid:" + error)[:500]
+
     error = (
         completed.stderr.strip()
         or completed.stdout.strip()
@@ -630,6 +679,8 @@ def deployment_status(plan: DeployPlan) -> dict:
 
     if not reachable:
         state = "UNREACHABLE"
+    elif error:
+        state = "ERROR"
     elif deployed_commit is None:
         state = "NOT_DEPLOYED"
     elif source_dirty:
@@ -888,10 +939,22 @@ if (Test-Path -LiteralPath $helper -PathType Leaf) {{
 if (-not (Test-Path -LiteralPath $previous -PathType Container)) {{
     throw 'assistant_rollback_previous_missing'
 }}
+
+foreach ($runtimeName in @('state','ai','models-cache')) {{
+    $candidatePersistent = Join-Path (Join-Path $root 'runtime') $runtimeName
+    $previousPersistent = Join-Path (Join-Path $previous 'runtime') $runtimeName
+    if (Test-Path -LiteralPath $candidatePersistent -PathType Container) {{
+        if (Test-Path -LiteralPath $previousPersistent) {{
+            Remove-Item -LiteralPath $previousPersistent -Recurse -Force
+        }}
+        [System.IO.Directory]::Move($candidatePersistent, $previousPersistent)
+    }}
+}}
+
 if (Test-Path -LiteralPath $root) {{
     Remove-Item -LiteralPath $root -Recurse -Force
 }}
-Move-Item -LiteralPath $previous -Destination $root
+[System.IO.Directory]::Move($previous, $root)
 Write-Output 'EZS_ASSISTANT_REMOTE_DEPLOY_ROLLBACK_OK'
 """
     completed = _run_remote_lifecycle_script(plan, script)

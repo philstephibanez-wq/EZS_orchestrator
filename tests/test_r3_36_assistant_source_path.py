@@ -10,7 +10,7 @@ DEPLOY = (ROOT / "assistant_deployment" / "manager.py").read_text(encoding="utf-
 class R336AssistantSourcePathContract(unittest.TestCase):
     def test_version_remains_1_2m(self):
         self.assertEqual(
-            "1.2m",
+            "1.2n",
             (ROOT / "VERSION").read_text(encoding="utf-8-sig").strip(),
         )
 

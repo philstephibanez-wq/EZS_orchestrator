@@ -10,7 +10,7 @@ MANAGER = (ROOT / "assistant_supervision" / "manager.py").read_text(encoding="ut
 
 class R333AssistantWebRemoteContract(unittest.TestCase):
     def test_release_version(self):
-        self.assertEqual("1.2m", (ROOT / "VERSION").read_text(encoding="utf-8").strip())
+        self.assertEqual("1.2n", (ROOT / "VERSION").read_text(encoding="utf-8").strip())
 
     def test_remote_start_uses_canonical_web_singleton(self):
         self.assertIn('$webStartPath = Join-Path $root "scripts\\start.cmd"', HELPER)
