@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class R335StartupHotfixContract(unittest.TestCase):
     def test_version_remains_1_2m(self):
-        self.assertEqual("1.2n", (ROOT / "VERSION").read_text(encoding="utf-8-sig").strip())
+        self.assertEqual("1.2o", (ROOT / "VERSION").read_text(encoding="utf-8-sig").strip())
 
     def test_manager_compiles(self):
         py_compile.compile(str(ROOT / "assistant_supervision" / "manager.py"), doraise=True)

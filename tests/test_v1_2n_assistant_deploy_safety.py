@@ -44,12 +44,14 @@ class V12nAssistantDeploySafetyContract(unittest.TestCase):
         self.assertIn("[System.IO.Directory]::Move($staging, $remoteRoot)", rendered)
         self.assertNotIn("Move-Item -LiteralPath $remoteRoot -Destination $previous", rendered)
 
-    def test_local_ai_blocks_root_swap(self):
+    def test_local_ai_is_handled_before_root_swap(self):
         rendered = _remote_script(self._plan(), "runtime.zip")
-        self.assertLess(
-            rendered.index("assistant_local_ai_running_blocks_deploy"),
-            rendered.index("[System.IO.Directory]::Move($remoteRoot, $previous)"),
-        )
+        swap = rendered.index("[System.IO.Directory]::Move($remoteRoot, $previous)")
+        guard = rendered.find("assistant_local_ai_running_blocks_deploy")
+        stop = rendered.find("Stop-Process -Id $localAIPid")
+        lifecycle_position = guard if guard >= 0 else stop
+        self.assertGreaterEqual(lifecycle_position, 0)
+        self.assertLess(lifecycle_position, swap)
 
     def test_persistent_runtime_assets_are_handled(self):
         for token in ("'state'", "'ai'", "'models-cache'"):

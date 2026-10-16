@@ -10,7 +10,7 @@ HELPER = (ROOT / "assistant_supervision" / "remote_helper.ps1").read_text(encodi
 
 class R337GitDeployRemoteStartContract(unittest.TestCase):
     def test_version_stays_1_2m(self):
-        self.assertEqual("1.2n", (ROOT / "VERSION").read_text(encoding="utf-8-sig").strip())
+        self.assertEqual("1.2o", (ROOT / "VERSION").read_text(encoding="utf-8-sig").strip())
 
     def test_status_uses_remote_git_head(self):
         self.assertIn("git -C $root rev-parse HEAD", DEPLOY)

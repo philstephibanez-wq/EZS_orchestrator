@@ -13,7 +13,7 @@ MANAGER = (ROOT / "assistant_supervision" / "manager.py").read_text(
 class R340PersistentWebTaskContract(unittest.TestCase):
     def test_version_stays_1_2m(self):
         self.assertEqual(
-            "1.2n",
+            "1.2o",
             (ROOT / "VERSION").read_text(encoding="utf-8-sig").strip(),
         )
 

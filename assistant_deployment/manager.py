@@ -282,8 +282,10 @@ if (-not (Test-Path -LiteralPath (Join-Path $newVendor 'autoload_runtime.php') -
 }}
 
 # The local llama-server executes from inside the single Assistant root.
-# A root swap while it is running is unsafe on Windows. Fail closed before
-# touching the active root.
+# Capture its canonical model, stop it before the atomic root rename, then
+# restart it from the new root after persistent runtime assets are moved.
+$localAIWasRunning = $false
+$localAIModel = $null
 $localAI = @(
     Get-CimInstance Win32_Process | Where-Object {{
         $_.Name -eq 'llama-server.exe' -and
@@ -294,9 +296,45 @@ $localAI = @(
         ) -ge 0
     }}
 )
-if ($localAI.Count -ne 0) {{
+if ($localAI.Count -gt 1) {{
     $localAIPids = ($localAI | Select-Object -ExpandProperty ProcessId) -join ','
-    throw "assistant_local_ai_running_blocks_deploy:$localAIPids"
+    throw "assistant_local_ai_duplicate_processes:$localAIPids"
+}}
+if ($localAI.Count -eq 1) {{
+    $localAIWasRunning = $true
+    $localAIManifest = Join-Path $remoteRoot 'runtime\\ai\\cache-manifest.json'
+    if (-not (Test-Path -LiteralPath $localAIManifest -PathType Leaf)) {{
+        throw 'assistant_local_ai_manifest_missing'
+    }}
+    $localAIManifestData = Get-Content -LiteralPath $localAIManifest -Raw | ConvertFrom-Json
+    $localAIModel = [string]$localAIManifestData.canonical_model
+    if ([string]::IsNullOrWhiteSpace($localAIModel)) {{
+        throw 'assistant_local_ai_canonical_model_missing'
+    }}
+
+    try {{
+        $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8720/health' -TimeoutSec 5
+        if ([string]$health.status -notin @('ok','ready')) {{
+            throw "assistant_local_ai_health_not_ready:$($health.status)"
+        }}
+    }}
+    catch {{
+        throw "assistant_local_ai_health_failed:$($_.Exception.Message)"
+    }}
+
+    $localAIPid = [int]$localAI[0].ProcessId
+    Stop-Process -Id $localAIPid -Force -ErrorAction Stop
+    Remove-Item -LiteralPath (Join-Path $remoteRoot 'runtime\\ai\\llama-server.pid') -Force -ErrorAction SilentlyContinue
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+    do {{
+        Start-Sleep -Milliseconds 250
+        $aiListener = @(Get-NetTCPConnection -State Listen -LocalPort 8720 -ErrorAction SilentlyContinue)
+    }} while ($aiListener.Count -ne 0 -and [DateTime]::UtcNow -lt $deadline)
+    if ($aiListener.Count -ne 0) {{
+        $owners = ($aiListener | Select-Object -ExpandProperty OwningProcess -Unique) -join ','
+        throw "assistant_local_ai_stop_incomplete:$owners"
+    }}
 }}
 
 $dirty = (& git -C $staging status --porcelain)
@@ -347,6 +385,42 @@ if (
 ) {{
     New-Item -ItemType Directory -Force -Path $stateTarget | Out-Null
     Copy-Item -Path (Join-Path $legacyStateRuntime '*') -Destination $stateTarget -Recurse -Force -ErrorAction SilentlyContinue
+}}
+
+if ($localAIWasRunning) {{
+    $python = (Get-Command python -ErrorAction Stop).Source
+    $env:EZSTUDIOLAB_LOCAL_AI_MODEL = $localAIModel
+    $env:EZSTUDIO_SHARED_MODEL_ROOT = '\\\\EZSTUDIO-MAIN\\EZModels'
+    $env:EZSTUDIOLAB_LOCAL_AI_CACHE_ROOT = Join-Path $remoteRoot 'runtime\\models-cache'
+    $env:EZSTUDIOLAB_LOCAL_AI_RUNTIME_ROOT = Join-Path $remoteRoot 'runtime\\ai'
+
+    Push-Location $remoteRoot
+    try {{
+        $localAIStartCode = "import json; from app.local_ai_runtime import local_ai_start; print(json.dumps(local_ai_start(), ensure_ascii=True))"
+        & $python -c $localAIStartCode
+        if ($LASTEXITCODE -ne 0) {{
+            throw "assistant_local_ai_restart_failed:$LASTEXITCODE"
+        }}
+    }}
+    finally {{
+        Pop-Location
+    }}
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(65)
+    $localAIReady = $false
+    do {{
+        Start-Sleep -Milliseconds 500
+        try {{
+            $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8720/health' -TimeoutSec 2
+            $localAIReady = ([string]$health.status -in @('ok','ready'))
+        }}
+        catch {{
+            $localAIReady = $false
+        }}
+    }} while (-not $localAIReady -and [DateTime]::UtcNow -lt $deadline)
+    if (-not $localAIReady) {{
+        throw 'assistant_local_ai_restart_health_timeout'
+    }}
 }}
 
 $deployed = (& git -C $remoteRoot rev-parse HEAD).Trim()
@@ -936,6 +1010,42 @@ $helper = Join-Path $runtime 'assistant-supervision.ps1'
 if (Test-Path -LiteralPath $helper -PathType Leaf) {{
     & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper stop
 }}
+
+$rollbackAIWasRunning = $false
+$rollbackAIModel = $null
+$rollbackAI = @(
+    Get-CimInstance Win32_Process | Where-Object {{
+        $_.Name -eq 'llama-server.exe' -and
+        $_.CommandLine -and
+        $_.CommandLine.IndexOf(
+            (Join-Path $root 'runtime\\ai'),
+            [System.StringComparison]::OrdinalIgnoreCase
+        ) -ge 0
+    }}
+)
+if ($rollbackAI.Count -gt 1) {{
+    throw "assistant_rollback_local_ai_duplicates:$($rollbackAI.Count)"
+}}
+if ($rollbackAI.Count -eq 1) {{
+    $rollbackAIWasRunning = $true
+    $rollbackManifest = Join-Path $root 'runtime\\ai\\cache-manifest.json'
+    if (Test-Path -LiteralPath $rollbackManifest -PathType Leaf) {{
+        $rollbackManifestData = Get-Content -LiteralPath $rollbackManifest -Raw | ConvertFrom-Json
+        $rollbackAIModel = [string]$rollbackManifestData.canonical_model
+    }}
+    Stop-Process -Id ([int]$rollbackAI[0].ProcessId) -Force -ErrorAction Stop
+    Remove-Item -LiteralPath (Join-Path $root 'runtime\\ai\\llama-server.pid') -Force -ErrorAction SilentlyContinue
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+    do {{
+        Start-Sleep -Milliseconds 250
+        $aiListener = @(Get-NetTCPConnection -State Listen -LocalPort 8720 -ErrorAction SilentlyContinue)
+    }} while ($aiListener.Count -ne 0 -and [DateTime]::UtcNow -lt $deadline)
+    if ($aiListener.Count -ne 0) {{
+        throw 'assistant_rollback_local_ai_stop_incomplete'
+    }}
+}}
+
 if (-not (Test-Path -LiteralPath $previous -PathType Container)) {{
     throw 'assistant_rollback_previous_missing'
 }}
@@ -955,6 +1065,55 @@ if (Test-Path -LiteralPath $root) {{
     Remove-Item -LiteralPath $root -Recurse -Force
 }}
 [System.IO.Directory]::Move($previous, $root)
+
+if ($rollbackAIWasRunning) {{
+    if ([string]::IsNullOrWhiteSpace($rollbackAIModel)) {{
+        $rollbackManifest = Join-Path $root 'runtime\\ai\\cache-manifest.json'
+        if (-not (Test-Path -LiteralPath $rollbackManifest -PathType Leaf)) {{
+            throw 'assistant_rollback_local_ai_manifest_missing'
+        }}
+        $rollbackManifestData = Get-Content -LiteralPath $rollbackManifest -Raw | ConvertFrom-Json
+        $rollbackAIModel = [string]$rollbackManifestData.canonical_model
+    }}
+    if ([string]::IsNullOrWhiteSpace($rollbackAIModel)) {{
+        throw 'assistant_rollback_local_ai_model_missing'
+    }}
+
+    $python = (Get-Command python -ErrorAction Stop).Source
+    $env:EZSTUDIOLAB_LOCAL_AI_MODEL = $rollbackAIModel
+    $env:EZSTUDIO_SHARED_MODEL_ROOT = '\\\\EZSTUDIO-MAIN\\EZModels'
+    $env:EZSTUDIOLAB_LOCAL_AI_CACHE_ROOT = Join-Path $root 'runtime\\models-cache'
+    $env:EZSTUDIOLAB_LOCAL_AI_RUNTIME_ROOT = Join-Path $root 'runtime\\ai'
+
+    Push-Location $root
+    try {{
+        $localAIStartCode = "import json; from app.local_ai_runtime import local_ai_start; print(json.dumps(local_ai_start(), ensure_ascii=True))"
+        & $python -c $localAIStartCode
+        if ($LASTEXITCODE -ne 0) {{
+            throw "assistant_rollback_local_ai_restart_failed:$LASTEXITCODE"
+        }}
+    }}
+    finally {{
+        Pop-Location
+    }}
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(65)
+    $localAIReady = $false
+    do {{
+        Start-Sleep -Milliseconds 500
+        try {{
+            $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8720/health' -TimeoutSec 2
+            $localAIReady = ([string]$health.status -in @('ok','ready'))
+        }}
+        catch {{
+            $localAIReady = $false
+        }}
+    }} while (-not $localAIReady -and [DateTime]::UtcNow -lt $deadline)
+    if (-not $localAIReady) {{
+        throw 'assistant_rollback_local_ai_restart_health_timeout'
+    }}
+}}
+
 Write-Output 'EZS_ASSISTANT_REMOTE_DEPLOY_ROLLBACK_OK'
 """
     completed = _run_remote_lifecycle_script(plan, script)
