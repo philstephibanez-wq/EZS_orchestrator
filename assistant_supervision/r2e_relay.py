@@ -60,6 +60,8 @@ class Store:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         with closing(self.connect()) as c, c:
             c.execute('CREATE TABLE IF NOT EXISTS receipts (run_id INTEGER PRIMARY KEY, payload_hash TEXT NOT NULL, state TEXT NOT NULL, updated REAL NOT NULL)')
+            c.execute('CREATE TABLE IF NOT EXISTS relay_control (id INTEGER PRIMARY KEY CHECK(id=1), maintenance INTEGER NOT NULL DEFAULT 0)')
+            c.execute('INSERT OR IGNORE INTO relay_control(id,maintenance) VALUES(1,0)')
 
     def connect(self):
         c = sqlite3.connect(self.path, timeout=30)
@@ -75,20 +77,39 @@ class Store:
             c.execute('INSERT INTO receipts VALUES(?,?,?,?) ON CONFLICT(run_id) DO UPDATE SET payload_hash=excluded.payload_hash,state=excluded.state,updated=excluded.updated', (run_id, digest, state, time.time()))
 
 
+    def maintenance(self) -> bool:
+        with closing(self.connect()) as c:
+            row=c.execute('SELECT maintenance FROM relay_control WHERE id=1').fetchone()
+            if row is None: raise RelayError(503,'maintenance_state_unavailable')
+            return bool(row[0])
+
+    def active(self) -> bool:
+        with closing(self.connect()) as c:
+            return c.execute("SELECT 1 FROM receipts WHERE state IN ('claimed','saved') LIMIT 1").fetchone() is not None
+
+    def set_maintenance(self, enabled: bool) -> None:
+        with closing(self.connect()) as c, c:
+            c.execute('UPDATE relay_control SET maintenance=? WHERE id=1',(int(enabled),))
+
+
 class Relay:
     def __init__(self, lab: LabClient, store: Store):
         self.lab, self.store = lab, store
         self.lock = threading.RLock()
 
     def queue(self, limit: int) -> dict:
-        # LAB is the authority for eligibility and claim. Never expose scientific jobs.
+        # One ASSISTANT claim, regardless of queue depth. Preserve waiting jobs.
         with self.lock:
+            if self.store.maintenance():
+                return {'schema':'ezs.r2e.profile-queue.v1','reviews':[],'count':0,'maintenance':True}
+            if self.store.active():
+                return {'schema':'ezs.r2e.profile-queue.v1','reviews':[],'count':0,'busy':True}
             requests = self.lab.call('GET', PREFIX + '/profile/ai-requests').get('requests', [])
             if not isinstance(requests, list):
                 raise RelayError(502, 'invalid_lab_requests')
             reviews = []
             for job in requests:
-                if len(reviews) >= limit:
+                if len(reviews) >= 1:
                     break
                 if not isinstance(job, dict) or job.get('status') != 'queued':
                     continue
@@ -109,6 +130,16 @@ class Relay:
                 self.store.set_receipt(run_id, '', 'claimed')
                 reviews.append(item)
             return {'schema':'ezs.r2e.profile-queue.v1','reviews':reviews,'count':len(reviews)}
+
+    def control(self, mode: str) -> dict:
+        with self.lock:
+            if mode == 'pause':
+                self.store.set_maintenance(True)
+            elif mode == 'resume':
+                self.store.set_maintenance(False)
+            elif mode != 'status':
+                raise RelayError(422,'maintenance_mode_invalid')
+            return {'ok':True,'maintenance':self.store.maintenance(),'active':self.store.active()}
 
     def submit(self, payload: dict) -> dict:
         run_id = int(payload.get('run_id') or 0)
@@ -156,8 +187,14 @@ def make_handler(relay: Relay, key: str):
                 return
             url = urlsplit(self.path)
             try:
-                if method == 'GET' and url.path == '/r2e/profile/reviews/queue':
-                    limit = min(5, max(1, int(parse_qs(url.query).get('limit',['1'])[0])))
+                if method == 'GET' and url.path == '/r2e/profile/maintenance':
+                    self._send(200,relay.control('status'))
+                elif method == 'POST' and url.path == '/r2e/profile/maintenance/pause':
+                    self._send(200,relay.control('pause'))
+                elif method == 'POST' and url.path == '/r2e/profile/maintenance/resume':
+                    self._send(200,relay.control('resume'))
+                elif method == 'GET' and url.path == '/r2e/profile/reviews/queue':
+                    limit = 1  # Single-job policy; never batch-claim.
                     self._send(200, relay.queue(limit))
                 elif method == 'POST' and url.path == '/r2e/profile/reviews':
                     length = int(self.headers.get('Content-Length','0'))
