@@ -9,6 +9,8 @@ import sys
 import threading
 import time
 import webbrowser
+import urllib.error
+import urllib.request
 from dataclasses import asdict
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -653,12 +655,64 @@ class ControlCenter:
             return None
         return target, str(job_id)
 
+    def _r2e_canonical_jobs(self) -> list[dict]:
+        """Read-only LAB canonical history, never claim or alter AI jobs."""
+        lab_url = self.config.lab_backend_url
+        if not lab_url:
+            raise RuntimeError('lab_backend_url_missing')
+        token = self.assistant_supervision._configured_token()
+        url = lab_url.rstrip('/') + '/internal/analysis/desktop/profile/ai-requests/recent?limit=80'
+        request = urllib.request.Request(url, headers={
+            'X-EZScore-Analysis-Token': token,
+            'Accept': 'application/json',
+        }, method='GET')
+        with urllib.request.urlopen(request, timeout=3) as response:
+            payload = json.loads(response.read(262144).decode('utf-8'))
+        raw = payload.get('jobs')
+        if not isinstance(raw, list):
+            raise ValueError('r2e_invalid_lab_job_history')
+        records = []
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            status = str(item.get('status') or '').lower()
+            if status not in {'queued', 'running', 'completed', 'error'}:
+                continue
+            records.append({
+                'job_id': item.get('job_id'),
+                'target': 'lab',
+                'song_id': item.get('song_id'),
+                'song_title': item.get('song_title') or f"PROFILE run #{item.get('run_id')}",
+                'kind': 'assistant.profile.review',
+                'state': status,
+                'timestamp': item.get('updated_at') or item.get('created_at') or '',
+                'analysis_returncode': None,
+                'finalize_status': 'ok' if status == 'completed' else ('error' if status == 'error' else '-'),
+                'error': item.get('message') if status == 'error' else None,
+                'run_id': item.get('run_id'),
+                'source': 'lab_canonical_ai',
+            })
+        return records
+
     def jobs(self) -> dict:
         history_payload = self.job_history.payload(limit=80)
         history = list(history_payload.get("jobs") or [])
         known = {key for row in history if (key := self._job_key(row)) is not None}
         waiting = []
         queue_errors = {}
+        try:
+            canonical_ai = self._r2e_canonical_jobs()
+        except Exception as exc:
+            canonical_ai = []
+            queue_errors['lab_ai'] = f"{type(exc).__name__}:{exc}"[:200]
+        # Canonical LAB status supersedes historical scientific-worker errors for
+        # the same ID; retain old unrelated scientific records distinctly.
+        ai_keys = {self._job_key(row) for row in canonical_ai}
+        history = [row for row in history if not (
+            str(row.get('kind') or '') == 'assistant.profile.review'
+            and self._job_key(row) in ai_keys
+        )]
+        known = {key for row in history for key in [self._job_key(row)] if key is not None}
         for target in (Target.DEV, Target.PROD, Target.LAB):
             try:
                 queued = self.transport.queue(target)
@@ -676,15 +730,19 @@ class ControlCenter:
         active_states = {"running", "claimed", "cancelling"}
         active = [r for r in history if str(r.get("state") or "").lower() in active_states]
         archived = [r for r in history if str(r.get("state") or "").lower() not in active_states]
-        jobs = active + waiting + archived
+        ai_active = [r for r in canonical_ai if r['state'] in active_states]
+        ai_waiting = [r for r in canonical_ai if r['state'] == 'queued']
+        ai_archived = [r for r in canonical_ai if r['state'] not in active_states and r['state'] != 'queued']
+        jobs = ai_active + active + ai_waiting + waiting + ai_archived + archived
         return {
             "ok": bool(history_payload.get("ok", True)),
             "count": len(jobs),
             "jobs": jobs[:100],
-            "running": len(active),
-            "waiting": len(waiting),
+            "running": len(active) + len(ai_active),
+            "waiting": len(waiting) + len(ai_waiting),
             "history": len(archived),
             "queue_errors": queue_errors,
+            "ai_canonical_count": len(canonical_ai),
             "execution_policy": "sequential_machine_gpu_singleton",
         }
 
@@ -1197,8 +1255,8 @@ function renderStatus(s){
 }
 function renderJobs(payload){
  const jobs=(payload&&payload.jobs)||[],running=payload?.running??0,waiting=payload?.waiting??0;
- txt("jobsMeta",payload&&payload.ok?`${payload.count??jobs.length} job(s) · ${running} running · ${waiting} waiting · exécution séquentielle`:"Erreur");
- $("jobsBody").innerHTML=jobs.length?jobs.map(j=>{const state=String(j.state||"unknown").toLowerCase(),target=String(j.target||"-").toLowerCase();const job=(j.job_id&&j.job_id!=="-")?`#${esc(j.job_id)}`:"-";const song=j.song_title?`${esc(j.song_title)}${j.song_id?` (#${esc(j.song_id)})`:""}`:(j.song_id?`#${esc(j.song_id)}`:"-");const date=j.timestamp||((state==="waiting"&&j.queue_position)?`position ${j.queue_position}`:"-");return `<tr><td><strong>${job}</strong></td><td><span class="job-target ${esc(target)}">${esc(target.toUpperCase())}</span></td><td>${song}</td><td>${esc(j.kind||"-")}</td><td><span class="job-state ${esc(state)}">${esc(state.toUpperCase())}</span></td><td>${esc(date)}</td><td>${esc(j.analysis_returncode??"-")}</td><td>${esc(j.finalize_status||"-")}</td><td>${j.error?esc(j.error):"-"}</td></tr>`}).join(""):'<tr><td colspan="9">Aucun job récent.</td></tr>';
+ txt("jobsMeta",payload&&payload.ok?`${payload.count??jobs.length} job(s) · ${running} running · ${waiting} waiting · IA canonique ${payload.ai_canonical_count??0} · exécution séquentielle${payload.queue_errors?.lab_ai?" · IA indisponible":""}`:"Erreur");
+ $("jobsBody").innerHTML=jobs.length?jobs.map(j=>{const state=String(j.state||"unknown").toLowerCase(),target=String(j.target||"-").toLowerCase();const job=(j.job_id&&j.job_id!=="-")?`#${esc(j.job_id)}${j.source==="lab_canonical_ai"?" · IA":""}`:"-";const song=j.song_title?`${esc(j.song_title)}${j.song_id?` (#${esc(j.song_id)})`:""}`:(j.song_id?`#${esc(j.song_id)}`:"-");const date=j.timestamp||((state==="waiting"&&j.queue_position)?`position ${j.queue_position}`:"-");return `<tr><td><strong>${job}</strong></td><td><span class="job-target ${esc(target)}">${esc(target.toUpperCase())}</span></td><td>${song}</td><td>${esc(j.kind||"-")}</td><td><span class="job-state ${esc(state)}">${esc(state.toUpperCase())}</span></td><td>${esc(date)}</td><td>${esc(j.analysis_returncode??"-")}</td><td>${esc(j.finalize_status||"-")}</td><td>${j.error?esc(j.error):"-"}</td></tr>`}).join(""):'<tr><td colspan="9">Aucun job récent.</td></tr>';
 }
 async function refreshJobs(){if(jobsRefreshInFlight)return;jobsRefreshInFlight=true;try{renderJobs(await getJSON("/api/jobs"))}catch(e){txt("jobsMeta","Erreur de lecture")}finally{jobsRefreshInFlight=false}}
 async function refreshLogs(){
