@@ -1245,7 +1245,17 @@ async function refreshLogs(){
   $("logText").textContent=String(e);
  }
 }
-async function refresh(){if(refreshInFlight)return;refreshInFlight=true;try{renderStatus(await getJSON("/api/status"));if(currentView==="logs")await refreshLogs()}catch(e){toast(String(e),false)}finally{refreshInFlight=false}}
+async function refresh(){
+ if(refreshInFlight)return;
+ refreshInFlight=true;
+ try{
+  renderStatus(await getJSON("/api/status"));
+  if(currentView==="logs")await refreshLogs();
+ }catch(e){
+  txt("updated","Dernière actualisation impossible · "+new Date().toLocaleTimeString("fr-FR"));
+  toast(String(e),false);
+ }finally{refreshInFlight=false}
+}
 async function action(name){if(busy)return;busy=true;syncActionButtons();try{const r=await protectedFetch("/api/action",{method:"POST",headers:{"Content-Type":"application/json","X-EZS-Token":TOKEN},body:JSON.stringify({action:name})});const d=await r.json();toast(d.message||d.error||"OK",!!d.ok)}catch(e){toast(String(e),false)}finally{busy=false;await refresh()}}
 async function assistantRuntimeAction(path,successMessage){
  if(busy)return;
@@ -1455,7 +1465,19 @@ $("safetyLogs").addEventListener("click",()=>{
  if(tab)tab.click();else refreshLogs();
 });
 $("headerRefresh").addEventListener("click",async()=>{await refresh();await refreshJobs();await refreshAssistantDeployment();await refreshAssistantSupervision();if(currentView==="deployment")await refreshDeployment()});
-refresh();refreshJobs();refreshAssistantDeployment();refreshAssistantSupervision();setInterval(refresh,3000);setInterval(refreshJobs,3000);setInterval(refreshAssistantSupervision,10000);
+// R27A: foreground-only polling, with immediate refresh on return.
+function refreshVisibleInfrastructure(){
+ if(document.hidden)return;
+ refresh();
+ if(currentView==="infrastructure")refreshAssistantSupervision();
+}
+document.addEventListener("visibilitychange",()=>{
+ if(!document.hidden){refreshVisibleInfrastructure();refreshJobs();}
+});
+refresh();refreshJobs();refreshAssistantDeployment();refreshAssistantSupervision();
+setInterval(refreshVisibleInfrastructure,5000);
+setInterval(()=>{if(!document.hidden)refreshJobs()},5000);
+setInterval(()=>{if(!document.hidden && currentView!=="infrastructure")refreshAssistantSupervision()},10000);
 </script>
 </body></html>'''
 

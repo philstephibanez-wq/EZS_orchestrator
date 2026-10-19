@@ -795,6 +795,11 @@ def deployment_status(plan: DeployPlan) -> dict:
     }
 
 def deploy(plan: DeployPlan) -> dict:
+    # R27B_FAIL_CLOSED_LEGACY_DEPLOY_GUARD: legacy full-root deploy stops
+    # unrelated workers and force-terminates local AI; no safe PROFILE
+    # handover exists yet. Keep it unreachable until R27C implements a
+    # targeted, non-destructive transaction and verifies the old worker exit.
+    raise RuntimeError("r27_profile_safe_handover_not_implemented")
     _audit_deployment("START", plan)
     try:
         if shutil.which("ssh") is None:
@@ -1184,6 +1189,63 @@ Write-Output 'EZS_ASSISTANT_REMOTE_DEPLOY_ROLLBACK_OK'
         "schema": "ezs.assistant-deployment.rollback.v1",
         "stdout": completed.stdout.strip(),
     }
+
+# R27C_READ_ONLY_PROFILE_REMOTE_PREFLIGHT
+# This function does not stop, register or restart any remote processes.
+def profile_remote_preflight(plan: DeployPlan) -> dict:
+    """Inventory remote PROFILE process/task and AI, without side effects."""
+    script = r"""
+$ErrorActionPreference = 'Stop'
+$all = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+$profile = @($all | Where-Object {
+  $_.CommandLine -and
+  $_.CommandLine -like '*EZStudioLab_assistant*app*main.py*' -and
+  $_.CommandLine -like '*profile-review-auto-watch*'
+})
+$ai = @($all | Where-Object {
+  $_.Name -eq 'llama-server.exe' -and $_.CommandLine -and
+  $_.CommandLine -like '*EZStudioLab_assistant*'
+})
+$unknown = @($all | Where-Object {
+  $_.Name -match '^(python|pythonw|py|llama-server)(\.exe)?$' -and
+  -not $_.CommandLine
+})
+$task = Get-ScheduledTask -TaskName 'EZStudioLab Assistant Profile' -ErrorAction SilentlyContinue
+[pscustomobject]@{
+  schema = 'ezs.r27c.profile-preflight.v1'
+  profile_pids = @($profile | ForEach-Object { [int]$_.ProcessId })
+  ai_pids = @($ai | ForEach-Object { [int]$_.ProcessId })
+  opaque_processes = @($unknown | ForEach-Object { [int]$_.ProcessId })
+  profile_task_present = ($null -ne $task)
+  profile_task_state = $(if ($null -eq $task) { $null } else { [string]$task.State })
+} | ConvertTo-Json -Compress -Depth 5
+"""
+    completed = _run_remote_lifecycle_script(plan, script, timeout=30)
+    if completed.returncode != 0:
+        raise RuntimeError('r27c_remote_inventory_unavailable')
+    try:
+        lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+        payload = json.loads(lines[-1])
+        if payload.get('schema') != 'ezs.r27c.profile-preflight.v1':
+            raise ValueError('wrong_schema')
+        for key in ('profile_pids', 'ai_pids', 'opaque_processes'):
+            if not isinstance(payload.get(key), list) or any(
+                isinstance(n, bool) or not isinstance(n, int) or n <= 0
+                for n in payload[key]
+            ):
+                raise ValueError('invalid_'+key)
+        if not isinstance(payload.get('profile_task_present'), bool):
+            raise ValueError('invalid_task')
+    except (IndexError, ValueError, TypeError, KeyError) as exc:
+        raise RuntimeError('r27c_remote_inventory_invalid') from exc
+    blockers = []
+    if payload['profile_pids']: blockers.append('profile_worker_active')
+    if payload['opaque_processes']: blockers.append('opaque_remote_processes')
+    if payload['profile_task_present']: blockers.append('profile_task_requires_cooperative_handover')
+    if payload['ai_pids']: blockers.append('local_ai_must_remain_untouched')
+    return {'schema': payload['schema'], 'safe_to_use_legacy_deploy': False,
+            'blockers': blockers or ['legacy_deployment_prohibited'], 'inventory': payload}
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(prog="EZS assistant deployment")

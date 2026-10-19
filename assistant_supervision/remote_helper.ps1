@@ -181,6 +181,33 @@ function New-WorkerEncodedCommand {
 `$env:PYTHONPATH = '$hostRepo\python'
 "@
 
+    if ($Mode -eq "profile") {
+        $common += @"
+
+# R20_PROFILE_AI_FROM_CANONICAL_CACHE_MANIFEST
+`$modelManifestPath = Join-Path '$root' 'runtime\ai\cache-manifest.json'
+if (-not (Test-Path -LiteralPath `$modelManifestPath -PathType Leaf)) {
+    throw 'profile_ai_cache_manifest_missing'
+}
+`$modelManifest = Get-Content -LiteralPath `$modelManifestPath -Raw | ConvertFrom-Json
+`$canonicalModel = [string]`$modelManifest.canonical_model
+if ([string]::IsNullOrWhiteSpace(`$canonicalModel)) {
+    throw 'profile_ai_canonical_model_missing'
+}
+`$sharedRoot = [string]`$env:EZSTUDIO_SHARED_MODEL_ROOT
+`$prefix = `$sharedRoot.TrimEnd('\') + '\'
+if (-not `$canonicalModel.StartsWith(`$prefix,[System.StringComparison]::OrdinalIgnoreCase)) {
+    throw 'profile_ai_model_outside_shared_root'
+}
+# R27A: canonical review preset; no local fallback.
+`$env:EZSTUDIOLAB_REVIEW_PRESET_PATH = '\\EZSTUDIO-MAIN\EZAssistantPresets\profile-baseline-1.json'
+`$env:EZSTUDIOLAB_AI_PROVIDER = 'local'
+`$env:EZSTUDIOLAB_LOCAL_AI_MODEL = `$canonicalModel
+`$env:EZSTUDIOLAB_LOCAL_AI_CACHE_ROOT = Join-Path '$root' 'runtime\models-cache'
+`$env:EZSTUDIOLAB_LOCAL_AI_ENDPOINT = 'http://127.0.0.1:8720'
+"@
+    }
+
     if ($Mode -eq "distributed") {
         $body = @"
 `$process = Start-Process -FilePath '$Python' -ArgumentList @(
