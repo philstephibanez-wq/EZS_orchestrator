@@ -242,8 +242,9 @@ class AssistantSupervisor:
     $profileMatches = @(
         Get-CimInstance Win32_Process | Where-Object {{
             $_.CommandLine -and
-            $_.CommandLine -like '*EZStudioLab_assistant*app*main.py*' -and
-            $_.CommandLine -like '*profile-review-auto-watch*'
+            ($_.CommandLine -like '*EZStudioLab_assistant*runtime*profile_ai_requests_worker.py*' -or
+             ($_.CommandLine -like '*EZStudioLab_assistant*app*main.py*' -and
+              $_.CommandLine -like '*profile-review-auto-watch*'))
         }}
     )
     $commit = $null
