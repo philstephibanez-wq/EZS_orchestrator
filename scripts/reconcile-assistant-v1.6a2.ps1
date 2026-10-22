@@ -40,6 +40,9 @@ git -C $root rev-parse --short HEAD
 if ($LASTEXITCODE -ne 0) { throw 'XPS_HEAD_FAILED' }
 $version = (Get-Content (Join-Path $root 'VERSION') -Raw).Trim()
 Write-Output "XPS_VERSION=$version"
+Write-Output '=== XPS GIT STATUS (READ ONLY) ==='
+git -C $root status --short
+if ($LASTEXITCODE -ne 0) { throw 'XPS_STATUS_FAILED' }
 $worker = @(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'profile_ai_requests_worker.py' })
 Write-Output "PROFILE_WORKER_COUNT=$($worker.Count)"
 foreach ($item in $worker) { Write-Output "PROFILE_WORKER_PID=$($item.ProcessId)" }
@@ -53,7 +56,12 @@ $applyRemote = @'
 $ErrorActionPreference = 'Stop'
 $root = 'C:\EZStudioLab_assistant'
 $dirty = @(git -C $root status --porcelain)
-if ($LASTEXITCODE -ne 0 -or $dirty.Count -gt 0) { throw 'XPS_SOURCE_DIRTY_ABORT' }
+if ($LASTEXITCODE -ne 0) { throw 'XPS_STATUS_FAILED' }
+if ($dirty.Count -gt 0) {
+    Write-Output '=== XPS MODIFICATIONS PRESERVED ==='
+    $dirty | ForEach-Object { Write-Output $_ }
+    throw 'XPS_SOURCE_DIRTY_ABORT: inspect files before retry; no reset, clean or stash performed'
+}
 git -C $root pull --ff-only origin main
 if ($LASTEXITCODE -ne 0) { throw 'XPS_PULL_FAILED' }
 $version = (Get-Content (Join-Path $root 'VERSION') -Raw).Trim()
