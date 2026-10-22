@@ -57,11 +57,19 @@ $ErrorActionPreference = 'Stop'
 $root = 'C:\EZStudioLab_assistant'
 $dirty = @(git -C $root status --porcelain)
 if ($LASTEXITCODE -ne 0) { throw 'XPS_STATUS_FAILED' }
-if ($dirty.Count -gt 0) {
-    Write-Output '=== XPS MODIFICATIONS PRESERVED ==='
-    $dirty | ForEach-Object { Write-Output $_ }
-    throw 'XPS_SOURCE_DIRTY_ABORT: inspect files before retry; no reset, clean or stash performed'
+$trackedChanges = @($dirty | Where-Object { $_ -notmatch '^\?\? ' })
+$untracked = @($dirty | Where-Object { $_ -match '^\?\? ' })
+if ($untracked.Count -gt 0) {
+    Write-Output '=== XPS UNTRACKED FILES PRESERVED ==='
+    $untracked | ForEach-Object { Write-Output $_ }
 }
+if ($trackedChanges.Count -gt 0) {
+    Write-Output '=== XPS TRACKED MODIFICATIONS: ABORT ==='
+    $trackedChanges | ForEach-Object { Write-Output $_ }
+    throw 'XPS_TRACKED_CHANGES_ABORT'
+}
+# Git fast-forward refuses collisions with existing untracked paths.
+# Never clean/reset/stash or add local-generated files automatically.
 git -C $root pull --ff-only origin main
 if ($LASTEXITCODE -ne 0) { throw 'XPS_PULL_FAILED' }
 $version = (Get-Content (Join-Path $root 'VERSION') -Raw).Trim()
