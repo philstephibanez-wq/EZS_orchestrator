@@ -3,6 +3,14 @@
 [CmdletBinding()]
 param([string]$Node='steph@192.168.1.81')
 $ErrorActionPreference='Stop'
+$mainSource='H:\EZStudioLab_assistant'
+if (-not (Test-Path -LiteralPath (Join-Path $mainSource '.git'))) { throw 'MAIN_ASSISTANT_SOURCE_MISSING' }
+$dirtyMain=@(git -C $mainSource status --porcelain)
+if ($LASTEXITCODE -ne 0 -or $dirtyMain.Count -ne 0) { throw 'MAIN_ASSISTANT_SOURCE_DIRTY' }
+git -C $mainSource pull --ff-only origin main
+if ($LASTEXITCODE -ne 0) { throw 'MAIN_ASSISTANT_PULL_FAILED' }
+$mainVersion=(Get-Content (Join-Path $mainSource 'VERSION') -Raw).Trim()
+if ($mainVersion -ne '1.6a(3)') { throw "MAIN_VERSION_UNEXPECTED=$mainVersion" }
 $remote=@'
 $ErrorActionPreference='Stop'
 $root='C:\EZStudioLab_assistant'
@@ -53,5 +61,5 @@ try {
 } finally { Pop-Location }
 '@
 $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($remote))
-& ssh $Node powershell -NoProfile -NonInteractive -ProgressPreference SilentlyContinue -ExecutionPolicy Bypass -EncodedCommand $encoded
+& ssh $Node powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded
 if ($LASTEXITCODE -ne 0) { throw "V16A3_REMOTE_DEPLOY_FAILED:$LASTEXITCODE" }
