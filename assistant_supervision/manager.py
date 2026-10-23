@@ -301,12 +301,9 @@ class AssistantSupervisor:
                     web_version = str(raw.get("web_version") or "").strip() or None
                     if web_foreign:
                         state = "FOREIGN"
-                    elif (
-                        distributed_count == 1
-                        and profile_count == 1
-                        and web_running
-                        and web_listener_count == 2
-                    ):
+                    elif web_running and web_listener_count == 2:
+                        # Canonical PROFILE requests are orchestrator-dispatched.
+                        # Legacy XPS pollers are not a requirement for Web availability.
                         state = "RUNNING"
                     elif (
                         distributed_count == 0
