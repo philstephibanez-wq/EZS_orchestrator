@@ -53,17 +53,23 @@ def _cleanup_stale(meta: Path, stop_file: Path) -> None:
 
 
 def _expected_service_process(pid: int) -> bool:
+    """Verify the command and executable of the recorded process.
+
+    The control plane may use a different Python interpreter from the
+    permanent service. Comparing the service executable with sys.executable
+    makes a healthy service appear foreign in that case.
+    """
     exe = executable_path(pid)
     cmd = command_line(pid)
     if not exe or not cmd:
         return False
-    try:
-        if Path(exe).resolve() != Path(sys.executable).resolve():
-            return False
-    except Exception:
+    normalized = " ".join(cmd.lower().replace('"', "").split())
+    if "-m service.service_cli run" not in normalized:
         return False
-    normalized = cmd.lower().replace('"', "")
-    return "-m service.service_cli run" in normalized
+    # An explicit Python executable is required, but need not be the
+    # interpreter running this status/stop command.
+    executable = Path(exe).name.lower()
+    return executable in ("python.exe", "pythonw.exe")
 
 
 def _live_metadata_pid(meta: Path, stop_file: Path) -> int:
@@ -77,8 +83,13 @@ def _live_metadata_pid(meta: Path, stop_file: Path) -> int:
         _cleanup_stale(meta, stop_file)
         return 0
     if not _expected_service_process(pid):
-        _cleanup_stale(meta, stop_file)
-        return 0
+        # An unrecognized but *live* PID must never cause deletion of the
+        # owner's metadata or its stop request: it may still hold the mutex.
+        # Preserve evidence and fail closed rather than reporting "stopped".
+        raise RuntimeError(
+            f"service_identity_unverified_live_pid={pid}; "
+            "metadata_preserved"
+        )
     return pid
 
 def run_foreground(scope: str, poll_seconds: float) -> int:
