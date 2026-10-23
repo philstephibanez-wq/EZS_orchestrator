@@ -49,8 +49,8 @@ try {
     if ($LASTEXITCODE -ne 0 -or $active -ne 'idle') { throw 'DEPLOY_EXECUTION_ACTIVE_OR_UNKNOWN' }
     $checks.science = 'idle'
 
-    & $python -m service.service_cli restart-if-idle --target all --poll-seconds 2.0
-    if ($LASTEXITCODE -ne 0) { throw 'DEPLOY_SERVICE_RESTART_FAILED' }
+    $restartOutput = & $python -m service.service_cli restart-if-idle --target all --poll-seconds 2.0
+    if ($LASTEXITCODE -ne 0 -or $restartOutput -match 'SERVICE_RELOAD_SKIPPED') { throw 'DEPLOY_SERVICE_RESTART_FAILED_OR_SKIPPED' }
     # A restart-if-idle may legitimately skip an active execution. Never call that deployed.
     $serviceOutput = & $python -m service.service_cli status
     if ($LASTEXITCODE -ne 0 -or $serviceOutput -notmatch 'SERVICE: running pid=(\d+) target=all') {
