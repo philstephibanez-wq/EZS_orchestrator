@@ -25,6 +25,7 @@ class RuntimeConfig:
     dev_web_php: Path | None
     prod_web_php: Path | None
     lab_web_php: Path | None
+    assistant_xps_url: str = ""
 
     def web_php_for(self, target: Target) -> Path:
         if target is Target.DEV:
@@ -167,4 +168,5 @@ def load_runtime_config(path: Path | None = None) -> RuntimeConfig:
         dev_web_php=dev_web_php,
         prod_web_php=prod_web_php,
         lab_web_php=lab_web_php,
+        assistant_xps_url=str(transport.get("assistant_xps_url") or "").rstrip("/"),
     )
