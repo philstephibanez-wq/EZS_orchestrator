@@ -47,6 +47,7 @@
   "transport": {
     "dev_backend_url": "http://127.0.0.1:8602",
     "prod_backend_url": "http://127.0.0.1:8511",
-    "lab_backend_url": "http://127.0.0.1:8701"
+    "lab_backend_url": "http://127.0.0.1:8701",
+    "assistant_xps_url": "http://192.168.1.81:8712"
   }
 }
