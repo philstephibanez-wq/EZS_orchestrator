@@ -34,9 +34,16 @@ try {
     $version = (Get-Content -LiteralPath (Join-Path $root 'VERSION') -Raw).Trim()
     if ($version -notmatch '^\d+\.\d+[a-z]\(\d+\)$') { throw 'DEPLOY_VERSION_INVALID' }
     $checks.source = "version=$version;sha=$sha"
-    $checkScript = 'from config.loader import load_runtime_config; c=load_runtime_config(); assert c.assistant_xps_url.startswith(("http://","https://")); print(c.assistant_xps_url)'
-    $xpsUrl = (& $python -c $checkScript).Trim()
-    if ($LASTEXITCODE -ne 0) { throw 'DEPLOY_XPS_CONFIG_INVALID' }
+    # Validate the Python runtime configuration without nested command-line quotes.
+    & $python -c 'from config.loader import load_runtime_config; load_runtime_config()'
+    if ($LASTEXITCODE -ne 0) { throw 'DEPLOY_CONFIG_INVALID' }
+    $runtimeConfig = Get-Content -LiteralPath (Join-Path $root 'config\runtime.json') -Raw | ConvertFrom-Json
+    $xpsUrl = [string]$runtimeConfig.transport.assistant_xps_url
+    $parsedUrl = $null
+    if (-not [Uri]::TryCreate($xpsUrl, [UriKind]::Absolute, [ref]$parsedUrl) -or
+        $parsedUrl.Scheme -notin @('http','https')) {
+        throw 'DEPLOY_XPS_CONFIG_INVALID'
+    }
     $checks.xps_url = $xpsUrl
     $health = Invoke-RestMethod -Uri ($xpsUrl.TrimEnd('/') + '/api/health') -TimeoutSec 8 -ErrorAction Stop
     if ($health.ok -ne $true -or $health.persistence_owner -ne 'LAB' -or -not $health.version) {
@@ -45,8 +52,9 @@ try {
     $checks.xps_health = "version=$($health.version);owner=LAB"
 
     # Fail closed if a scientific execution is underway; never report success if skipped.
-    $active = & $python -c 'from config.loader import load_runtime_config; from runtime_guard.activity import analysis_execution_active; c=load_runtime_config(); print("active" if analysis_execution_active(c.orchestrator_root / "runtime") else "idle")'
-    if ($LASTEXITCODE -ne 0 -or $active -ne 'idle') { throw 'DEPLOY_EXECUTION_ACTIVE_OR_UNKNOWN' }
+    $runtimePath = Join-Path $root 'runtime'
+    $active = & $python -c 'import sys; from pathlib import Path; from runtime_guard.activity import analysis_execution_active; print(int(analysis_execution_active(Path(sys.argv[1]))))' $runtimePath
+    if ($LASTEXITCODE -ne 0 -or $active -ne '0') { throw 'DEPLOY_EXECUTION_ACTIVE_OR_UNKNOWN' }
     $checks.science = 'idle'
 
     $restartOutput = & $python -m service.service_cli restart-if-idle --target all --poll-seconds 2.0
