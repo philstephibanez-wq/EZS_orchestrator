@@ -781,6 +781,8 @@ class ControlCenter:
                 state = "BUSY"
             else:
                 state = "ONLINE"
+        elif remote_state == "WEB_ONLY":
+            state = "WEB_ONLY"
         elif remote_state == "DEGRADED":
             state = "DEGRADED"
         elif remote_state == "FOREIGN":
