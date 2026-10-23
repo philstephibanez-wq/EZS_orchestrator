@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
-
 from dataclasses import dataclass
 from typing import Callable
 
@@ -56,6 +54,10 @@ class OrchestrationService:
         selected = self.candidate(target)
         if selected is None:
             return None
+
+        # PROFILE destination preflight: never claim an unroutable job.
+        if selected.kind == "assistant.profile.review" and not self.config.assistant_xps_url.startswith(("http://", "https://")):
+            raise RuntimeError("assistant_xps_url_required_before_claim")
 
         self.scheduler.submit(selected)
         reserved = self.scheduler.next_ready()
@@ -118,7 +120,7 @@ class OrchestrationService:
             if claimed.kind == "assistant.profile.review":
                 dispatch_profile(
                     claimed, self.transport.registry,
-                    xps_url=os.environ.get("EZS_ASSISTANT_API_URL", ""),
+                    xps_url=self.config.assistant_xps_url,
                 )
                 result = ExecutionResult(returncode=0, stdout_tail=())
             else:
