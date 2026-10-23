@@ -118,7 +118,7 @@ class OrchestrationService:
             if claimed.kind == "assistant.profile.review":
                 dispatch_profile(
                     claimed, self.transport.registry,
-                    xps_url=os.environ.get("EZS_ASSISTANT_API_URL", "http://EZSTUDIO-XPS:8712"),
+                    xps_url=os.environ.get("EZS_ASSISTANT_API_URL", ""),
                 )
                 result = ExecutionResult(returncode=0, stdout_tail=())
             else:
