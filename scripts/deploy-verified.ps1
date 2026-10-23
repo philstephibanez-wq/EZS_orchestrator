@@ -73,6 +73,11 @@ try {
         throw 'DEPLOY_PROCESS_IDENTITY_MISMATCH'
     }
     $checks.service = "pid=$pidValue;target=all"
+    $ccResult = & (Join-Path $PSScriptRoot 'reload-control-center.ps1') -ExpectedVersion $version
+    if ($LASTEXITCODE -ne 0 -or $ccResult -notmatch 'CONTROL_CENTER_RELOADED') {
+        throw 'DEPLOY_CONTROL_CENTER_RELOAD_FAILED'
+    }
+    $checks.control_center = ($ccResult -join '; ')
     $state = 'DEPLOYED_OK'
 } catch {
     $failure = $_.Exception.Message
