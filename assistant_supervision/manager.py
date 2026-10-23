@@ -6,6 +6,7 @@ import os
 import subprocess
 import threading
 import time
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -274,9 +275,9 @@ class AssistantSupervisor:
         try:
             completed = self._run_ps(script)
         except subprocess.TimeoutExpired:
-            payload = self._error_status("ssh_timeout")
+            payload = self._http_fallback("ssh_timeout")
         except OSError as exc:
-            payload = self._error_status(f"{type(exc).__name__}:{exc}"[:500])
+            payload = self._http_fallback(f"{type(exc).__name__}:{exc}"[:500])
         else:
             if completed.returncode != 0:
                 error = (
@@ -284,7 +285,7 @@ class AssistantSupervisor:
                     or completed.stdout.strip()
                     or f"ssh_rc={completed.returncode}"
                 )
-                payload = self._error_status(error[:500])
+                payload = self._http_fallback(error[:500])
             else:
                 try:
                     rows = [
@@ -355,6 +356,30 @@ class AssistantSupervisor:
         with self._lock:
             self._status_cache = (time.monotonic(), dict(payload))
         return payload
+
+    def _http_fallback(self, ssh_error: str) -> dict:
+        """Separate public REST availability from SSH process inventory."""
+        try:
+            with urllib.request.urlopen(
+                "http://192.168.1.81:8712/api/health", timeout=4
+            ) as response:
+                payload = json.loads(response.read(8192).decode("utf-8"))
+            if (payload.get("ok") is not True
+                    or payload.get("persistence_owner") != "LAB"
+                    or not payload.get("version")):
+                raise ValueError("assistant_health_contract_invalid")
+        except Exception:
+            return self._error_status(ssh_error)
+        status = self._error_status(ssh_error)
+        status.update({
+            "ok": True,
+            "state": "WEB_ONLY",
+            "web_running": True,
+            "web_version": str(payload["version"]),
+            "web_transport": "HTTP",
+            "error": "ssh_process_inventory_unavailable",
+        })
+        return status
 
     def _error_status(self, error: str) -> dict:
         return AssistantRemoteStatus(
