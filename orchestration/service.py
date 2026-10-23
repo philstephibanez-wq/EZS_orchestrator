@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 
 from dataclasses import dataclass
 from typing import Callable
 
+from orchestration.profile_dispatch import dispatch as dispatch_profile
 from config.loader import RuntimeConfig
 from contracts.job import JobEnvelope
 from contracts.target import Target
@@ -113,14 +115,21 @@ class OrchestrationService:
                         "progress": int(percent),
                     }, ensure_ascii=False))
 
-            result: ExecutionResult = self.executor.run(
-                claimed,
-                on_output=on_output,
-                on_progress=publish_progress,
-                should_cancel=lambda: self.transport.cancel_requested(
-                    target, claimed.job_id
-                ),
-            )
+            if claimed.kind == "assistant.profile.review":
+                dispatch_profile(
+                    claimed, self.transport.registry,
+                    xps_url=os.environ.get("EZS_ASSISTANT_API_URL", "http://EZSTUDIO-XPS:8712"),
+                )
+                result = ExecutionResult(returncode=0, stdout_tail=())
+            else:
+                result = self.executor.run(
+                    claimed,
+                    on_output=on_output,
+                    on_progress=publish_progress,
+                    should_cancel=lambda: self.transport.cancel_requested(
+                        target, claimed.job_id
+                    ),
+                )
 
             if result.cancelled:
                 self.transport.cancelled(target, claimed.job_id)
