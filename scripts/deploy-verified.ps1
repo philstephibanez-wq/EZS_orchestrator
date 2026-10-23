@@ -32,7 +32,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'DEPLOY_MERGE_FAILED' }
     $sha = (& git -C $root rev-parse HEAD).Trim()
     $version = (Get-Content -LiteralPath (Join-Path $root 'VERSION') -Raw).Trim()
-    if ($version -notmatch '^\d+\.\d+[a-z]\(\d+\)) { throw 'DEPLOY_VERSION_INVALID' }
+    if ($version -notmatch '^\d+\.\d+[a-z]\(\d+\)$') { throw 'DEPLOY_VERSION_INVALID' }
     $checks.source = "version=$version;sha=$sha"
     $checkScript = 'from config.loader import load_runtime_config; c=load_runtime_config(); assert c.assistant_xps_url.startswith(("http://","https://")); print(c.assistant_xps_url)'
     $xpsUrl = (& $python -c $checkScript).Trim()
