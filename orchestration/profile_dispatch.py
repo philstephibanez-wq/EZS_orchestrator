@@ -51,6 +51,8 @@ def dispatch(job: JobEnvelope, registry: TargetRegistry, *, xps_url: str):
             "verdict": row["verdict"], "reason": row.get("reason"),
             "reference_value": row.get("reference_value"),
             "citations": [u for u in urls if u.startswith("https://")],
+            "proposed_verdict": row.get("proposed_verdict"),
+            "references": row.get("references") or [],
         })
     review = {
         "run_id": payload["analysis_id"],
