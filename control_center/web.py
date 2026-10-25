@@ -762,7 +762,7 @@ class ControlCenter:
             str(row.get('kind') or '') == 'assistant.profile.review'
             and self._job_key(row) in ai_keys
         )]
-        known = {key for row in history for key in [self._job_key(row)] if key is not None}
+        known = {key for row in history + canonical_ai + canonical_profile for key in [self._job_key(row)] if key is not None}
         for target in (Target.DEV, Target.PROD, Target.LAB):
             try:
                 queued = self.transport.queue(target)
