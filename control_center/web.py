@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import secrets
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -694,6 +695,47 @@ class ControlCenter:
             })
         return records
 
+    def _lab_scientific_jobs(self, limit: int = 80) -> list[dict]:
+        """Read the canonical LAB scientific PROFILE history without changing LAB.
+
+        The existing AI history endpoint is specific to assistant.profile.review.
+        Use a read-only SQLite connection for the separate scientific jobs.
+        """
+        database = Path(r"H:\EZStudio_lab\data\benchmark.sqlite")
+        if not database.is_file():
+            raise FileNotFoundError("lab_scientific_history_database_missing")
+        connection = sqlite3.connect(database.as_uri() + "?mode=ro", uri=True, timeout=2)
+        connection.row_factory = sqlite3.Row
+        try:
+            rows = connection.execute(
+                """SELECT aj.id AS job_id, aj.scientific_run_id AS run_id,
+                          aj.kind, aj.status, aj.created_at, aj.updated_at,
+                          aj.song_id, s.title AS song_title, aj.error
+                   FROM analysis_jobs aj
+                   LEFT JOIN songs s ON s.id = aj.song_id
+                   WHERE aj.kind = 'profile'
+                   ORDER BY aj.id DESC LIMIT ?""", (max(1, min(limit, 100)),)
+            ).fetchall()
+        finally:
+            connection.close()
+        states = {"queued":"waiting", "running":"running", "completed":"completed",
+                  "done":"completed", "failed":"failed", "error":"failed",
+                  "cancelled":"cancelled"}
+        return [{
+            "job_id": int(row["job_id"]),
+            "target": "lab",
+            "song_id": row["song_id"],
+            "song_title": row["song_title"] or f"PROFILE run #{row['run_id']}",
+            "kind": "profile",
+            "state": states.get(str(row["status"]).lower(), str(row["status"]).lower()),
+            "timestamp": row["updated_at"] or row["created_at"] or "",
+            "analysis_returncode": None,
+            "finalize_status": "ok" if row["status"] == "completed" else "-",
+            "error": str(row["error"])[:240] if row["status"] in ("failed", "error") and row["error"] else None,
+            "run_id": row["run_id"],
+            "source": "lab_scientific_read_only",
+        } for row in rows]
+
     def jobs(self) -> dict:
         history_payload = self.job_history.payload(limit=80)
         history = list(history_payload.get("jobs") or [])
@@ -705,6 +747,14 @@ class ControlCenter:
         except Exception as exc:
             canonical_ai = []
             queue_errors['lab_ai'] = f"{type(exc).__name__}:{exc}"[:200]
+        try:
+            canonical_profile = self._lab_scientific_jobs()
+        except Exception as exc:
+            canonical_profile = []
+            queue_errors["lab_profile_history"] = f"{type(exc).__name__}:{exc}"[:200]
+        # Only deduplicate the same LAB job ID; never conflate analysis and IA.
+        canonical_keys = {self._job_key(row) for row in canonical_profile}
+        history = [row for row in history if self._job_key(row) not in canonical_keys]
         # Canonical LAB status supersedes historical scientific-worker errors for
         # the same ID; retain old unrelated scientific records distinctly.
         ai_keys = {self._job_key(row) for row in canonical_ai}
@@ -730,17 +780,24 @@ class ControlCenter:
         active_states = {"running", "claimed", "cancelling"}
         active = [r for r in history if str(r.get("state") or "").lower() in active_states]
         archived = [r for r in history if str(r.get("state") or "").lower() not in active_states]
+        profile_active = [r for r in canonical_profile if r["state"] in active_states]
+        profile_waiting = [r for r in canonical_profile if r["state"] == "waiting"]
+        profile_archived = [r for r in canonical_profile if r["state"] not in active_states and r["state"] != "waiting"]
         ai_active = [r for r in canonical_ai if r['state'] in active_states]
         ai_waiting = [r for r in canonical_ai if r['state'] == 'queued']
         ai_archived = [r for r in canonical_ai if r['state'] not in active_states and r['state'] != 'queued']
-        jobs = ai_active + active + ai_waiting + waiting + ai_archived + archived
+        # Interleave histories by real timestamp, not by provider type.
+        jobs = profile_active + ai_active + active + profile_waiting + ai_waiting + waiting
+        finished = profile_archived + ai_archived + archived
+        finished.sort(key=lambda row: str(row.get("timestamp") or ""), reverse=True)
+        jobs += finished
         return {
             "ok": bool(history_payload.get("ok", True)),
             "count": len(jobs),
             "jobs": jobs[:100],
-            "running": len(active) + len(ai_active),
-            "waiting": len(waiting) + len(ai_waiting),
-            "history": len(archived),
+            "running": len(active) + len(ai_active) + len(profile_active),
+            "waiting": len(waiting) + len(ai_waiting) + len(profile_waiting),
+            "history": len(archived) + len(ai_archived) + len(profile_archived),
             "queue_errors": queue_errors,
             "ai_canonical_count": len(canonical_ai),
             "execution_policy": "sequential_machine_gpu_singleton",
