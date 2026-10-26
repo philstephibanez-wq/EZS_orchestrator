@@ -21,6 +21,6 @@ class MainDockerSupervisorTest(unittest.TestCase):
             run.return_value.returncode=0
             run.return_value.stdout=""
             docker(["ps"])
-            self.assertTrue(run.call_args.args[0][0].lower().endswith("/docker/desktop/resources/bin/docker.exe"))
+            self.assertTrue(run.call_args.args[0][0].replace(chr(92), "/").lower().endswith("/docker/desktop/resources/bin/docker.exe"))
 if __name__=="__main__":
     unittest.main()
