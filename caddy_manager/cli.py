@@ -25,6 +25,8 @@ def main() -> int:
         f"media_root={view.media_root} pid={view.pid or '-'} "
         f"process={view.process_alive} http={view.http_alive}"
     )
+    if args.command == "start" and not view.http_alive:
+        return 2
     return 0
 
 

@@ -172,6 +172,28 @@ try {
         throw "Impossible de charger le service permanent EZS."
     }
 
+    # 1b. Reconcile each Caddy proxy after reboot using the canonical manager.
+    # Never stop/restart an existing owned instance. Failures are logged per
+    # target, so a LAB failure cannot prevent DEV/PROD reconciliation.
+    $caddyResults = @()
+    $caddyFailures = @()
+    foreach ($target in @("dev", "prod", "lab")) {
+        $caddyOutput = & $Python -m caddy_manager.cli start --target $target 2>&1
+        $caddyCode = $LASTEXITCODE
+        $caddyText = ($caddyOutput | Out-String).Trim()
+        $caddyResults += ("[{0}] exit={1} {2}" -f $target, $caddyCode, $caddyText)
+        if ($caddyCode -ne 0 -or $caddyText -notmatch "http=True") {
+            $caddyFailures += $target
+        }
+    }
+    $caddyResults | Set-Content -LiteralPath (Join-Path $Logs "caddy-start.log") -Encoding utf8
+    if ($caddyFailures.Count -gt 0) {
+        Add-Content -LiteralPath $ErrLog -Value ("CADDY_START_FAILURE targets=" + ($caddyFailures -join ",")) -Encoding utf8
+    }
+    if ($caddyFailures -contains "dev") {
+        throw "CADDY_DEV_NOT_READY: consulter logs\\caddy-start.log"
+    }
+
     # 2. launch.bat means: run the currently installed Orchestrator.
     #    Restart our own listener, but never kill an unrelated process on 8700.
     Preserve-CurrentControlCenterToken
