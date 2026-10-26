@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Stop"
 
 $Root = Split-Path -Parent $PSScriptRoot
 $Logs = Join-Path $Root "logs"
@@ -157,7 +157,16 @@ try {
     # Purge visible operational logs at every Orchestrator restart.
     # Use a real module entrypoint: Windows PowerShell 5 can mangle
     # multiline Python code passed through -c.
-    $logPurgeOutput = & $Python -m control_center.log_tools clear 2>&1
+    $purgeOut = Join-Path $Logs "log-purge.out.log"
+    $purgeErr = Join-Path $Logs "log-purge.err.log"
+    $purge = Start-Process -FilePath $Python -WorkingDirectory $Root -Wait -PassThru -NoNewWindow `
+        -ArgumentList @("-m", "control_center.log_tools", "clear") `
+        -RedirectStandardOutput $purgeOut -RedirectStandardError $purgeErr
+    $logPurgeOutput = @(
+        Get-Content -LiteralPath $purgeOut -ErrorAction SilentlyContinue
+        Get-Content -LiteralPath $purgeErr -ErrorAction SilentlyContinue
+    )
+    $logPurgeExitCode = [int]$purge.ExitCode
     $logPurgeExitCode = $LASTEXITCODE
     if ($logPurgeExitCode -ne 0) {
         throw "Impossible de purger les logs au redémarrage. $($logPurgeOutput -join ' | ')"
@@ -165,14 +174,23 @@ try {
 
     # 1. Ensure the permanent service is running on the currently installed code.
     #    If an analysis is active, service_cli leaves the current service untouched.
-    $serviceReloadOutput = & $Python -m service.service_cli restart-if-idle --target all --poll-seconds 2 2>&1
+    $serviceOut = Join-Path $Logs "service-start.out.log"
+    $serviceErr = Join-Path $Logs "service-start.err.log"
+    $serviceProc = Start-Process -FilePath $Python -WorkingDirectory $Root -Wait -PassThru -NoNewWindow `
+        -ArgumentList @("-m", "service.service_cli", "restart-if-idle", "--target", "all", "--poll-seconds", "2") `
+        -RedirectStandardOutput $serviceOut -RedirectStandardError $serviceErr
+    $serviceReloadOutput = @(
+        Get-Content -LiteralPath $serviceOut -ErrorAction SilentlyContinue
+        Get-Content -LiteralPath $serviceErr -ErrorAction SilentlyContinue
+    )
+    $serviceReloadExitCode = [int]$serviceProc.ExitCode
     $serviceReloadExitCode = $LASTEXITCODE
     $serviceReloadOutput | Set-Content -LiteralPath (Join-Path $Logs "service-start.log") -Encoding utf8
     if ($serviceReloadExitCode -ne 0) {
-        throw "Impossible de charger le service permanent EZS."
+        throw "Impossible de charger le service permanent EZS : $($serviceReloadOutput -join ' | ')"
     }
 
-    # Restore missing Caddy proxies without stopping any running instance.
+    # Canonical start means controlled restart of owned Caddy proxies per target.
     # Separate stderr from stdout: PowerShell 5.1 can throw on native stderr
     # when ErrorActionPreference is Stop, losing the real Python traceback.
     $caddyResults = @()
@@ -181,7 +199,7 @@ try {
         $stderrPath = Join-Path $Logs ("caddy-start-" + $target + ".err.log")
         try {
             $proc = Start-Process -FilePath $Python -WorkingDirectory $Root -Wait -PassThru -NoNewWindow `
-                -ArgumentList @("-m", "caddy_manager.cli", "start", "--target", $target) `
+                -ArgumentList @("-m", "caddy_manager.cli", "restart", "--target", $target) `
                 -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
             $output = if (Test-Path -LiteralPath $stdoutPath) {
                 Get-Content -LiteralPath $stdoutPath -Raw -ErrorAction SilentlyContinue
@@ -203,6 +221,10 @@ try {
         }
     }
     $caddyResults | Set-Content -LiteralPath (Join-Path $Logs "caddy-start.log") -Encoding utf8
+    # A failed target is reported explicitly but does not hide diagnostics for other targets.
+    if ($caddyResults -match "ready=False|launcher_exception:") {
+        Add-Content -LiteralPath $ErrLog -Value "CADDY_RESTART_PARTIAL_FAILURE: see caddy-start.log" -Encoding utf8
+    }
 
     # 2. launch.bat means: run the currently installed Orchestrator.
     #    Restart our own listener, but never kill an unrelated process on 8700.
@@ -241,7 +263,7 @@ try {
 }
 catch {
     $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $message = "[$stamp] $($_.Exception.Message)"
+    $message = "[$stamp] $($_ | Out-String)"
 
     # Failure marker first: the splash must never wait forever because
     # an error log is temporarily locked by another process.
