@@ -167,7 +167,6 @@ try {
         Get-Content -LiteralPath $purgeErr -ErrorAction SilentlyContinue
     )
     $logPurgeExitCode = [int]$purge.ExitCode
-    $logPurgeExitCode = $LASTEXITCODE
     if ($logPurgeExitCode -ne 0) {
         throw "Impossible de purger les logs au redémarrage. $($logPurgeOutput -join ' | ')"
     }
@@ -184,7 +183,6 @@ try {
         Get-Content -LiteralPath $serviceErr -ErrorAction SilentlyContinue
     )
     $serviceReloadExitCode = [int]$serviceProc.ExitCode
-    $serviceReloadExitCode = $LASTEXITCODE
     $serviceReloadOutput | Set-Content -LiteralPath (Join-Path $Logs "service-start.log") -Encoding utf8
     if ($serviceReloadExitCode -ne 0) {
         throw "Impossible de charger le service permanent EZS : $($serviceReloadOutput -join ' | ')"
