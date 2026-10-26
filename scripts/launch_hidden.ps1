@@ -159,9 +159,12 @@ try {
     # multiline Python code passed through -c.
     $purgeOut = Join-Path $Logs "log-purge.out.log"
     $purgeErr = Join-Path $Logs "log-purge.err.log"
-    $purge = Start-Process -FilePath $Python -WorkingDirectory $Root -Wait -PassThru -NoNewWindow `
+    $purge = Start-Process -FilePath $Python -WorkingDirectory $Root -PassThru -NoNewWindow `
         -ArgumentList @("-m", "control_center.log_tools", "clear") `
         -RedirectStandardOutput $purgeOut -RedirectStandardError $purgeErr
+    if (-not $purge.WaitForExit(30000)) {
+        throw "Timeout purge des journaux (commande CLI, 30 s)."
+    }
     $logPurgeOutput = @(
         Get-Content -LiteralPath $purgeOut -ErrorAction SilentlyContinue
         Get-Content -LiteralPath $purgeErr -ErrorAction SilentlyContinue
@@ -175,9 +178,12 @@ try {
     #    If an analysis is active, service_cli leaves the current service untouched.
     $serviceOut = Join-Path $Logs "service-start.out.log"
     $serviceErr = Join-Path $Logs "service-start.err.log"
-    $serviceProc = Start-Process -FilePath $Python -WorkingDirectory $Root -Wait -PassThru -NoNewWindow `
+    $serviceProc = Start-Process -FilePath $Python -WorkingDirectory $Root -PassThru -NoNewWindow `
         -ArgumentList @("-m", "service.service_cli", "restart-if-idle", "--target", "all", "--poll-seconds", "2") `
         -RedirectStandardOutput $serviceOut -RedirectStandardError $serviceErr
+    if (-not $serviceProc.WaitForExit(30000)) {
+        throw "Timeout relance du service (commande CLI, 30 s)."
+    }
     $serviceReloadOutput = @(
         Get-Content -LiteralPath $serviceOut -ErrorAction SilentlyContinue
         Get-Content -LiteralPath $serviceErr -ErrorAction SilentlyContinue
@@ -196,9 +202,12 @@ try {
         $stdoutPath = Join-Path $Logs ("caddy-start-" + $target + ".out.log")
         $stderrPath = Join-Path $Logs ("caddy-start-" + $target + ".err.log")
         try {
-            $proc = Start-Process -FilePath $Python -WorkingDirectory $Root -Wait -PassThru -NoNewWindow `
+            $proc = Start-Process -FilePath $Python -WorkingDirectory $Root -PassThru -NoNewWindow `
                 -ArgumentList @("-m", "caddy_manager.cli", "restart", "--target", $target) `
                 -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+            if (-not $proc.WaitForExit(30000)) {
+                throw "Timeout commande Caddy $target (30 s)."
+            }
             $output = if (Test-Path -LiteralPath $stdoutPath) {
                 Get-Content -LiteralPath $stdoutPath -Raw -ErrorAction SilentlyContinue
             } else { "" }
