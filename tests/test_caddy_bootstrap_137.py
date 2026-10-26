@@ -15,7 +15,7 @@ class CaddyBootstrapAfterReboot(unittest.TestCase):
         self.assertIn('"caddy_manager.cli", "restart", "--target", $target', source)
         self.assertIn('caddy-start.log', source)
         self.assertIn('CADDY_START_FAILURE target=', source)
-        self.assertLess(source.index('-m service.service_cli restart-if-idle'), source.index('"caddy_manager.cli", "start"'))
+        self.assertLess(source.index('"service.service_cli", "restart-if-idle"'), source.index('"caddy_manager.cli", "restart"'))
         self.assertLess(source.index('"caddy_manager.cli", "restart"'), source.index('    Preserve-CurrentControlCenterToken\n'))
         self.assertIn('-RedirectStandardError $stderrPath', source)
         self.assertIn('launcher_exception:', source)
