@@ -658,17 +658,13 @@ class ControlCenter:
 
     def _r2e_canonical_jobs(self) -> list[dict]:
         """Read-only LAB canonical history, never claim or alter AI jobs."""
-        lab_url = self.config.lab_backend_url
-        if not lab_url:
-            raise RuntimeError('lab_backend_url_missing')
-        token = self.assistant_supervision._configured_token()
-        url = lab_url.rstrip('/') + '/internal/analysis/desktop/profile/ai-requests/recent?limit=80'
-        request = urllib.request.Request(url, headers={
-            'X-EZScore-Analysis-Token': token,
-            'Accept': 'application/json',
-        }, method='GET')
-        with urllib.request.urlopen(request, timeout=3) as response:
-            payload = json.loads(response.read(262144).decode('utf-8'))
+        # Use the canonical LAB transport client, not the Docker supervisor.
+        # The latter deliberately owns no LAB credential. The TargetRegistry
+        # resolves the LAB token from its existing canonical credential source.
+        payload = self.transport.registry.endpoint(Target.LAB).client().get(
+            '/internal/analysis/desktop/profile/ai-requests/recent?limit=80',
+            timeout=3.0,
+        )
         raw = payload.get('jobs')
         if not isinstance(raw, list):
             raise ValueError('r2e_invalid_lab_job_history')
