@@ -10,14 +10,19 @@ from .manager import CaddyManager
 def main() -> int:
     parser = argparse.ArgumentParser(prog="EZS_orchestrator.caddy")
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("status", "start"):
+    for name in ("status", "start", "restart"):
         p = sub.add_parser(name)
         p.add_argument("--target", choices=("dev", "prod", "lab"), required=True)
 
     args = parser.parse_args()
     target = Target(args.target)
     manager = CaddyManager(load_runtime_config())
-    view = manager.start(target) if args.command == "start" else manager.view(target)
+    if args.command == "start":
+        view = manager.start(target)
+    elif args.command == "restart":
+        view = manager.restart(target)
+    else:
+        view = manager.view(target)
 
     print(
         f"CADDY {view.target.value.upper()}: "
@@ -25,7 +30,7 @@ def main() -> int:
         f"media_root={view.media_root} pid={view.pid or '-'} "
         f"process={view.process_alive} http={view.http_alive}"
     )
-    if args.command == "start" and not view.http_alive:
+    if args.command in ("start", "restart") and not (view.process_alive and view.http_alive):
         return 2
     return 0
 
