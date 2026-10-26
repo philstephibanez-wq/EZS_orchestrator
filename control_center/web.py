@@ -1153,14 +1153,15 @@ let assistantDeployData=null,assistantDeployRefreshInFlight=false;
 function renderAssistantDeployment(payload){
  assistantDeployData=payload||{};
  const state=assistantDeployData.state||"ERROR";
+ const mainDocker=state==="DISABLED_MAIN_DOCKER";
  const sourceVersion=assistantDeployData.source_version||"-";
  const deployedVersion=assistantDeployData.deployed_version||"-";
  txt("assistantSourceVersion",sourceVersion==="-"?"-":`v${String(sourceVersion).replace(/^v/i,"")}`);
- txt("assistantDeployedVersion",deployedVersion==="-"?"-":`v${String(deployedVersion).replace(/^v/i,"")}`);
+ txt("assistantDeployedVersion",mainDocker?"Sans objet":deployedVersion==="-"?"-":`v${String(deployedVersion).replace(/^v/i,"")}`);
  txt("assistantSourceCommit",(assistantDeployData.source_commit||"").slice(0,12)||"-");
  txt("assistantDeployedCommit",(assistantDeployData.deployed_commit||"").slice(0,12)||"-");
  const label=state==="UP_TO_DATE"?"À JOUR":state==="LOCAL_CHANGES"?"MODIFICATIONS LOCALES":state==="UPDATE_AVAILABLE"?"MISE À JOUR DISPONIBLE":state==="NOT_DEPLOYED"?"NON DÉPLOYÉ":state==="UNREACHABLE"?"XPS INJOIGNABLE":"ERREUR";
- txt("assistantDeployState",label);
+ txt("assistantDeployState",mainDocker?"DOCKER MAIN · XPS DÉSACTIVÉ":label);
  const sourceLabel=sourceVersion==="-"?"la version locale":`v${String(sourceVersion).replace(/^v/i,"")}`;
  const deployedLabel=deployedVersion==="-"?"la version déployée":`v${String(deployedVersion).replace(/^v/i,"")}`;
  const notices={
@@ -1169,12 +1170,13 @@ function renderAssistantDeployment(payload){
   UP_TO_DATE:`✓ ${sourceLabel} est déjà déployée sur XPS.`,
   NOT_DEPLOYED:`Assistant non déployé sur XPS.`,
   UNREACHABLE:`⚠ XPS est injoignable : déploiement indisponible.`,
+  DISABLED_MAIN_DOCKER:"Assistant local MAIN Docker. Ancien déploiement XPS désactivé.",
   ERROR:`⚠ État de déploiement indisponible : ${assistantDeployData.error||"erreur inconnue"}.`
  };
  txt("assistantDeployNotice",notices[state]||"");
  const btn=$("assistantDeploy");
  if(btn){
-  btn.disabled=busy||state==="UP_TO_DATE"||state==="UNREACHABLE"||state==="LOCAL_CHANGES";
+  btn.disabled=busy||mainDocker||state==="UP_TO_DATE"||state==="UNREACHABLE"||state==="LOCAL_CHANGES";
   btn.title=state==="LOCAL_CHANGES"?"Commit/push Assistant puis mise à jour du gitlink LAB requis avant déploiement":"";
  }
 }
@@ -1196,6 +1198,11 @@ function renderAssistantSupervision(payload){
  const state=assistantSupervisionData.state||"ERROR";
  const labels={STOPPED:"ARRÊTÉ",ONLINE:"EN LIGNE",BUSY:"OCCUPÉ",DEGRADED:"DÉGRADÉ",FOREIGN:"PORT ÉTRANGER",ERROR:"ERREUR"};
  const label=labels[state]||state;
+ if(assistantSupervisionData.deployment_mode==="main-docker"){
+  txt("assistantMeta","MAIN Docker · Web "+(assistantSupervisionData.web_running?"EN LIGNE":"INDISPONIBLE")+" · CUDA "+(assistantSupervisionData.inference_running?"EN LIGNE":"INDISPONIBLE"));
+  txt("assistantDeployedVersion","Sans objet");
+  const el=$("assistantWorkers");if(el)el.replaceChildren();
+ }
  txt("assistantRuntimeState",label);
  txt("assistantState",label);
  dot($("assistantDot"),state==="ONLINE"||state==="BUSY",state==="DEGRADED");
@@ -1258,7 +1265,7 @@ function renderStatus(s){
  const svc=s.service||{};dot($("serviceDot"),!!svc.running);txt("serviceState",svc.running?"ACTIF":"ARRÊTÉ");txt("serviceTarget",svc.target?String(svc.target).toUpperCase():"-");txt("serviceMeta",`pid=${svc.pid??'-'} · state=${svc.state??'-'} · heartbeat=${svc.heartbeat??'-'} · ${fmtMetric(svc)}`);$("serviceStart").disabled=busy||!!svc.running;$("serviceStop").disabled=busy||!svc.running;
  const d=s.dev,ds=d.server,dc=d.caddy;const devHealthy=!!(ds.process_alive&&ds.http_alive&&dc.process_alive&&dc.http_alive);devFailures=devHealthy?0:devFailures+1;const devShown=devHealthy||devFailures<3;dot($("devDot"),devShown,!devHealthy);txt("devState",devHealthy?"EN LIGNE":(devFailures<3?"VÉRIFICATION":"HORS LIGNE"));txt("devRoot",ds.root);txt("devEnv",ds.app_env);txt("devBackend",`:${ds.backend_port} · ${fmtProc(ds)}`);txt("devCaddy",`:${dc.public_port} · ${fmtProc(dc)}`);txt("devTransport",d.transport);txt("devPython",d.analysis_python);txt("devOwnership",fmtOwnership(ds.ownership));
  const p=s.prod,pl=p.lifecycle,pb=pl.backend,pg=pl.gateway,pc=pl.caddy;const prodHealthy=!!pl.online;prodFailures=prodHealthy?0:prodFailures+1;const prodShown=prodHealthy||prodFailures<3;dot($("prodDot"),prodShown,!prodHealthy);txt("prodState",prodHealthy?"EN LIGNE":(prodFailures<3?"VÉRIFICATION":"CHAÎNE INCOMPLÈTE"));txt("prodRoot",pb.root);txt("prodBackend",`:${pb.backend_port} · ${fmtProc(pb)}`);txt("prodGateway",`:${pg.port} · pid ${pg.pid??'-'} · ${pg.process_alive?'PROCESSUS OK':'PROCESSUS ARRÊTÉ'} · ${pg.http_alive?'HTTP OK':'HTTP KO'} · ${pg.protocol??'-'} · propriété=${fmtOwnership(pg.ownership)}`);txt("prodCaddy",`:${pc.public_port} · ${fmtProc(pc)}`);txt("prodTransport",p.transport);txt("prodPython",p.analysis_python);txt("prodOwnership",fmtOwnership(pb.ownership));const mode=$("prodMode");mode.textContent=pl.mode==="maintenance"?"MAINTENANCE":pl.mode==="normal"?"NORMAL":String(pl.mode||"-").toUpperCase();mode.className="mode "+(pl.mode==="maintenance"?"maintenance":"");
- const l=s.lab||{},ls=l.server||{},lc=l.caddy||{};const labHealthy=!!(ls.process_alive&&ls.http_alive&&lc.process_alive&&lc.http_alive);labFailures=labHealthy?0:labFailures+1;const labShown=labHealthy||labFailures<3;dot($("labDot"),labShown,!labHealthy);txt("labState",labHealthy?"EN LIGNE":(labFailures<3?"VÉRIFICATION":"HORS LIGNE"));txt("labRoot",ls.root??l.root);txt("labEnv",ls.app_env);txt("labBackend",`:${ls.backend_port??8701} · ${fmtProc(ls)}`);txt("labCaddy",`:${lc.public_port??8702} · ${fmtProc(lc)}`);txt("labTransport",l.transport);txt("labPython",l.analysis_python);txt("labOwnership",fmtOwnership(ls.ownership));renderAssistantWorkers(l.workers||{});
+ const l=s.lab||{},ls=l.server||{},lc=l.caddy||{};const labHealthy=!!(ls.process_alive&&ls.http_alive&&lc.process_alive&&lc.http_alive);labFailures=labHealthy?0:labFailures+1;const labShown=labHealthy||labFailures<3;dot($("labDot"),labShown,!labHealthy);txt("labState",labHealthy?"EN LIGNE":(labFailures<3?"VÉRIFICATION":"HORS LIGNE"));txt("labRoot",ls.root??l.root);txt("labEnv",ls.app_env);txt("labBackend",`:${ls.backend_port??8701} · ${fmtProc(ls)}`);txt("labCaddy",`:${lc.public_port??8702} · ${fmtProc(lc)}`);txt("labTransport",l.transport);txt("labPython",l.analysis_python);txt("labOwnership",fmtOwnership(ls.ownership));if(assistantSupervisionData?.deployment_mode!=="main-docker")renderAssistantWorkers(l.workers||{});
  syncActionButtons();
 }
 function renderJobs(payload){
