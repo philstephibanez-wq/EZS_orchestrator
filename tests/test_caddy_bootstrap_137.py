@@ -21,6 +21,13 @@ class CaddyBootstrapAfterReboot(unittest.TestCase):
         self.assertIn('launcher_exception:', source)
         self.assertNotIn('Stop-Process -Name caddy', source)
 
+    def test_start_process_exit_codes_are_authoritative(self):
+        source=(ROOT/'scripts/launch_hidden.ps1').read_text(encoding='utf-8-sig')
+        self.assertIn('$logPurgeExitCode = [int]$purge.ExitCode', source)
+        self.assertIn('$serviceReloadExitCode = [int]$serviceProc.ExitCode', source)
+        self.assertNotIn('$logPurgeExitCode = $LASTEXITCODE', source)
+        self.assertNotIn('$serviceReloadExitCode = $LASTEXITCODE', source)
+
     def test_native_stderr_is_redirected_before_caddy(self):
         source=(ROOT/'scripts/launch_hidden.ps1').read_text(encoding='utf-8-sig')
         self.assertNotIn('2>&1', source)
