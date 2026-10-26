@@ -172,27 +172,37 @@ try {
         throw "Impossible de charger le service permanent EZS."
     }
 
-    # 1b. Reconcile each Caddy proxy after reboot using the canonical manager.
-    # Never stop/restart an existing owned instance. Failures are logged per
-    # target, so a LAB failure cannot prevent DEV/PROD reconciliation.
+    # Restore missing Caddy proxies without stopping any running instance.
+    # Separate stderr from stdout: PowerShell 5.1 can throw on native stderr
+    # when ErrorActionPreference is Stop, losing the real Python traceback.
     $caddyResults = @()
-    $caddyFailures = @()
     foreach ($target in @("dev", "prod", "lab")) {
-        $caddyOutput = & $Python -m caddy_manager.cli start --target $target 2>&1
-        $caddyCode = $LASTEXITCODE
-        $caddyText = ($caddyOutput | Out-String).Trim()
-        $caddyResults += ("[{0}] exit={1} {2}" -f $target, $caddyCode, $caddyText)
-        if ($caddyCode -ne 0 -or $caddyText -notmatch "http=True") {
-            $caddyFailures += $target
+        $stdoutPath = Join-Path $Logs ("caddy-start-" + $target + ".out.log")
+        $stderrPath = Join-Path $Logs ("caddy-start-" + $target + ".err.log")
+        try {
+            $proc = Start-Process -FilePath $Python -WorkingDirectory $Root -Wait -PassThru -NoNewWindow `
+                -ArgumentList @("-m", "caddy_manager.cli", "start", "--target", $target) `
+                -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+            $output = if (Test-Path -LiteralPath $stdoutPath) {
+                Get-Content -LiteralPath $stdoutPath -Raw -ErrorAction SilentlyContinue
+            } else { "" }
+            $errorText = if (Test-Path -LiteralPath $stderrPath) {
+                Get-Content -LiteralPath $stderrPath -Raw -ErrorAction SilentlyContinue
+            } else { "" }
+            $code = [int]$proc.ExitCode
+            $ready = ($code -eq 0 -and $output -match "http=True")
+            $caddyResults += ("[{0}] exit={1} ready={2}`nstdout: {3}`nstderr: {4}" -f $target, $code, $ready, $output, $errorText)
+            if (-not $ready) {
+                Add-Content -LiteralPath $ErrLog -Value ("CADDY_START_FAILURE target=" + $target + " exit=" + $code + " details=" + $stderrPath) -Encoding utf8
+            }
+        }
+        catch {
+            $detail = $_ | Out-String
+            $caddyResults += ("[{0}] launcher_exception: {1}" -f $target, $detail)
+            Add-Content -LiteralPath $ErrLog -Value ("CADDY_LAUNCH_EXCEPTION target=" + $target + " " + $detail) -Encoding utf8
         }
     }
     $caddyResults | Set-Content -LiteralPath (Join-Path $Logs "caddy-start.log") -Encoding utf8
-    if ($caddyFailures.Count -gt 0) {
-        Add-Content -LiteralPath $ErrLog -Value ("CADDY_START_FAILURE targets=" + ($caddyFailures -join ",")) -Encoding utf8
-    }
-    if ($caddyFailures -contains "dev") {
-        throw "CADDY_DEV_NOT_READY: consulter logs\\caddy-start.log"
-    }
 
     # 2. launch.bat means: run the currently installed Orchestrator.
     #    Restart our own listener, but never kill an unrelated process on 8700.
