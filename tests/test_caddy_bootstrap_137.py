@@ -16,7 +16,7 @@ class CaddyBootstrapAfterReboot(unittest.TestCase):
         self.assertIn('caddy-start.log', source)
         self.assertIn('CADDY_DEV_NOT_READY', source)
         self.assertLess(source.index('-m service.service_cli restart-if-idle'), source.index('-m caddy_manager.cli start'))
-        self.assertLess(source.index('-m caddy_manager.cli start'), source.index('Preserve-CurrentControlCenterToken'))
+        self.assertLess(source.index('-m caddy_manager.cli start'), source.index('    Preserve-CurrentControlCenterToken\n'))
         self.assertNotIn('Stop-Process -Name caddy', source)
 
     def test_cli_start_must_report_http_ready(self):
