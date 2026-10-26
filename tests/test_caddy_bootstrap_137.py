@@ -28,6 +28,26 @@ class CaddyBootstrapAfterReboot(unittest.TestCase):
         self.assertNotIn('$logPurgeExitCode = $LASTEXITCODE', source)
         self.assertNotIn('$serviceReloadExitCode = $LASTEXITCODE', source)
 
+    def test_do_not_wait_for_permanent_descendants(self):
+        source=(ROOT/'scripts/launch_hidden.ps1').read_text(encoding='utf-8-sig')
+        self.assertNotIn('-Wait -PassThru', source)
+        for name in ('purge', 'serviceProc', 'proc'):
+            self.assertIn('
+        source=(ROOT/'scripts/launch_hidden.ps1').read_text(encoding='utf-8-sig')
+        self.assertNotIn('2>&1', source)
+        self.assertIn('-RedirectStandardError $purgeErr', source)
+        self.assertIn('-RedirectStandardError $serviceErr', source)
+        self.assertIn('$($_ | Out-String)', source)
+
+    def test_cli_start_must_report_http_ready(self):
+        source=(ROOT/'caddy_manager/cli.py').read_text(encoding='utf-8')
+        ast.parse(source)
+        self.assertIn('args.command in ("start", "restart")', source)
+
+if __name__ == '__main__':
+    unittest.main()
++name+'.WaitForExit(30000)', source)
+
     def test_native_stderr_is_redirected_before_caddy(self):
         source=(ROOT/'scripts/launch_hidden.ps1').read_text(encoding='utf-8-sig')
         self.assertNotIn('2>&1', source)
