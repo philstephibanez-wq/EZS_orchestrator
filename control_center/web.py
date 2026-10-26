@@ -1027,6 +1027,7 @@ main{padding:20px;max-width:1600px;margin:auto}.view{display:none}.view.active{d
       </details>
       <div id="assistantDeployNotice" class="muted" style="margin-top:10px"></div>
       <div class="actions">
+        <a id="assistantOpen" class="primary" href="http://127.0.0.1:18713/" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;padding:10px 14px;border-radius:9px;text-decoration:none;color:#edf4f7">Ouvrir Assistant</a>
         <button id="assistantStart" class="primary">Démarrer assistant</button>
         <button id="assistantStop" class="danger">Arrêter assistant</button>
         <button id="assistantDeploy">Déploiement XPS désactivé</button>
@@ -1348,8 +1349,8 @@ async function assistantRuntimeAction(path,successMessage){
   syncActionButtons();
  }
 }
-$("assistantStart").addEventListener("click",()=>assistantRuntimeAction("/api/assistant/supervision/start","Assistant XPS démarré"));
-$("assistantStop").addEventListener("click",()=>assistantRuntimeAction("/api/assistant/supervision/stop","Assistant XPS arrêté"));
+$("assistantStart").addEventListener("click",()=>assistantRuntimeAction("/api/assistant/supervision/start","Assistant Web MAIN démarré"));
+$("assistantStop").addEventListener("click",()=>assistantRuntimeAction("/api/assistant/supervision/stop","Assistant Web MAIN arrêté"));
 $("assistantDeploy").addEventListener("click",async()=>{
  if(busy)return;
  if(!confirm("Déployer la version validée de EZStudioLab_assistant vers le XPS ?"))return;
