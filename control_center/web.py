@@ -27,7 +27,7 @@ from control_center.log_tools import LogTools
 from control_center.singleton import ControlCenterSingleton, ControlCenterSingletonBusy
 from deployment.manager import DeploymentManager
 from assistant_deployment.manager import build_plan as build_assistant_deploy_plan, build_status_plan as build_assistant_status_plan, deploy as deploy_assistant_node, deployment_status as get_assistant_deployment_status, finalize_deployment as finalize_assistant_deployment, rollback_deployment as rollback_assistant_deployment
-from assistant_supervision.manager import AssistantSupervisor
+from assistant_supervision.main_supervisor import MainSupervisor as AssistantSupervisor
 from gateway_manager.manager import GatewayManager
 from prod_lifecycle.manager import ProdLifecycleManager
 from runtime_guard.activity import analysis_execution_active
@@ -822,6 +822,8 @@ class ControlCenter:
 
     def assistant_supervision_status(self) -> dict:
         remote = self.assistant_supervision.status()
+        if remote.get('deployment_mode') == 'main-docker':
+            return remote
         workers_payload = self._distributed_workers()
         workers = workers_payload.get("workers") if workers_payload.get("ok") else []
         workers = workers if isinstance(workers, list) else []
@@ -872,65 +874,12 @@ class ControlCenter:
             return result
 
     def assistant_deployment_status(self) -> dict:
-        try:
-            return get_assistant_deployment_status(build_assistant_status_plan())
-        except Exception as exc:
-            return {
-                "ok": False,
-                "schema": "ezs.assistant-deployment.status.v1",
-                "state": "ERROR",
-                "source_version": _read_version(
-                    Path(r"H:\EZStudioLab_assistant") / "VERSION"
-                ),
-                "deployed_version": None,
-                "source_dirty": None,
-                "source_commit": None,
-                "deployed_commit": None,
-                "node": "steph@192.168.1.81",
-                "remote_root": r"C:\EZStudioLab_assistant",
-                "error": f"{type(exc).__name__}:{exc}"[:500],
-            }
+        return {"ok": True, "state": "DISABLED_MAIN_DOCKER", "source_version": ASSISTANT_VERSION,
+                "deployed_version": None, "error": "XPS deployment disabled for MAIN Docker"}
 
     def assistant_deployment_apply(self) -> dict:
-        with self.action_lock:
-            plan = build_assistant_deploy_plan()
-            result = None
-            runtime = None
-            try:
-                result = deploy_assistant_node(plan)
-                runtime = self.assistant_supervision.start()
-                if str(runtime.get("state") or "").upper() != "RUNNING":
-                    raise RuntimeError(
-                        f"assistant_post_deploy_runtime_not_running:{runtime.get('state')}"
-                    )
-                finalize_assistant_deployment(plan)
-            except Exception as exc:
-                rollback_error = None
-                restart_error = None
-                try:
-                    rollback_assistant_deployment(plan)
-                except Exception as rollback_exc:
-                    rollback_error = f"{type(rollback_exc).__name__}:{rollback_exc}"
-                else:
-                    try:
-                        self.assistant_supervision.start()
-                    except Exception as restart_exc:
-                        restart_error = f"{type(restart_exc).__name__}:{restart_exc}"
-                detail = f"{type(exc).__name__}:{exc}"
-                if rollback_error:
-                    detail += f"; rollback={rollback_error}"
-                if restart_error:
-                    detail += f"; rollback_restart={restart_error}"
-                raise RuntimeError(
-                    f"assistant_post_deploy_validation_failed:{detail[:1200]}"
-                ) from exc
-
-            self._invalidate_snapshot()
-            return {
-                **(result or {}),
-                "runtime": runtime,
-                "finalized": True,
-            }
+        return {"ok": False, "state": "DISABLED_MAIN_DOCKER",
+                "error": "XPS deployment disabled for MAIN Docker"}
 
     def acknowledge_incident(self, incident_id: str) -> dict:
         return {
@@ -1060,14 +1009,14 @@ main{padding:20px;max-width:1600px;margin:auto}.view{display:none}.view.active{d
       </div>
     </article>
     <article class="card target lab">
-      <h2>EZStudioLab_assistant · V__ASSISTANT_VERSION__ · nœuds distribués</h2>
+      <h2>EZStudioLab Assistant MAIN Docker · V__ASSISTANT_VERSION__</h2>
       <div class="statusrow"><span id="assistantDot" class="dot"></span><strong id="assistantState">-</strong></div>
       <div class="muted" id="assistantMeta" style="margin-top:6px">Inventaire en lecture seule.</div>
       <dl class="kv" style="margin-top:10px">
         <dt>Version source</dt><dd id="assistantSourceVersion">-</dd>
         <dt>Version déployée</dt><dd id="assistantDeployedVersion">-</dd>
         <dt>État déploiement</dt><dd id="assistantDeployState">-</dd>
-        <dt>Processus assistant XPS</dt><dd id="assistantRuntimeState">-</dd>
+        <dt>Conteneurs Assistant MAIN</dt><dd id="assistantRuntimeState">-</dd>
       </dl>
       <details style="margin-top:8px">
         <summary class="muted">Détails techniques Git</summary>
@@ -1080,7 +1029,7 @@ main{padding:20px;max-width:1600px;margin:auto}.view{display:none}.view.active{d
       <div class="actions">
         <button id="assistantStart" class="primary">Démarrer assistant</button>
         <button id="assistantStop" class="danger">Arrêter assistant</button>
-        <button id="assistantDeploy">Déployer assistant → XPS</button>
+        <button id="assistantDeploy">Déploiement XPS désactivé</button>
       </div>
       <div id="assistantWorkers"></div>
     </article>
@@ -1198,7 +1147,7 @@ syncCollapseControl();
 function syncActionButtons(){
  document.querySelectorAll('button[data-action]').forEach(b=>{const destructive=b.dataset.destructive==="1";b.disabled=busy||(destructive&&analysisActive)});
  if(deployData)$("deployApply").disabled=busy||analysisActive||!deployData.ok;
- if($("assistantDeploy"))$("assistantDeploy").disabled=busy||assistantDeployData?.state==="UP_TO_DATE"||assistantDeployData?.state==="UNREACHABLE"||assistantDeployData?.state==="LOCAL_CHANGES";
+ if($("assistantDeploy"))$("assistantDeploy").disabled=busy||assistantDeployData?.state==="UP_TO_DATE"||assistantDeployData?.state==="UNREACHABLE"||assistantDeployData?.state==="LOCAL_CHANGES"||assistantDeployData?.state==="DISABLED_MAIN_DOCKER";
 }
 let assistantDeployData=null,assistantDeployRefreshInFlight=false;
 function renderAssistantDeployment(payload){
