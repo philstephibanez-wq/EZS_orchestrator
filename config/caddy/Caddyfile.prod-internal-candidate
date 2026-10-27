@@ -5,7 +5,7 @@
 
 # Internal PROD HTTP facade for Gateway :8510.
 # Must remain loopback only, never publicly reachable.
-http://127.0.0.1:8511 {
+:8511 {
     bind 127.0.0.1
     root * H:/EZScore/public
     encode gzip
