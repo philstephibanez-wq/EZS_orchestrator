@@ -1,0 +1,3 @@
+/* EZS Orchestrator: Bootstrap 5 remains the visual source of truth. */
+body { min-height: 100vh; background: var(--bs-tertiary-bg); }
+main.container-fluid { max-width: 1600px; }
