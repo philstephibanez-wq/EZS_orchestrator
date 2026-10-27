@@ -33,8 +33,25 @@ try {
         exit 0
     }
     AssertOrchestrator
-    $caddy = & $CaddyCheck -Action status
-    if ($LASTEXITCODE -ne 0 -or [string]$caddy -notmatch '^CADDY_DEV_REUSED PID=\d+$') { throw 'APP_CONTROL_SHARED_CADDY_UNAVAILABLE' }
+    $caddy = @(& $CaddyCheck -Action status)
+    $caddyText = ($caddy | ForEach-Object { [string]$_ }) -join "`n"
+    if ($caddy.Count -ne 1 -or $caddyText.Trim() -notmatch '^CADDY_DEV_REUSED PID=[1-9][0-9]*
+    if ($Action -eq 'restart') {
+        & $BackendScript -Action stop
+        if (-not $?) { throw 'APP_CONTROL_STOP_FAILED' }
+        & $BackendScript -Action start
+        if (-not $?) { throw 'APP_CONTROL_START_FAILED' }
+    } else {
+        & $BackendScript -Action $Action
+        if (-not $?) { throw "APP_CONTROL_ACTION_FAILED $Action" }
+    }
+    Write-Host "APP_CONTROL_OK APP=$Application ACTION=$Action"
+} finally {
+    $mutex.Dispose()
+}
+) {
+        throw "APP_CONTROL_SHARED_CADDY_UNAVAILABLE RESULT=$caddyText"
+    }
     if ($Action -eq 'restart') {
         & $BackendScript -Action stop
         if (-not $?) { throw 'APP_CONTROL_STOP_FAILED' }
