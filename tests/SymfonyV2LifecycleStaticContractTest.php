@@ -10,4 +10,7 @@ if (!str_contains($start, "v2_lifecycle.ps1") || !str_contains($stop,"v2_lifecyc
 foreach (['EZS_LIFECYCLE_CONCURRENT_OPERATION','EZS_STOP_REFUSED_UNVERIFIED_PROCESS_OWNERSHIP','EZS_GLOBAL_STOP_REQUIRES_DEV_OWNERSHIP_PORT_','EZS_START_REFUSED_PORT_8790_OR_8791_IN_USE','Caddyfile.dev-root-candidate','-WindowStyle Hidden','PROD_UNTOUCHED'] as $token) {
     if (!str_contains($source,$token)) throw new RuntimeException('LIFECYCLE_GUARD_MISSING:'.$token);
 }
+foreach (['Refuse-OtherDevListeners $c', '@(8502, 8852)', 'OwningProcess -ne $caddyPid', '@(8602, 8701, 8702, 8712, 8862)'] as $marker) {
+    if (!str_contains($source, $marker)) throw new RuntimeException('CADDY_DEV_FACADE_GUARD_MISSING:' . $marker);
+}
 echo "EZS_V2_LIFECYCLE_STATIC_CONTRACT_OK\n";

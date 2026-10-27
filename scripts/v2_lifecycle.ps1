@@ -42,12 +42,15 @@ function Wait-Port([int]$port, [int]$processId) {
     }
     return $false
 }
-function Refuse-OtherDevListeners {
-    # Global stop is not yet allowed to leave unrelated DEV backends running.
-    # Their managers must be integrated before enabling global stop.
-    foreach ($port in @(8502, 8602, 8701, 8702, 8712, 8852, 8862)) {
+function Refuse-OtherDevListeners([int]$caddyPid) {
+    foreach ($port in @(8502, 8852)) {
         $found = @(Listening $port)
-        if ($found.Count -gt 0) {
+        if ($found.Count -ne 1 -or [int]$found[0].OwningProcess -ne $caddyPid) {
+            throw "EZS_STOP_REFUSED_CADDY_DEV_FACADE_OWNER_$port"
+        }
+    }
+    foreach ($port in @(8602, 8701, 8702, 8712, 8862)) {
+        if ((@(Listening $port)).Count -gt 0) {
             throw "EZS_GLOBAL_STOP_REQUIRES_DEV_OWNERSHIP_PORT_$port"
         }
     }
@@ -78,7 +81,7 @@ try {
             -not (Owned $c $caddy 'Caddyfile.dev-root-candidate') -or -not (Port-Owned 8790 $c)) {
             throw 'EZS_STOP_REFUSED_UNVERIFIED_PROCESS_OWNERSHIP'
         }
-        Refuse-OtherDevListeners
+        Refuse-OtherDevListeners $c
         Stop-Process -Id $p -ErrorAction Stop
         Stop-Process -Id $c -ErrorAction Stop
         Remove-Item -LiteralPath $stateFile -Force
