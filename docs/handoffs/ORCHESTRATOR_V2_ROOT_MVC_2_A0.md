@@ -69,3 +69,22 @@ Si `composer` est une commande `.cmd`, elle est exécutée **seulement dans la c
 - `bin/console ezs:prod:fastcgi-preflight` : maintenance true, ports 8511/8512 libres, candidate_only true.
 - `composer validate` signalait un `composer.lock` non synchronisé suite au changement de nom de package `ezs/orchestrator-web` vers `ezs/orchestrator`. Correctif sur master : **mise à jour ciblée du `content-hash` Composer** (`07229fc62a5472051ff874f2b6c5cd9e`), calculée avec l'algorithme du Locker Composer et vérifiée contre le hash de l'ancien package. Aucune version de dépendance changée. Validation Composer locale après pull encore requise.
 - Ne pas supprimer `web/` : Caddy/runtime V1 n'est pas encore basculé ni testé en HTTP sur le root. Ne pas activer PROD, ni traiter les jobs en attente.
+
+
+## Lot HTTP/Twig racine préparé — v2.a0
+- Composer validate sur MAIN confirmé : `./composer.json is valid`, lock synchronisé ; Symfony 7.4.21/PHP 8.5.11 et routes root détectées.
+- Test **in-process** sans listener ajouté : `tests/SymfonyRootHttpKernelTest.php` vérifie les réponses HTTP internes GET `/` (Twig, version `2.a0`) et GET `/api/v2/environments` (JSON) à travers le Kernel Symfony racine. **Pas encore exécuté sur MAIN.**
+- `HomeController` racine explicite désormais Content-Type HTML/UTF-8 et Cache-Control no-store.
+- Nouveau `config/caddy/Caddyfile.orchestrator-root-preview` : candidate loopback **8890 → 8891**, docroot `H:/EZS_orchestrator/public`, admin off. Ports distincts de 8790/8791, aucune activation.
+- **Gate impératif** : aucun Caddy ni PHP-CGI lancé dans ce lot ; première recette valide la configuration et le Kernel in-process. La vraie recette HTTP réseau/Windows et zéro fenêtre console reste à effectuer avant switchover. `web/` demeure opérationnel et intact.
+
+### Recette MAIN (lecture seule vis-à-vis des services)
+```powershell
+cd H:\EZS_orchestrator
+git pull --ff-only origin master
+$PHP = "H:\PHP\php-8.5-x64\php.exe"
+& $PHP .\tests\SymfonyRootHttpKernelTest.php
+& $PHP .\bin\console lint:twig .\templates
+& "H:\Caddy\caddy.exe" validate --config .\config\caddy\Caddyfile.orchestrator-root-preview --adapter caddyfile
+```
+Attendu : `SYMFONY_ROOT_HTTP_KERNEL_OK`, templates Twig valides, `Valid configuration`. Rien n'est démarré ou redirigé. Si échec du test, ne pas modifier Caddy actif, joindre le log.
