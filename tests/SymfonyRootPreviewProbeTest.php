@@ -26,10 +26,17 @@ function readRootPreview(string $host, string $path, int $expectedStatus, string
     $headers = $http_response_header ?? [];
     $status = $headers[0] ?? '';
     $headerText = implode("\n", $headers);
+    $typePattern = $expectedType === 'javascript'
+        ? '~^content-type:\\s*(?:text|application)/javascript(?:\\s*;|\\s*$)~im'
+        : '~^content-type:\\s*' . preg_quote($expectedType, '~') . '(?:\\s*;|\\s*$)~im';
     if (!preg_match('~^HTTP/\\d(?:\\.\\d)? ' . $expectedStatus . '(?:\\s|$)~', $status)
-        || !preg_match('~content-type:\\s*' . preg_quote($expectedType, '~') . '~i', $headerText)
+        || !preg_match($typePattern, $headerText)
         || !is_string($body)) {
-        throw new RuntimeException('ROOT_PREVIEW_HTTP_FAILED:' . $path . ' status=' . $status);
+        $actualType = 'absent';
+        if (preg_match('~^content-type:\\s*([^\\r\\n]+)~im', $headerText, $matches)) {
+            $actualType = trim($matches[1]);
+        }
+        throw new RuntimeException('ROOT_PREVIEW_HTTP_FAILED:' . $path . ' status=' . $status . ' content_type=' . $actualType);
     }
     return $body;
 }
