@@ -36,7 +36,7 @@ Le dépôt utilise un fichier canonique `VERSION`.
 
 Format :
 - release : `MAJOR.MINOR` (ex. `1.5`)
-- fix : suffixe lettre minuscule ajouté à la release courante (ex. `1.5a`, `1.5b`, ..., puis `aa`, `ab` si nécessaire)
+- fix : suffixe lettre minuscule ajouté à la release courante (ex. `1.5a`, `1.5b`, ..., puis `aa`, `ab` si nécessaire). Les suffixes numériques parenthésés, tels que `1.3a(26)`, sont historiques et interdits pour les nouvelles versions.
 - nouvelle release : incrément d'une composante numérique selon la portée et suppression du suffixe
 - rupture majeure : incrément explicite de `MAJOR`
 
@@ -65,7 +65,7 @@ Règles :
 
 Chaque commit publié doit être intelligible sans ouvrir le diff. Rédiger **en français**, avec :
 
-- Format obligatoire : `[vVERSION] type(périmètre): résultat concret`, par exemple `[v1.3a(6)] fix(jobs): préserver la distinction entre analyse et expertise`.
+- Format obligatoire : `[vVERSION] type(périmètre): résultat concret`, par exemple `[v1.3b] fix(jobs): préserver la distinction entre analyse et expertise`.
 - Un **corps de message multiligne** expliquant `Contexte`, `Modifications`, `Validation`, `Impact` et, si nécessaire, `Limites / risques`.
 - Dans `Validation`, distinguer explicitement les tests exécutés des tests seulement ajoutés ou non exécutés. Ne jamais affirmer une réussite non constatée.
 - Dans `Impact`, indiquer les dépôts ou composants touchés, les éventuels redémarrages/déploiements, et si les modèles, presets scientifiques, données et interfaces sont inchangés.
