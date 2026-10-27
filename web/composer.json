@@ -22,5 +22,6 @@
     "allow-plugins": {
       "symfony/runtime": true
     }
-  }
+  },
+  "license": "proprietary"
 }
