@@ -30,6 +30,8 @@ class ProdEdgeBootstrapContract(unittest.TestCase):
         launcher = (ROOT / "scripts" / "start.cmd").read_text(encoding="utf-8")
         self.assertIn("prod-edge-start.py", launcher)
         self.assertIn("if errorlevel 1 exit /b", launcher)
+        entry = (ROOT / "scripts" / "prod-edge-start.py").read_text(encoding="utf-8")
+        self.assertIn("sys.path.insert(0, str(ROOT))", entry)
 
 
 if __name__ == "__main__":
