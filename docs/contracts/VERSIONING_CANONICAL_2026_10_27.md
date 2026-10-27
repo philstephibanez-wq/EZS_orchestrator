@@ -1,13 +1,14 @@
-# Correctif de conformité des versions — 2026-10-27
+# Convention de versionnement — décision du mainteneur (27 octobre 2026)
 
-## Décision
-Format canonique obligatoire : release `MAJOR.MINOR` ; fix `MAJOR.MINORa`, puis `b`, ... `z`, `aa`, etc. Aucun suffixe numérique parenthésé pour une nouvelle livraison.
+## Format canonique
+- Release : `1.3`.
+- Série corrective et compteur simplifié sans parenthèses : `1.3b0`, `1.3b1`, `1.3b2`.
+- Nouvelle série : `1.3c0`. Nouvelle release : `1.4`.
+- Le préfixe du commit doit correspondre strictement à `[vVERSION]`.
+- Chaque livraison regroupe le changement durable, la mise à jour de `VERSION`, les tests et la documentation, sans scripts temporaires dans le dépôt.
 
-## État et anomalie
-Des commits antérieurs, dont `[v1.3a(24)]`, `[v1.3a(25)]` et `[v1.3a(26)]`, employaient le format historique parenthésé malgré la règle de `AGENTS.md`. Les exemples de la section « messages de commit » ont entretenu la contradiction. Ne pas réécrire l'historique partagé.
+## Correction historique
+`1.3a(24)`, `1.3a(25)`, `1.3a(26)` étaient les anciennes notations ; une tentative incorrecte `1.3b` a ensuite été publiée. Ces références restent inchangées dans l'historique Git. Le mainteneur a validé le format **`1.3b0`** comme version canonique actuelle. Ne pas réécrire de commits publiés.
 
-## Remise en conformité
-La version canonique repart à `1.3b` (fix suivant dans la série 1.3). La valeur du fichier `VERSION` et le préfixe du commit concordent. Les anciennes mentions numériques dans les notes historiques ne sont pas des versions réutilisables. Les prochaines évolutions incrémentent le suffixe, sans sous-compteur.
-
-## Validation et limites
-Inspection documentaire du contrat et du HEAD GitHub uniquement. Aucun test d'exécution, démarrage de service, publication de rapport ou job scientifique. Les écarts de version présents dans les autres dépôts restent à inventorier indépendamment, sans modification de leurs versions dans ce correctif.
+## Périmètre et validation
+Correction du contrat documentaire et du fichier `VERSION` uniquement. Vérification statique des valeurs dans les fichiers GitHub ; aucun test runtime exécuté, aucun service/job démarré. Les autres dépôts conservent leur état tant qu'une décision explicite ne les aligne pas.

@@ -34,17 +34,20 @@ Voir aussi `REPOSITORY_HYGIENE.md`.
 
 Le dépôt utilise un fichier canonique `VERSION`.
 
-Format :
-- release : `MAJOR.MINOR` (ex. `1.5`)
-- fix : suffixe lettre minuscule ajouté à la release courante (ex. `1.5a`, `1.5b`, ..., puis `aa`, `ab` si nécessaire). Les suffixes numériques parenthésés, tels que `1.3a(26)`, sont historiques et interdits pour les nouvelles versions.
-- nouvelle release : incrément d'une composante numérique selon la portée et suppression du suffixe
-- rupture majeure : incrément explicite de `MAJOR`
+Format retenu par le mainteneur le 27 octobre 2026 :
+- release : `MAJOR.MINOR` (ex. `1.3`) ;
+- série corrective : lettre minuscule après la release (ex. `1.3a`, puis `1.3b`) ;
+- révision dans une série : entier **sans parenthèses** collé à la lettre, à partir de zéro : `1.3b0`, `1.3b1`, `1.3b2` ;
+- nouvelle série corrective : lettre suivante avec compteur remis à zéro (`1.3c0`) ;
+- nouvelle release : incrément explicite d'une composante numérique, sans suffixe.
+
+Les notations antérieures `1.3a(26)` et `1.3b(0)` sont conservées uniquement dans les références historiques. Ne pas les employer pour de nouveaux commits. Ne pas interpréter un numéro de révision comme une nouvelle release.
 
 Règles :
-1. chaque push doit obligatoirement modifier `VERSION` ;
-2. chaque push doit être classé `release` ou `fix` ;
-3. le hash Git n'est jamais la version produit : il est affiché séparément comme `Révision` ;
-4. les interfaces et logs doivent distinguer `Version` et `Révision` ;
+1. chaque push doit modifier `VERSION` ;
+2. chaque push est classé release ou fix ;
+3. le hash Git est une révision technique distincte de la version produit ;
+4. UI et logs distinguent `Version` et `Révision` ;
 5. pour EZS_orchestrator, la version DEV est canonique ; la PROD reprend cette version lors du déploiement.
 
 ## CONTRAT TRANSVERSAL — UTF-8 ET LISIBILITÉ DES SOURCES
@@ -65,7 +68,7 @@ Règles :
 
 Chaque commit publié doit être intelligible sans ouvrir le diff. Rédiger **en français**, avec :
 
-- Format obligatoire : `[vVERSION] type(périmètre): résultat concret`, par exemple `[v1.3b] fix(jobs): préserver la distinction entre analyse et expertise`.
+- Format obligatoire : `[vVERSION] type(périmètre): résultat concret`, par exemple `[v1.3b0] fix(jobs): préserver la distinction entre analyse et expertise`.
 - Un **corps de message multiligne** expliquant `Contexte`, `Modifications`, `Validation`, `Impact` et, si nécessaire, `Limites / risques`.
 - Dans `Validation`, distinguer explicitement les tests exécutés des tests seulement ajoutés ou non exécutés. Ne jamais affirmer une réussite non constatée.
 - Dans `Impact`, indiquer les dépôts ou composants touchés, les éventuels redémarrages/déploiements, et si les modèles, presets scientifiques, données et interfaces sont inchangés.
