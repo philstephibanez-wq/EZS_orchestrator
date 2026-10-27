@@ -1,9 +1,0 @@
-services:
-    _defaults:
-        autowire: true
-        autoconfigure: true
-    Ezs\Web\:
-        resource: '../src/'
-        exclude:
-            - '../src/Kernel.php'
-            - '../src/Module/Coordination/ExclusiveLease.php'

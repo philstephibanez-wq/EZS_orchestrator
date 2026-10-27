@@ -6,7 +6,7 @@
 # Single isolated Caddy DEV instance: existing Orchestrator plus EZScore sandbox.
 http://127.0.0.1:8790 {
     bind 127.0.0.1
-    root * H:/EZS_orchestrator/web/public
+    root * H:/EZS_orchestrator/public
     encode gzip
     php_fastcgi 127.0.0.1:8791 {
         capture_stderr

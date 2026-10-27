@@ -1,6 +1,0 @@
-/vendor/
-/var/
-/.env.local
-/.env.*.local
-
-/config/reference.php
