@@ -29,7 +29,13 @@ if($Action -eq 'start') {
     if($devStatus -notmatch 'state_present=True'){
         & $dev -Action start
     } elseif($devStatus -notmatch 'php_owned=True caddy_owned=True state_present=True'){
-        throw 'EZS_RESTORE_REFUSED_DEV_STATE_NOT_OWNED'
+        if($devStatus -match 'php_owned=False caddy_owned=True state_present=True'){
+            & $dev -Action repair
+            $devStatus=(& $dev -Action status | Out-String)
+        }
+        if($devStatus -notmatch 'php_owned=True caddy_owned=True state_present=True'){
+            throw 'EZS_RESTORE_REFUSED_DEV_STATE_NOT_OWNED'
+        }
     }
     $prodStatus=(& $prod -Action status | Out-String)
     if($prodStatus -notmatch 'state_present=True'){

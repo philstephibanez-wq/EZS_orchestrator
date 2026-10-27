@@ -26,4 +26,9 @@ if (str_contains($waitPort, 'if ((@(Listening $port)).Count -gt 0) { return $fal
     || !str_contains($waitPort, 'return (Port-Owned $port $processId)')) {
     throw new RuntimeException('WAIT_PORT_EARLY_REJECTION_REGRESSION');
 }
+foreach (['EZS_DEV_REPAIR_REFUSED_CADDY_NOT_VERIFIED','EZS_DEV_REPAIR_REFUSED_PHP_PROCESS_OR_PORT_PRESENT','EZS_DEV_REPAIR_FASTCGI_OK_CADDY_PRESERVED','Port-Owned 8502 $caddyPid','Port-Owned 8852 $caddyPid'] as $marker) {
+    if (!str_contains($source,$marker)) throw new RuntimeException('DEV_REPAIR_GUARD_MISSING:'.$marker);
+}
+$restore=(string)file_get_contents($root.'/scripts/infrastructure_restore.ps1');
+if (!str_contains($restore,'& $dev -Action repair')) throw new RuntimeException('RESTORE_REPAIR_NOT_CONNECTED');
 echo "EZS_V2_LIFECYCLE_STATIC_CONTRACT_OK\n";

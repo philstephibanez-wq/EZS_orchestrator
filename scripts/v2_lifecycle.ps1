@@ -1,4 +1,4 @@
-param([ValidateSet('start','stop','status')][string]$Action)
+param([ValidateSet('start','stop','status','repair')][string]$Action)
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $runtime = Join-Path $root 'runtime\v2-dev'
@@ -74,6 +74,41 @@ try {
             $caddyOk = (Owned ([int]$s.caddy_pid) $caddy 'Caddyfile.dev-root-candidate') -and (Port-Owned 8790 ([int]$s.caddy_pid))
         }
         Write-Host "EZS_STATUS php_owned=$phpOk caddy_owned=$caddyOk state_present=$($null -ne $s)"
+        return
+    }
+    if ($Action -eq 'repair') {
+        if ($null -eq $s) { throw 'EZS_DEV_REPAIR_REFUSED_NO_STATE' }
+        $oldPid = [int]$s.php_pid
+        $caddyPid = [int]$s.caddy_pid
+        if (-not (Owned $caddyPid $caddy 'Caddyfile.dev-root-candidate') -or
+            -not (Port-Owned 8790 $caddyPid) -or -not (Port-Owned 8502 $caddyPid) -or
+            -not (Port-Owned 8852 $caddyPid)) {
+            throw 'EZS_DEV_REPAIR_REFUSED_CADDY_NOT_VERIFIED'
+        }
+        if ((Owned $oldPid $php '-b 127.0.0.1:8791') -and (Port-Owned 8791 $oldPid)) {
+            Write-Host 'EZS_DEV_REPAIR_NOT_NEEDED'
+            return
+        }
+        # Do not overwrite an occupied port or kill an unidentified/stale PID.
+        if ((@(Listening 8791)).Count -gt 0 -or $null -ne (ProcessInfo $oldPid)) {
+            throw 'EZS_DEV_REPAIR_REFUSED_PHP_PROCESS_OR_PORT_PRESENT'
+        }
+        if (-not (Test-Path -LiteralPath $php -PathType Leaf)) { throw 'EZS_DEV_REPAIR_PHP_MISSING' }
+        $env:APP_ENV = 'dev'
+        $env:APP_DEBUG = '1'
+        $backend = Start-Process -FilePath $php -ArgumentList '-b 127.0.0.1:8791' -WorkingDirectory $root -WindowStyle Hidden -PassThru
+        if (-not (Wait-Port 8791 ([int]$backend.Id))) {
+            if (Owned ([int]$backend.Id) $php '-b 127.0.0.1:8791') {
+                Stop-Process -Id $backend.Id -ErrorAction SilentlyContinue
+            }
+            throw 'EZS_DEV_REPAIR_FASTCGI_FAILED'
+        }
+        if (-not (Owned ([int]$backend.Id) $php '-b 127.0.0.1:8791')) {
+            throw 'EZS_DEV_REPAIR_REFUSED_UNVERIFIED_NEW_PROCESS'
+        }
+        $s.php_pid = [int]$backend.Id
+        Save-State $s
+        Write-Host 'EZS_DEV_REPAIR_FASTCGI_OK_CADDY_PRESERVED'
         return
     }
     if ($Action -eq 'stop') {
