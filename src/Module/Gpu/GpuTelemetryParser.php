@@ -15,7 +15,7 @@ final class GpuTelemetryParser
         if ($name === '' || !is_numeric($usage) || !is_numeric($used) || !is_numeric($total) || !is_numeric($temperature) || (float)$total <= 0) {
             throw new \UnexpectedValueException('gpu_invalid_measurements');
         }
-        $optional = array_slice($fields, 5);
+        $optional = array_map('trim', array_slice($fields, 5));
         $power = $optional[0] ?? null;
         $limit = $optional[1] ?? null;
         $clock = $optional[2] ?? null;
