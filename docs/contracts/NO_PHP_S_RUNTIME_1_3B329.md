@@ -1,0 +1,7 @@
+# v1.3b329 — neutralisation exécutable du serveur PHP intégré
+
+Le gestionnaire historique `ServerManager.start()` ne peut plus démarrer (ni adopter comme démarrage) le serveur intégré de PHP sur aucun des targets DEV, PROD, LAB. La méthode échoue immédiatement et explicitement avec `php_builtin_server_forbidden:use_caddy_fastcgi_lifecycle`. La commande `php -S` a été supprimée du code exécutable de cette méthode, sans recours à un autre nom ou à un fallback. Test Python de garde pour les trois targets.
+
+Cette étape rend volontairement inopérants les anciens points d'entrée Python qui appelaient cette méthode ; ils devront être migrés avant utilisation. Le démarrage `scripts/start.cmd` v1.3b327 passe toujours par `v2_lifecycle.ps1` (PHP-CGI pour Orchestrator), puis `prod_lifecycle/edge_bootstrap.py` (Gateway + Caddy PROD en maintenance) et ne passe pas par `ServerManager.start()`. Les backends applicatifs DEV, LAB et PROD n'ont pas tous été migrés en FastCGI par cette seule modification. La fonction historique de redémarrage PROD est ainsi bloquée ; ne pas l'utiliser.
+
+**PROD reste en maintenance**, Caddy PROD et Gateway déjà actifs ne sont pas perturbés par le pull. Le bouton Mode normal reste bloqué : la suppression du serveur intégré ne constitue pas à elle seule un backend PROD fonctionnel. Les étapes suivantes restent indispensables : chemin HTTP Caddy 8511 → FastCGI PHP 8512, préflight de santé et SSO, puis autorisation de la sortie de maintenance.

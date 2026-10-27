@@ -223,69 +223,9 @@ class ServerManager:
         target: Target,
         app_env: str | None = None,
     ) -> ServerView:
-        spec = self.spec(target)
-        env = spec.validate_env(app_env or spec.default_env)
-        public = spec.root / "public"
-        if not public.is_dir():
-            raise RuntimeError(f"Public directory missing: {public}")
-
-        existing = listener_pid(spec.backend_port)
-        if existing:
-            return self.adopt(target, env)
-
-        self._clear_framework_cache(target, env)
-
-        php_path = self.config.web_php_for(target)
-        if php_path.is_absolute() and not php_path.is_file():
-            raise RuntimeError(
-                f"PHP executable missing for {target.value}: {php_path}"
-            )
-        php = str(php_path)
-        out = (self.logs / f"{target.value}.out.log").open("ab")
-        err = (self.logs / f"{target.value}.err.log").open("ab")
-        process_env = os.environ.copy()
-        process_env["APP_ENV"] = env
-        process_env["APP_DEBUG"] = "1" if env == "dev" else "0"
-        process_env["EZSCORE_INSTANCE"] = target.value
-        try:
-            proc = subprocess.Popen(
-                [
-                    php,
-                    "-S",
-                    f"127.0.0.1:{spec.backend_port}",
-                    "-t",
-                    str(public),
-                ],
-                cwd=str(spec.root),
-                env=process_env,
-                stdout=out,
-                stderr=err,
-                creationflags=WINDOWS_NO_WINDOW if os.name == "nt" else 0,
-            )
-        finally:
-            out.close()
-            err.close()
-
-        time.sleep(0.5)
-        if proc.poll() is not None:
-            raise RuntimeError(
-                f"{target.value} PHP server exited immediately "
-                f"with code {proc.returncode}"
-            )
-        self._pid_path(target).write_text(str(proc.pid), encoding="ascii")
-        atomic_json(
-            self._meta_path(target),
-            {
-                "schema": "ezs.server-instance.v1",
-                "target": target.value,
-                "environment": env,
-                "pid": proc.pid,
-                "backend_port": spec.backend_port,
-                "root": str(spec.root),
-                "started_at": datetime.now(timezone.utc).isoformat(),
-            },
-        )
-        return self.view(target, env)
+        # Built-in PHP HTTP serving is forbidden across the EZS platform.
+        # No implicit fallback: the owning FastCGI lifecycle must be used.
+        raise RuntimeError("php_builtin_server_forbidden:use_caddy_fastcgi_lifecycle")
 
     def stop(self, target: Target) -> ServerView:
         spec = self.spec(target)
