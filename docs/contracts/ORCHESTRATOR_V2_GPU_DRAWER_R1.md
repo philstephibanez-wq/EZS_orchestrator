@@ -1,0 +1,5 @@
+# 1.3b12 — Volet GPU gauche
+
+Volet Twig/CSS/JS repris de l'Assistant, identique à LAB, adapté au thème sombre et placé à gauche. Données fournies par la sonde centrale GpuProbe dans Symfony. Le nouvel endpoint navigateur est réservé à DEV loopback (contrôles environnement/hôte/adresse IP), non destiné à une exposition publique ; l'API technique à token demeure inchangée. Le réemploi du même module n'autorise aucun secret côté navigateur. L'interface affiche les valeurs réelles NVIDIA et les historiques sur 120 secondes.
+
+Tests MAIN : `php web/tests/GpuDrawerContractTest.php`, `php web/tests/GpuTelemetryParserTest.php`, `php web/bin/console lint:twig web/templates`, `php web/bin/console lint:container`, `php web/bin/console debug:router`. Vérifier ensuite HTTP 200 de l'endpoint et le graphique dans le navigateur. Ne jamais déployer cette route de dashboard telle quelle en PROD. Pas de script start V2 canonique pour l'instant ; start.cmd cible encore Python. Aucun service/job/port PROD modifié.

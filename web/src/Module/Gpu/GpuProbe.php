@@ -11,7 +11,7 @@ final class GpuProbe
     public function read(): array
     {
         $binary = getenv('EZS_NVIDIA_SMI') ?: 'nvidia-smi';
-        $process = new Process([$binary, '--query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu', '--format=csv,noheader,nounits']);
+        $process = new Process([$binary, '--query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw,power.limit,clocks.sm,pstate', '--format=csv,noheader,nounits']);
         $process->setTimeout(5);
         $process->mustRun();
         return [

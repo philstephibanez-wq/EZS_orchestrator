@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="fr" data-bs-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="/assets/ezs-infrastructure.css">
     <script src="https://code.jquery.com/jquery-3.7.1.min.js" defer></script>
     <script src="/assets/ezs-infrastructure.js" defer></script>
+    <script src="/assets/ezs-gpu-monitor.js" defer></script>
 </head>
 <body>
     <header class="navbar navbar-dark bg-dark">
@@ -16,7 +17,9 @@
             <span class="badge text-bg-secondary">DEV · Consultation</span>
         </div>
     </header>
-    <main class="container-fluid py-4">
+    {% include 'infrastructure/_gpu_monitor.html.twig' %}
+    <nav class="ezs-nav" aria-label="Navigation principale"><a href="/" aria-current="page">Infrastructure</a><span>Files &amp; Jobs · en migration</span><span>Déploiements · en migration</span></nav>
+    <main class="container-fluid py-4 ezs-main">
         <h1 class="h3 mb-2">Infrastructure</h1>
         <p class="text-body-secondary">Environnements autorisés. Aucun service ni job ne peut être démarré depuis cette page.</p>
         <section class="card shadow-sm" aria-labelledby="environments-title">
