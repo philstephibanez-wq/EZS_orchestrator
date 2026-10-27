@@ -1,0 +1,15 @@
+# Handoff — Publication terminale ONE SHOT V2 — 27/10/2026
+
+## Décision
+L'Orchestrator **Symfony/PHP** reçoit de LAB et Assistant les confirmations finales, regroupe/normalise leurs comptes rendus expurgés selon les événements métier autorisés et publie sur le dépôt privé `philstephibanez-wq/EZStudio_Run_Reports` **une fois à la clôture**, sans polling ni reporting périodique.
+
+## États
+LAB analyse finalisée et/ou Assistant contre-expertise finalisée → validation de terminalité + corrélation/idempotence → outbox persistante Symfony → Messenger publisher → GitHub private commit → vérification retour + SHA/état `published`.
+
+Si un rapport consolidé doit inclure à la fois analyse et expertise, ne pas publier avant que les deux soient finales. Échec d'envoi : rejouer **la publication seule**, jamais le traitement scientifique. Rapport expurgé, authentification minimale, sans secrets/audio/éléments bruts.
+
+## Références / non-régression
+- Contrat : `docs/contracts/ORCHESTRATOR_V2_PRIVATE_REPORTS_ONESHOT_2026_10_27.md`
+- Issues : #18 et #15.
+- Ancien `scripts/publish_jobs_report.py` = snapshot de queue et publication rolling ; ce n'est **pas** le contrat demandé et sera retiré à la bascule après audit.
+- Aucun worker ou service démarré, aucun job existant consommé ; statut **contrat uniquement**.
