@@ -1,0 +1,7 @@
+# Configurations canoniques Caddy — v1.3b325
+
+- `web/config/caddy/Caddyfile.dev` reprend à l'identique la candidate DEV 8502 FastCGI, avec les routes existantes 8790 et 8852. Les façades LAB 8702 et Assistant 8712 sont **encore à intégrer** après vérification des backends : ne pas considérer le Caddyfile DEV comme plateforme complète.
+- `web/config/caddy/Caddyfile.prod` décrit la façade PROD 8501, le chemin média protégé par `forward_auth 8510`, et la Gateway maintenance 8510. Préserve les en-têtes HTTPS nécessaires derrière Cloudflare. **Le Caddyfile est inactif** et n'est pas une implémentation FastCGI : l'upstream HTTP Gateway → backend PHP PROD 8511 nécessite une migration séparée pour supprimer `php -S`.
+- Le Caddy DEV live utilise toujours `Caddyfile.dev-preflight` (`admin off`). Le Caddy PROD live utilise son Caddyfile runtime existant. **Ce commit ne modifie ni les lanceurs, ni les processus, ni l'état de maintenance PROD.**
+- Vérifications préalables : `php web/tests/CaddyCanonicalConfigR1Test.php` et `H:\Caddy\caddy.exe validate --config web/config/caddy/Caddyfile.dev --adapter caddyfile`, puis de même pour PROD. `{$EZSCORE_MEDIA_ROOT}` doit être défini pour validation DEV. Test SSO Google, cookies, URI publiques, forward_auth et restauration maintenance impératifs avant toute activation.
+- Objectif définitif : deux instances Caddy et deux Caddyfiles pilotés par l'Orchestrator. Les sources `H:\EZScore` PROD ne sont pas modifiées.
