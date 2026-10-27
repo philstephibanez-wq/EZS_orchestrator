@@ -30,3 +30,7 @@ Pas de dumps de files, aucune fuite d'information à travers un dépôt privé, 
 
 ## Handoff
 Implémenter sous modules Symfony dédiés (événements terminaux, outbox, Messenger, GitHub publisher, observabilité), pas en CLI ponctuelle. L'issue #18 pilote la migration et #15 le trajet LAB/Assistant. Maintenir les chemins encore actifs jusqu'à une bascule prouvée.
+
+
+## Exécution système — règle V2 irrévocable
+Toutes les opérations d'orchestration, y compris Git, sont implémentées en services **PHP 8.5 / Symfony**. Les binaires tiers (`git.exe`, `caddy.exe`, `php-cgi.exe`, etc.) sont exécutés directement par PHP avec arguments structurés (p. ex. `proc_open()`), contrôle d'identité, autorisations, ownership PID, environnement, timeout, sortie, code retour et journalisation expurgée. **Aucun wrapper/script Python, PowerShell, Bash ou CMD** dans le chemin d'exécution cible. L'utilisation de `git.exe` ne signifie pas réimplémenter Git en PHP. Les anciens scripts sont inventoriés puis supprimés lors de la bascule validée, sans interruption prématurée des services.
