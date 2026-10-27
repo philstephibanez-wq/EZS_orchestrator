@@ -32,7 +32,7 @@ final class ProdOperationsController
     {
         if (!$this->allowed($request)) return new JsonResponse(['error'=>'forbidden'],403);
         $token = $this->sessionToken();
-        $root = dirname(__DIR__, 5);
+        $root = dirname(__DIR__, 4);
         $config = 'H:/EZScore/var/runtime/online-gateway.json';
         $desired = null;
         if (is_file($config)) {
@@ -70,7 +70,7 @@ final class ProdOperationsController
         $token=$this->sessionToken();
         if (!hash_equals($token,(string)$request->headers->get('X-EZS-CSRF',''))) return new JsonResponse(['error'=>'csrf'],403);
         if ((string)$request->request->get('confirmation','') !== 'MAINTENANCE') return new JsonResponse(['error'=>'confirmation_required'],400);
-        $root=dirname(__DIR__, 5);
+        $root=dirname(__DIR__, 4);
         $python='H:/Python/pythoncore-3.14-64/python.exe';
         $code='from config.loader import load_runtime_config; from gateway_manager.manager import GatewayManager; g=GatewayManager(load_runtime_config()); s=g.set_maintenance(True); assert s.maintenance is True and s.http_alive';
         $process=new Process([$python,'-c',$code],$root,null,null,12);
