@@ -1,0 +1,9 @@
+# v1.3b330 — chemin interne PROD HTTP → FastCGI, candidat non activé
+
+Les ports publics SSO restent inchangés : Cloudflare → Caddy PROD :8501 → Gateway HTTP maintenance :8510. La Gateway actuelle parle HTTP à :8511 ; le candidat ajoute un Caddy HTTP **interne** sur 127.0.0.1:8511, relié via `php_fastcgi` au processus PHP-CGI privé :8512, avec racine `H:/EZScore/public`. Le Caddy interne dispose de son admin séparé :2022, distinct du Caddy PROD :2020 et du Caddy DEV.
+
+Cette topologie permet de conserver la Gateway maintenance existante, les routes OAuth et les médias (via le Caddy PROD existant), tout en supprimant `php -S` une fois un singleton PHP-CGI valide et une gestion Caddy interne **éprouvés**. La Gateway HTTP transmet actuellement des en-têtes `X-Forwarded-Proto`/Host : vérifier impérativement leur restitution après deux proxies et le comportement Google SSO avant toute ouverture publique.
+
+**Aucun lancement actif n'est modifié dans cette livraison.** Nouveau fichier : `web/config/caddy/Caddyfile.prod-internal-candidate`. Nouveau préflight **lecture seule** : `python -m prod_lifecycle.fastcgi_preflight` (signale état maintenance et occupation des ports, sans adopter ni arrêter le moindre processus). Une occupation de :8511 par l'ancien `php -S` doit bloquer l'activation ; ne jamais tuer un PID non identifié.
+
+Recette MAIN : `git pull --ff-only origin master`, `python -m unittest tests.test_prod_fastcgi_candidate -v`, `python -m prod_lifecycle.fastcgi_preflight`, `H:\Caddy\caddy.exe validate --config web/config/caddy/Caddyfile.prod-internal-candidate --adapter caddyfile`. Puis implémenter singleton 8512 avec identité rigoureuse, Caddy interne 8511 et switch contrôlé, tests Cloudflare, SSO, médias et rollback. Pendant tout cela, PROD reste en maintenance. Les sources H:\EZScore sont inchangées.
