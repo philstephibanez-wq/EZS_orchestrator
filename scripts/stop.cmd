@@ -1,4 +1,3 @@
 @echo off
-setlocal
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0v2_lifecycle.ps1" stop
+powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0stop.ps1"
 exit /b %ERRORLEVEL%
