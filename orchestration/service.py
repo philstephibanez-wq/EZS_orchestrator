@@ -161,18 +161,6 @@ class OrchestrationService:
                             "error": f"{type(finalize_exc).__name__}:{finalize_exc}",
                         }, ensure_ascii=False))
                     return RunOutcome(target=target, job_id=claimed.job_id, returncode=75)
-                # Report export is side-effect only: never alter scientific job status.
-                try:
-                    from reports_control import notify_completed
-                    report = notify_completed(job_id=claimed.job_id, kind=claimed.kind, target=target.value)
-                    if on_output is not None:
-                        on_output(json.dumps({"event": "report_trigger", "job_id": claimed.job_id,
-                                              "result": report}, ensure_ascii=False))
-                except Exception as report_exc:
-                    if on_output is not None:
-                        on_output(json.dumps({"event": "report_trigger_error",
-                                              "job_id": claimed.job_id,
-                                              "error": type(report_exc).__name__}, ensure_ascii=False))
             else:
                 detail = " | ".join(result.stdout_tail[-6:])
                 error = (

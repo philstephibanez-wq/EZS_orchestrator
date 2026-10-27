@@ -1,9 +1,0 @@
-# Run Reports : déclenchement métier dans Orchestrator — 1.3a(19)
-
-Le rapport vers le dépôt privé GitHub doit être publié **après une analyse LAB terminée et confirmée**, et non à intervalle régulier. `OrchestrationService.run_once` appelle `reports_control.notify_completed` immédiatement après `transport.complete` réussi sur LAB. Les jobs en échec ou annulés ne publient pas. Les jobs `assistant.profile.review` ne publient pas à l'issue du dispatch : l'envoi distant ne prouve pas la finalisation de l'expertise.
-
-**Mode de sécurité** : hook désactivé par défaut. Lorsque les anciennes tâches Windows `EZStudio_Run_Reports_Publisher` et `EZStudio_Run_Reports_Watcher` ont été supprimées ou désactivées, activer explicitement dans l'environnement de lancement de l'Orchestrator `EZS_EVENT_REPORTS_ENABLED=1`. En l'absence de preuve de désactivation, le hook refuse la publication. Pas de console enfant visible ; pas de polling ; pas d'altération de la SQLite de LAB. Le watcher LAB existant fait un seul passage avec `--once` et garde sa journalisation d'empreintes `published.json`.
-
-**Limitation** : le hook couvre les analyses LAB clôturées *par OrchestrationService*, pas les analyses lancées uniquement par les workers internes à Symfony, ni les expertises finalisées ultérieurement par push externe. Ces cas exigent un événement de fin explicite côté LAB pour publication exhaustive ; ne pas confondre un dispatch et une fin d'expertise. Le watcher existant peut publier un backlog historique lors de sa première passe, ce qui doit être évalué avant activation.
-
-Tests ciblés `python -m unittest tests.test_reports_event_trigger -v`. Ne rien activer tant que les deux tâches anciennes ne sont pas arrêtées et la politique de backlog validée. Aucun redémarrage automatique ni modification de scripts d'installation de tâches.
