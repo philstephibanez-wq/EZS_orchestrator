@@ -1,5 +1,5 @@
 {
-  "name": "ezs/orchestrator-web",
+  "name": "ezs/orchestrator",
   "type": "project",
   "require": {
     "php": ">=8.4",
