@@ -15,7 +15,7 @@ final class ProdFastcgiPreflightCommand extends Command
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         try {
-            $root = dirname(__DIR__, 5);
+            $root = dirname(__DIR__, 4);
             $result = ProdFastcgiPreflight::inspect($root);
             $output->writeln(json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
             return Command::SUCCESS;
