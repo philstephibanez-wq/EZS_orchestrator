@@ -27,3 +27,6 @@ Les fichiers sont versionnés sur GitHub ; **les tests Windows au root ne sont p
 
 ## Complément implémenté — root Caddy / sécurité (27/10/2026)
 Les six Caddyfiles versionnés ont été copiés dans `config/caddy/` à la racine ; l'ancien chemin `web/config/caddy/` reste utilisable par les services encore actifs. Le préflight PHP racine utilise désormais le nouveau chemin. Le contrôleur de maintenance PROD de la copie racine ne doit plus exécuter Python : réponse HTTP 503 `prod_lifecycle_migration_pending` en attendant un lifecycle Symfony natif authentifié et testé. Contrat statique `tests/SymfonyRootRuntimeContractTest.php`. Composer doit être découvert sur MAIN, pas supposé à `H:\PHP\composer.phar`; installation root de vendor avec scripts désactivés au premier essai, puis tests Symfony. **Pas de bascule Caddy ni suppression `web/` dans ce lot**.
+
+## Livraison corrective v2.a1 — discipline de version
+La version canonique est incrémentée à `2.a1` et le test HTTP lit désormais `VERSION` au lieu de fixer `2.a0`. Préfixe du commit obligatoire `[v2.a1]` et message structuré selon `AGENTS.md`. La suppression locale en attente de `web/`, la migration des tests historiques et le remplacement des références Caddy ne sont **pas** inclus dans cette révision distante, afin de ne pas entrer en conflit avec les modifications non publiées sur MAIN.

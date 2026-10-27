@@ -17,7 +17,7 @@ $kernel = new Kernel('dev', true);
 try {
     $kernel->boot();
     foreach ([
-        ['/', 'text/html', ['2.a0']],
+        ['/', 'text/html', [trim((string) file_get_contents($root.'/VERSION'))]],
         ['/api/v2/environments', 'application/json', ['orchestrator']],
     ] as [$uri, $type, $markers]) {
         $request = Request::create($uri, 'GET', [], [], [], [
