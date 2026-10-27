@@ -39,7 +39,7 @@
                   if (!data || data.schema !== 'ezs.dev_backend.v1' || !data.item) return;
                   const d = data.item;
                   $('#dev-backend').text(d.tcp_listening ? 'Port TCP ouvert' : 'Arrêt / absent');
-                  $('#dev-backend-ownership').text(d.ownership === 'unverified' ? 'PID '+d.pid+' — identité non vérifiée' : d.ownership === 'absent' ? 'Aucun listener' : 'Indéterminée');
+                  $('#dev-backend-ownership').text(d.ownership === 'legacy_exact' ? 'PID '+d.pid+' — serveur legacy identifié' : d.ownership === 'foreign' ? 'PID '+d.pid+' — processus étranger' : d.ownership === 'absent' ? 'Aucun listener' : 'Indéterminée');
                   if (d.tcp_listening && $('#state-dev').text() === 'Façade absente') {
                       $('#state-dev').text('Backend présent · façade absente').removeClass('text-bg-secondary').addClass('text-bg-warning');
                   }
