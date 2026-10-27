@@ -33,8 +33,20 @@
               .fail(function () { $feedback.text('Supervision DEV indisponible'); })
               .always(function () { pending = false; $refresh.prop('disabled', false); });
         }
-        $refresh.on('click', refresh);
-        refresh();
-        window.setInterval(function () { if (!document.hidden) refresh(); }, 15000);
+        function refreshBackend() {
+            $.ajax({url:'/api/v2/infrastructure/dev-backend',method:'GET',dataType:'json',timeout:5000,cache:false})
+              .done(function(data) {
+                  if (!data || data.schema !== 'ezs.dev_backend.v1' || !data.item) return;
+                  const d = data.item;
+                  $('#dev-backend').text(d.tcp_listening ? 'Port TCP ouvert' : 'Arrêt / absent');
+                  $('#dev-backend-ownership').text(d.ownership === 'unverified' ? 'PID '+d.pid+' — identité non vérifiée' : d.ownership === 'absent' ? 'Aucun listener' : 'Indéterminée');
+                  if (d.tcp_listening && $('#state-dev').text() === 'Façade absente') {
+                      $('#state-dev').text('Backend présent · façade absente').removeClass('text-bg-secondary').addClass('text-bg-warning');
+                  }
+              });
+        }
+        $refresh.on('click', function(){ refresh(); refreshBackend(); });
+        refresh(); refreshBackend();
+        window.setInterval(function () { if (!document.hidden) {refresh(); refreshBackend();} }, 15000);
     });
 })(window.jQuery);

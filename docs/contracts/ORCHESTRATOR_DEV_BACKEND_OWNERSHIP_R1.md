@@ -1,0 +1,3 @@
+# v1.3b18 — observation propriétaire backend EZScore DEV
+
+Contrôle loopback du port 8602, vérification facultative du PID Windows via Get-NetTCPConnection. La présence d'un PID **n'est jamais** présentée comme preuve de propriété. Aucun arrêt, lancement ni adoption ; actions des cartes inchangées et désactivées. REST GET /api/v2/infrastructure/dev-backend réservé à APP_ENV=dev et client/hôte loopback. Affichage dans Détails techniques carte DEV. Pas de contact avec port PROD 8501, 8510, 8511. Tests sur MAIN `php web/tests/DevBackendOwnershipTest.php`, `php web/bin/console lint:twig web/templates`, `php web/bin/console lint:container`, HTTP et navigateur. Cette version prépare le contrôle d'identité strict avant le branchement à un lanceur PHP-CGI/Caddy DEV partagé.

@@ -27,7 +27,7 @@
             <div class="card-body">
               <div class="ezs-server-summary"><div>Public <strong>8502</strong></div><div>HTTP <strong id="http-dev">—</strong></div><div>TCP <strong id="tcp-dev">—</strong></div></div>
               <div class="ezs-server-actions"><a class="btn btn-outline-primary btn-sm" href="http://127.0.0.1:8502/fr/catalog" target="_blank" rel="noopener noreferrer">Ouvrir DEV</a><button class="btn btn-outline-secondary btn-sm" disabled title="Commande non migrée">Démarrer</button><button class="btn btn-outline-secondary btn-sm" disabled title="Commande non migrée">Arrêter</button></div>
-              <details><summary>Détails techniques</summary><p class="small text-body-secondary mt-2 mb-0">Serveur, Caddy DEV et propriété des processus : supervision à raccorder. Pas de contrôle automatique de DEV.</p></details>
+              <details><summary>Détails techniques</summary><p class="small text-body-secondary mt-2 mb-0">Backend 8602 : <strong id="dev-backend">Non mesuré</strong>. Propriété du processus : <strong id="dev-backend-ownership">Non vérifiée</strong>. Les commandes restent indisponibles tant que le cycle de vie Symfony/Caddy DEV n'est pas raccordé.</p></details>
             </div>
           </section>
           <section class="card ezs-server-card border-warning" aria-labelledby="prod-title">
