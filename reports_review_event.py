@@ -56,8 +56,16 @@ def publish_completed_revision(revision_id: int, *, dry_run: bool = False) -> di
     script = LAB / "scripts/publish_run_reports.py"
     if not script.is_file():
         return {"status":"error","reason":"lab_publisher_missing"}
-    # Existing detailed-only revision selector is not suitable for ordinary
-    # summary reports. Fail closed until targeted summary support is in LAB.
-    return {"status":"ready" if dry_run else "skipped",
-            "reason":"requires_targeted_summary_publisher",
-            "revision_id":revision_id,"run_id":row[1]}
+    targeted = LAB / "scripts/publish_review_event.py"
+    if not targeted.is_file():
+        return {"status":"error","reason":"lab_targeted_publisher_missing"}
+    args = [sys.executable,"-u",str(targeted),"--revision-id",str(revision_id),
+            "--state-dir",str(STATE)]
+    if dry_run:
+        args.append("--dry-run")
+    result = subprocess.run(args,cwd=str(LAB),capture_output=True,text=True,timeout=90,
+                            creationflags=getattr(subprocess,"CREATE_NO_WINDOW",0))
+    return {"status":"ready" if dry_run and result.returncode==0 else
+                     ("published" if result.returncode==0 else "error"),
+            "revision_id":revision_id,"run_id":row[1],
+            "exit_code":result.returncode}
