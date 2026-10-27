@@ -42,7 +42,11 @@ try {
         if ($null -eq $state) { Write-Host 'EZS_V2_STOPPED'; exit 0 }
         $phpOwned = Owner ([int]$state.php_pid) 'php'
         $caddyOwned = Owner ([int]$state.caddy_pid) 'caddy'
-        Write-Host "PHP_OWNED=$([bool]$phpOwned) CADDY_OWNED=$([bool]$caddyOwned) HTTP_8790=$([bool](Listener 8790))"
+        $listener8791 = Listener 8791
+        $backendPid = if ($listener8791) { [int]$listener8791.OwningProcess } else { 0 }
+        $phpPid = [int]$state.php_pid
+        $ownershipMismatch = ($backendPid -gt 0 -and ($phpPid -ne $backendPid -or -not $phpOwned))
+        Write-Host "PHP_OWNED=$([bool]$phpOwned) CADDY_OWNED=$([bool]$caddyOwned) HTTP_8790=$([bool](Listener 8790)) BACKEND_PID=$backendPid OWNERSHIP_MISMATCH=$ownershipMismatch"
         exit 0
     }
     if ($Action -eq 'stop') {
@@ -57,6 +61,11 @@ try {
                 throw "PID $pidValue non conforme : arret refuse, metadata conservees."
             }
         }
+        $remaining = Listener 8791
+        if ($null -ne $remaining) {
+            $remainingPid = [int]$remaining.OwningProcess
+            throw "BACKEND_8791_STILL_LISTENING PID=$remainingPid : metadata preserved, Caddy untouched."
+        }
         $state.php_pid = 0
         [System.IO.File]::WriteAllText($Metadata,($state | ConvertTo-Json) + "`n",[System.Text.UTF8Encoding]::new($false))
         Write-Host 'EZS_V2_STOPPED_CADDY_PRESERVED'
@@ -64,7 +73,8 @@ try {
     }
     if ($null -ne $state) {
         $existingPhp = Owner ([int]$state.php_pid) 'php'
-        if ($existingPhp -and (Listener 8791)) { Write-Host 'EZS_V2_ALREADY_RUNNING'; exit 0 }
+        $bound8791 = Listener 8791
+        if ($existingPhp -and $bound8791 -and [int]$bound8791.OwningProcess -eq [int]$state.php_pid) { Write-Host 'EZS_V2_ALREADY_RUNNING'; exit 0 }
         if ($existingPhp -or (([int]$state.php_pid -gt 0) -and (Get-Process -Id ([int]$state.php_pid) -ErrorAction SilentlyContinue))) { throw 'PID PHP ambigu : demarrage refuse.' }
     }
     foreach ($port in @(8791)) {
@@ -81,6 +91,10 @@ try {
     try {
         $phpProcess = Start-Process -FilePath $PhpExe -ArgumentList @('-b','127.0.0.1:8791') -WorkingDirectory $Web -WindowStyle Hidden -PassThru
         if (-not (AwaitListener 8791)) { throw 'PHP FastCGI ne repond pas sur 8791.' }
+        $listenerPid = [int](Listener 8791).OwningProcess
+        if ($listenerPid -ne [int]$phpProcess.Id -or $null -eq (Owner $listenerPid 'php')) {
+            throw "BACKEND_8791_UNEXPECTED_PID=$listenerPid STARTED_PID=$($phpProcess.Id) : no adoption."
+        }
         & (Join-Path $PSScriptRoot 'caddy_dev_shared.ps1') -Action start
         if (-not (AwaitListener 8790)) { throw 'Caddy DEV indisponible.' }
         $caddyPid = [int](Listener 8790).OwningProcess
