@@ -1,8 +1,10 @@
 <?php
 declare(strict_types=1);
 $root = dirname(__DIR__);
-if (is_dir($root . '/web')) {
-    throw new RuntimeException('LEGACY_WEB_DIRECTORY_REMAINS');
+foreach (['src/Kernel.php', 'public/index.php', 'bin/console', 'composer.json', 'composer.lock', 'config/routes.yaml'] as $legacySource) {
+    if (is_file($root . '/web/' . $legacySource)) {
+        throw new RuntimeException('LEGACY_WEB_APPLICATION_SOURCE_REMAINS:' . $legacySource);
+    }
 }
 $caddy = (string) file_get_contents($root . '/config/caddy/Caddyfile.dev');
 if (!str_contains($caddy, 'root * H:/EZS_orchestrator/public')
