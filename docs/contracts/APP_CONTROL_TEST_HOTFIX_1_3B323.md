@@ -1,0 +1,3 @@
+# Hotfix v1.3b323
+
+Recette MAIN : Parser.PowerShell de `scripts/app-control.ps1` = 0 erreur, statut EZScore PID 20472, Caddy PID 28860 et Orchestrator backend PID 11048 conformes. Seul le contrat PHP `AppControlHotfixStructureTest.php` échoue, car `AssertOrchestrator` apparaît deux fois de manière légitime (définition et appel). Le contrat vérifie désormais l'unicité de la **définition** `function AssertOrchestrator {`, tout en maintenant les autres assertions structurelles. Aucun script d'exploitation, aucune configuration Caddy, aucun service PROD ou DEV n'est modifié. Validation PHP sur MAIN nécessaire.
