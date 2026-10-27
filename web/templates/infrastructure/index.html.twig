@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="/assets/ezs-infrastructure.css">
     <script src="https://code.jquery.com/jquery-3.7.1.min.js" defer></script>
     <script src="/assets/ezs-infrastructure.js" defer></script>
+    <script src="/assets/ezs-prod-control.js" defer></script>
     <script src="/assets/ezs-gpu-monitor.js" defer></script>
 </head>
 <body>
@@ -31,10 +32,10 @@
             </div>
           </section>
           <section class="card ezs-server-card border-warning" aria-labelledby="prod-title">
-            <div class="card-header d-flex justify-content-between align-items-center"><h2 id="prod-title" class="h6 mb-0">PROD · EZScore</h2><span class="badge text-bg-secondary">État inconnu</span></div>
+            <div class="card-header d-flex justify-content-between align-items-center"><h2 id="prod-title" class="h6 mb-0">PROD · EZScore</h2><span id="prod-control-status" class="badge text-bg-secondary">État inconnu</span></div>
             <div class="card-body">
-              <div class="ezs-server-summary"><div>Public <strong>8501</strong></div><div>Maintenance <strong>Indéterminée</strong></div><div>Caddy <strong>PROD distinct</strong></div></div>
-              <div class="ezs-server-actions"><a class="btn btn-outline-warning btn-sm" href="https://ezscore.logandplay.com/fr/catalog" target="_blank" rel="noopener noreferrer">Ouvrir PROD</a><button class="btn btn-outline-secondary btn-sm" disabled title="Contrôleur sécurisé non migré">Maintenance</button><button class="btn btn-outline-secondary btn-sm" disabled title="Contrôleur sécurisé non migré">Mode normal</button></div>
+              <div class="ezs-server-summary"><div>Public <strong>8501</strong></div><div>Maintenance <strong id="prod-maintenance">Indéterminée</strong></div><div>Caddy <strong id="prod-caddy">PROD distinct</strong></div></div>
+              <div class="ezs-server-actions"><a class="btn btn-outline-warning btn-sm" href="https://ezscore.logandplay.com/fr/catalog" target="_blank" rel="noopener noreferrer">Ouvrir PROD</a><button id="prod-maintenance-button" class="btn btn-outline-warning btn-sm" disabled title="Activation de la maintenance PROD">Maintenance</button><button class="btn btn-outline-secondary btn-sm" disabled title="Contrôleur sécurisé non migré">Mode normal</button></div>
               <details><summary>Exploitation protégée</summary><p class="small text-body-secondary mt-2 mb-0">État de maintenance, autorisation et audit non raccordés. Aucune requête de sonde vers PROD et aucune modification du Caddy PROD.</p></details>
             </div>
           </section>
