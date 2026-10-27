@@ -99,10 +99,30 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'EZS_START_INVALID_CADDY_CONFIG' }
     $env:APP_ENV = 'dev'
     $env:APP_DEBUG = '1'
-    $backend = Start-Process -FilePath $php -ArgumentList @('-b','127.0.0.1:8791') -WorkingDirectory $root -WindowStyle Hidden -PassThru
+    # Diagnostic hors dépôt : capturer l'erreur native de php-cgi avant son éventuelle sortie.
+    $diagnosticDir = Join-Path ([IO.Path]::GetTempPath()) 'ezs-orchestrator'
+    New-Item -ItemType Directory -Path $diagnosticDir -Force | Out-Null
+    $stamp = [DateTime]::UtcNow.ToString('yyyyMMddHHmmssfff')
+    $stderrPath = Join-Path $diagnosticDir ("php-cgi-start-" + $stamp + ".stderr.log")
+    $stdoutPath = Join-Path $diagnosticDir ("php-cgi-start-" + $stamp + ".stdout.log")
+    $backend = Start-Process -FilePath $php -ArgumentList '-b 127.0.0.1:8791' -WorkingDirectory $root -WindowStyle Hidden -PassThru -RedirectStandardError $stderrPath -RedirectStandardOutput $stdoutPath
     if (-not (Wait-Port 8791 ([int]$backend.Id))) {
-        if (Owned ([int]$backend.Id) $php '-b 127.0.0.1:8791') { Stop-Process -Id $backend.Id -ErrorAction SilentlyContinue }
-        throw 'EZS_START_FASTCGI_FAILED'
+        $observed = @(Listening 8791)
+        $observedPids = ($observed | ForEach-Object { [string]$_.OwningProcess }) -join ','
+        $process = ProcessInfo ([int]$backend.Id)
+        $alive = $null -ne $process
+        $nativeError = ''
+        if (Test-Path -LiteralPath $stderrPath) {
+            $nativeError = (Get-Content -LiteralPath $stderrPath -Raw -ErrorAction SilentlyContinue)
+        }
+        Write-Host ("EZS_FASTCGI_DIAGNOSTIC launched_pid={0} alive={1} listener_pids={2} stderr_file={3}" -f $backend.Id, $alive, $observedPids, $stderrPath)
+        if (-not [string]::IsNullOrWhiteSpace($nativeError)) {
+            Write-Host ('EZS_FASTCGI_STDERR: ' + $nativeError.Trim())
+        }
+        if (Owned ([int]$backend.Id) $php '-b 127.0.0.1:8791') {
+            Stop-Process -Id $backend.Id -ErrorAction SilentlyContinue
+        }
+        throw 'EZS_START_FASTCGI_FAILED_DIAGNOSTIC_AVAILABLE'
     }
     $edge = $null
     try {

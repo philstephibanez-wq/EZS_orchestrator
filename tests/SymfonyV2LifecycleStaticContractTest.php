@@ -13,4 +13,7 @@ foreach (['EZS_LIFECYCLE_CONCURRENT_OPERATION','EZS_STOP_REFUSED_UNVERIFIED_PROC
 foreach (['Refuse-OtherDevListeners $c', '@(8502, 8852)', 'OwningProcess -ne $caddyPid', '@(8602, 8701, 8702, 8712, 8862)'] as $marker) {
     if (!str_contains($source, $marker)) throw new RuntimeException('CADDY_DEV_FACADE_GUARD_MISSING:' . $marker);
 }
+foreach (['EZS_FASTCGI_DIAGNOSTIC', 'EZS_FASTCGI_STDERR', 'EZS_START_FASTCGI_FAILED_DIAGNOSTIC_AVAILABLE', 'RedirectStandardError', 'RedirectStandardOutput'] as $marker) {
+    if (!str_contains($source, $marker)) throw new RuntimeException('FASTCGI_DIAGNOSTIC_MISSING:' . $marker);
+}
 echo "EZS_V2_LIFECYCLE_STATIC_CONTRACT_OK\n";
