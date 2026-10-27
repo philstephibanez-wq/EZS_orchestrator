@@ -49,6 +49,8 @@ try {
         if ($null -eq $state) { Write-Host 'EZS_V2_NOT_OWNED'; exit 0 }
         foreach ($item in @(@('php','php_pid'))) {
             $pidValue = [int]$state.($item[1])
+            if ($pidValue -eq 0) { continue }
+            if ($pidValue -lt 0) { throw 'PID PHP invalide : arrêt refusé.' }
             $owned = Owner $pidValue $item[0]
             if ($null -ne $owned) { Stop-Process -Id $pidValue -Force -ErrorAction Stop }
             elseif ($null -ne (Get-Process -Id $pidValue -ErrorAction SilentlyContinue)) {
