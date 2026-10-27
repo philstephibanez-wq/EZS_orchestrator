@@ -24,7 +24,7 @@ final class ProdFastcgiPreflight
         if (!is_file($prod.'/public/index.php')) {
             throw new \RuntimeException('PROD_ENTRYPOINT_MISSING');
         }
-        $caddy = @file_get_contents($root.'/web/config/caddy/Caddyfile.prod-internal-candidate');
+        $caddy = @file_get_contents($root.'/config/caddy/Caddyfile.prod-internal-candidate');
         if ($caddy === false) throw new \RuntimeException('CADDY_CONFIG_MISSING');
         foreach (['http://127.0.0.1:8511', 'bind 127.0.0.1', 'root * H:/EZScore/public', 'php_fastcgi 127.0.0.1:8512'] as $marker) {
             if (!str_contains($caddy, $marker)) throw new \RuntimeException('PROD_INTERNAL_CADDY_INVALID');
