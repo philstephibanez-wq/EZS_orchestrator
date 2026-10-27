@@ -125,6 +125,7 @@ def main() -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("status")
     sub.add_parser("health")
+    sub.add_parser("reports-drain")
 
     queue_parser = sub.add_parser("queue")
     queue_parser.add_argument("--target", choices=("dev", "prod", "lab"), default=None)
@@ -142,6 +143,11 @@ def main() -> int:
         sub.add_parser(name)
 
     args = parser.parse_args()
+    if args.command == "reports-drain":
+        from reports_outbox import drain
+        print(json.dumps(drain(),ensure_ascii=False))
+        return 0
+
     if args.command in {"status", "health"}:
         return status()
     if args.command == "queue":
