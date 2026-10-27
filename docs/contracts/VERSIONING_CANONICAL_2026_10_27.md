@@ -4,7 +4,8 @@
 - Release : `1.3`.
 - Série corrective et compteur simplifié sans parenthèses : `1.3b0`, `1.3b1`, `1.3b2`.
 - Lorsque la série est validée stable : `1.3b` (sans chiffre), **après** `1.3bN`.
-- Nouvelle série après stabilisation : `1.3c0`. Nouvelle release : `1.4`.
+- Nouvelle release après stabilisation : `1.4a0` → `1.4a1` → ... → `1.4` stable.
+- `1.3c0` n'est autorisé que pour des correctifs supplémentaires sur la branche 1.3.
 - Le préfixe du commit doit correspondre strictement à `[vVERSION]`.
 - Chaque livraison regroupe le changement durable, la mise à jour de `VERSION`, les tests et la documentation, sans scripts temporaires dans le dépôt.
 

@@ -39,8 +39,8 @@ Format retenu par le mainteneur le 27 octobre 2026 :
 - série corrective : lettre minuscule après la release (ex. `1.3a`, puis `1.3b`) ;
 - révision dans une série : entier **sans parenthèses** collé à la lettre, à partir de zéro : `1.3b0`, `1.3b1`, `1.3b2` ;
 - **version stable de la série** : suppression du compteur, par exemple `1.3b`, uniquement après validation de stabilisation ;
-- nouvelle série corrective : lettre suivante avec compteur remis à zéro (`1.3c0`) après `1.3b` stable ;
-- nouvelle release : incrément explicite d'une composante numérique, sans suffixe.
+- après stabilisation `1.3b`, la prochaine release suit `1.4a0` → `1.4a1` → ... → `1.4` stable ;
+- `1.3c0` est réservé à des corrections exceptionnelles de la branche 1.3, et n'est pas une étape vers 1.4.
 
 Les notations antérieures `1.3a(26)` et `1.3b(0)` sont conservées uniquement dans les références historiques. Ne pas les employer pour de nouveaux commits. Ne pas interpréter un numéro de révision comme une nouvelle release.
 

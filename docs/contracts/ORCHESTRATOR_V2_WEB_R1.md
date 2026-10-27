@@ -1,0 +1,3 @@
+# Orchestrator V2 — premier socle Symfony 1.3b2
+
+**Non déployé.** Symfony 7.4, Twig, Monolog et Profiler DEV. Module Infrastructure avec interface HTML et GET /api/v2/environments (lecture seule). Matrice : Orchestrator DEV, EZStudio DEV/PROD avec maintenance PROD, LAB DEV, Assistant DEV. MAIN uniquement. Aucune API mutante, nouvelle CLI, tâche Windows, sonde GPU, modification Caddy ou php -S. Aucun service ni job lancé. Les dépendances Composer et tests d'exécution restent à valider sur MAIN. Aucun serveur backend sans contrat conforme Caddy ne doit être démarré. Prochaine étape : validation du socle puis bascule contrôlée et suppression des anciens chemins en doublon.
