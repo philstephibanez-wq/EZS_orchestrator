@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="fr" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>EZS Orchestrator — Infrastructure</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="/assets/ezs-infrastructure.css">
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js" defer></script>
+    <script src="/assets/ezs-infrastructure.js" defer></script>
+    <script src="/assets/ezs-prod-control.js" defer></script>
+    <script src="/assets/ezs-gpu-monitor.js" defer></script>
+</head>
+<body>
+    <header class="navbar navbar-dark bg-dark">
+        <div class="container-fluid">
+            <span class="navbar-brand mb-0 h1">EZS Orchestrator <small class="text-secondary">v{{ orchestrator_version }}</small></span>
+            <span class="badge text-bg-secondary">DEV · Consultation</span>
+        </div>
+    </header>
+    {% include 'infrastructure/_gpu_monitor.html.twig' %}
+    <nav class="ezs-nav" aria-label="Navigation principale"><a href="/" aria-current="page">Infrastructure</a><span>Files &amp; Jobs · en migration</span><span>Déploiements · en migration</span></nav>
+    <main class="container-fluid py-4 ezs-main">
+        <div class="ezs-statusline mb-2"><strong>Infrastructure</strong><span class="text-body-secondary">État des environnements — lecture seule, actions en migration</span><span id="dev-health-feedback" role="status" aria-live="polite">En attente…</span><button type="button" id="refresh-dev-health" class="btn btn-outline-info btn-sm">Actualiser</button></div>
+        <div class="ezs-server-grid">
+          <section class="card ezs-server-card border-primary" aria-labelledby="dev-title">
+            <div class="card-header d-flex justify-content-between align-items-center"><h2 id="dev-title" class="h6 mb-0">DEV · EZScore</h2><span id="state-dev" class="badge text-bg-secondary">Inconnu</span></div>
+            <div class="card-body">
+              <div class="ezs-server-summary"><div>Public <strong>8502</strong></div><div>HTTP <strong id="http-dev">—</strong></div><div>TCP <strong id="tcp-dev">—</strong></div></div>
+              <div class="ezs-server-actions"><a class="btn btn-outline-primary btn-sm" href="http://127.0.0.1:8502/fr/catalog" target="_blank" rel="noopener noreferrer">Ouvrir DEV</a><button class="btn btn-outline-secondary btn-sm" disabled title="Commande non migrée">Démarrer</button><button class="btn btn-outline-secondary btn-sm" disabled title="Commande non migrée">Arrêter</button></div>
+              <details><summary>Détails techniques</summary><p class="small text-body-secondary mt-2 mb-0">Backend 8602 : <strong id="dev-backend">Non mesuré</strong>. Propriété du processus : <strong id="dev-backend-ownership">Non vérifiée</strong>. Les commandes restent indisponibles tant que le cycle de vie Symfony/Caddy DEV n'est pas raccordé.</p></details>
+            </div>
+          </section>
+          <section class="card ezs-server-card border-warning" aria-labelledby="prod-title">
+            <div class="card-header d-flex justify-content-between align-items-center"><h2 id="prod-title" class="h6 mb-0">PROD · EZScore</h2><span id="prod-control-status" class="badge text-bg-secondary">État inconnu</span></div>
+            <div class="card-body">
+              <div class="ezs-server-summary"><div>Public <strong>8501</strong></div><div>Maintenance <strong id="prod-maintenance">Indéterminée</strong></div><div>Caddy <strong id="prod-caddy">PROD distinct</strong></div></div>
+              <div class="ezs-server-actions"><a class="btn btn-outline-warning btn-sm" href="https://ezscore.logandplay.com/fr/catalog" target="_blank" rel="noopener noreferrer">Ouvrir PROD</a><button id="prod-maintenance-button" class="btn btn-outline-warning btn-sm" disabled title="Activation de la maintenance PROD">Maintenance</button><button class="btn btn-outline-secondary btn-sm" disabled title="Contrôleur sécurisé non migré">Mode normal</button></div>
+              <details><summary>Exploitation protégée</summary><p class="small text-body-secondary mt-2 mb-0">État de maintenance, autorisation et audit non raccordés. Aucune requête de sonde vers PROD et aucune modification du Caddy PROD.</p></details>
+            </div>
+          </section>
+          <section class="card ezs-server-card border-info" aria-labelledby="lab-title">
+            <div class="card-header d-flex justify-content-between align-items-center"><h2 id="lab-title" class="h6 mb-0">LAB · EZStudio</h2><span id="state-lab" class="badge text-bg-secondary">Inconnu</span></div>
+            <div class="card-body">
+              <div class="ezs-server-summary"><div>Interface <strong>8702</strong></div><div>HTTP <strong id="http-lab">—</strong></div><div>TCP <strong id="tcp-lab">—</strong></div></div>
+              <div class="ezs-server-actions"><a class="btn btn-outline-info btn-sm" href="http://127.0.0.1:8702/" target="_blank" rel="noopener noreferrer">Ouvrir LAB</a><button class="btn btn-outline-secondary btn-sm" disabled title="Commande non migrée">Démarrer</button><button class="btn btn-outline-secondary btn-sm" disabled title="Commande non migrée">Arrêter</button></div>
+              <details><summary>Détails techniques</summary><p class="small text-body-secondary mt-2 mb-0">Façade Caddy 8702 : état indiqué dans la carte. Backend LAB 8701 : <strong id="lab-backend">Non mesuré</strong>. Aucun processus modifié.</p></details>
+            </div>
+          </section>
+          <section class="card ezs-server-card border-success" aria-labelledby="assistant-title">
+            <div class="card-header d-flex justify-content-between align-items-center"><h2 id="assistant-title" class="h6 mb-0">Assistant</h2><span id="state-assistant" class="badge text-bg-secondary">Inconnu</span></div>
+            <div class="card-body">
+              <div class="ezs-server-summary"><div>Interface <strong>8712</strong></div><div>HTTP <strong id="http-assistant">—</strong></div><div>TCP <strong id="tcp-assistant">—</strong></div></div>
+              <div class="ezs-server-actions"><a class="btn btn-outline-success btn-sm" href="http://127.0.0.1:8712/" target="_blank" rel="noopener noreferrer">Ouvrir Assistant</a><button class="btn btn-outline-secondary btn-sm" disabled title="Commande non migrée">Démarrer</button><button class="btn btn-outline-secondary btn-sm" disabled title="Commande non migrée">Arrêter</button></div>
+              <details><summary>Détails techniques</summary><p class="small text-body-secondary mt-2 mb-0">Supervision HTTP locale uniquement ; déploiement et état XPS à raccorder.</p></details>
+            </div>
+          </section>
+        </div>
+        <div class="ezs-footerline mt-3"><strong>Orchestrator</strong> <span class="badge text-bg-success">HTTP actif</span><span>v{{ orchestrator_version }}</span><span>Port local 8790</span><span>GPU : panneau gauche</span><span class="text-body-secondary">Queues & Jobs / Logs / Déploiement : fonctions Python en cours de migration</span></div>
+    </main>
+</body>
+</html>
