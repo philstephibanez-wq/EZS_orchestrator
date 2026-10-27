@@ -122,7 +122,7 @@ try {
     $env:APP_DEBUG = '1'
     if (-not $env:APP_SECRET) { $env:APP_SECRET = [guid]::NewGuid().ToString('N') }
     $phpProcess = $null
-    $caddyProcess = $null
+    $registered = $false
     try {
         $phpProcess = Start-Process -FilePath $PhpExe -ArgumentList @('-b','127.0.0.1:8791') -WorkingDirectory $Web -WindowStyle Hidden -PassThru
         if (-not (AwaitListener 8791)) { throw 'PHP FastCGI ne repond pas sur 8791.' }
@@ -134,13 +134,19 @@ try {
         if (-not (AwaitListener 8790)) { throw 'Caddy DEV indisponible.' }
         $caddyPid = [int](Listener 8790).OwningProcess
         if ($null -eq (Owner $caddyPid 'caddy')) { throw 'Identite Caddy DEV incorrecte.' }
-        $response = Invoke-WebRequest -Uri 'http://127.0.0.1:8790/api/v2/environments' -UseBasicParsing -TimeoutSec 10
-        if ($response.StatusCode -ne 200) { throw 'HTTP Symfony non valide.' }
         $payload = @{schema='ezs.v2-dev.lifecycle.v1';php_pid=$phpProcess.Id;caddy_pid=$caddyPid;started_utc=[DateTime]::UtcNow.ToString('o')} | ConvertTo-Json
         [System.IO.File]::WriteAllText($Metadata, $payload + "`n", [System.Text.UTF8Encoding]::new($false))
-        Write-Host 'EZS_V2_STARTED http://127.0.0.1:8790/'
+        $registered = $true
+        try {
+            $response = Invoke-WebRequest -Uri 'http://127.0.0.1:8790/api/v2/environments' -UseBasicParsing -TimeoutSec 10
+            if ($response.StatusCode -ne 200) { throw 'HTTP Symfony non valide.' }
+            Write-Host 'EZS_V2_STARTED http://127.0.0.1:8790/'
+        } catch {
+            Write-Warning "EZS_V2_BACKEND_RETAINED_HTTP_NOT_READY PID=$($phpProcess.Id): $($_.Exception.Message)"
+            Write-Host 'EZS_V2_STARTED_BACKEND_HTTP_DEGRADED'
+        }
     } catch {
-        if ($null -ne $phpProcess -and $null -ne (Owner ([int]$phpProcess.Id) 'php')) { Stop-Process -Id $phpProcess.Id -Force -ErrorAction SilentlyContinue }
+        if (-not $registered -and $null -ne $phpProcess -and $null -ne (Owner ([int]$phpProcess.Id) 'php')) { Stop-Process -Id $phpProcess.Id -Force -ErrorAction SilentlyContinue }
         throw
     }
 } finally {

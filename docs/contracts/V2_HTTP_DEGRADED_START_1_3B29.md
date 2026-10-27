@@ -1,0 +1,5 @@
+# v1.3b29 — tolérance au délai HTTP du lanceur Orchestrator
+
+Incident MAIN : Caddy DEV PID 28860 existe, port 8791 a disparu après `start.cmd` expirant pendant `Invoke-WebRequest /api/v2/environments` (10 s). Le Caddyfile DEV versionné route toujours `8790` vers `8791` et `8852` vers `8862` ; aucune preuve d'une modification effective du Caddy actif. Nouveau contrat : lorsque le PID PHP-CGI et le listener ont été vérifiés et que Caddy DEV est reconnu, les métadonnées sont enregistrées **avant** le test HTTP. Un échec du seul test HTTP laisse le backend démarré et logue `EZS_V2_STARTED_BACKEND_HTTP_DEGRADED`. Les échecs antérieurs à l'enregistrement conservent la compensation locale. Caddy partagé n'est ni arrêté ni rechargé. Ne pas confondre backend présent avec application HTTP saine.
+
+Recette MAIN : parser PowerShell ; test PHP ; `scripts/start.cmd`, `scripts/status.cmd`, `scripts/caddy-dev.cmd status`, puis test HTTP différé et journaux Symfony. Si `STARTED_BACKEND_HTTP_DEGRADED`, laisser le processus et diagnostiquer Symfony, sans redémarrages en boucle. Aucun changement PROD.
