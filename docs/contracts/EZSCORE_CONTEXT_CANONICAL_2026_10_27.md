@@ -21,7 +21,7 @@
 - Pipeline scientifique LAB : **PROFILE → STEMS → CHORDS/N → LYRICS**, modules réglables et **presets** déclaratifs. Ne pas réintroduire les anciennes dénominations d'ADN/chromosome.
 - Les analyses, révisions et évaluations doivent conserver leur provenance, leur degré d'incertitude et la distinction entre constat, hypothèse et validation.
 - L'Assistant ne peut jamais altérer directement les résultats scientifiques ni promouvoir un preset actif sans protocole validé.
-- **Conflit à arbitrer** : `EZS_orchestrator/contracts/ASSISTANT_SCIENTIFIQUE_PRESETS_R1.md` (2026-10-21) autorise une expertise scientifique intermodules, alors que `EZStudioLab_assistant/AGENTS.md` impose explicitement une contre-expertise **des items musicaux seulement**, sans audit des moteurs. Aucun nouvel élargissement de mission avant clarification du contrat prioritaire.
+- **Décision explicite du mainteneur (27/10/2026)** : au moins dans une première phase, l’Assistant réalise **uniquement la contre-expertise des assertions musicales finales de LAB**, au sens de `EZStudioLab_assistant/AGENTS.md`. Aucun audit des moteurs, algorithmes, modules ou presets ; aucune modification scientifique de LAB. Le contrat transversal `ASSISTANT_SCIENTIFIQUE_PRESETS_R1.md` décrit un périmètre élargi potentiel, **non autorisé pour cette première phase**. Un changement ultérieur exige une décision explicite et une mise à jour harmonisée des contrats.
 
 ## 3. Sources de vérité et états vérifiés sur GitHub durant cette reconstruction
 
@@ -57,7 +57,7 @@ Règles canoniques : `AGENTS.md`, `REPOSITORY_HYGIENE.md`, README-FIRST et contr
 
 ## 6. Prochain chantier autorisé
 
-**Premier lot V2** : établir la matrice REST + propriétaire des commandes `start/stop/status` + stratégie Caddy/serveur PHP compatible, puis créer *un seul module Symfony démontrable et testable* sans démarrage des services existants. Lister les CLI à éliminer après qualification, sans supprimer les chemins réellement utilisés. Relever explicitement l'incompatibilité entre le contrat transversal et le contrat Assistant avant modification métier.
+**Premier lot V2** : établir la matrice REST + propriétaire des commandes `start/stop/status` + stratégie Caddy/serveur PHP compatible, puis créer *un seul module Symfony démontrable et testable* sans démarrage des services existants. Lister les CLI à éliminer après qualification, sans supprimer les chemins réellement utilisés. Pour la première phase Assistant, faire primer la restriction aux assertions musicales ; ne pas implémenter la portée scientifique élargie sans nouveau contrat.
 
 ## 7. Limite sur la mémoire ChatGPT
 
