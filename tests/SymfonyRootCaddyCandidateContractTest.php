@@ -9,7 +9,11 @@ if ($active === '' || $candidate === '') {
 }
 $prefix = "# Single isolated Caddy DEV instance: existing Orchestrator plus EZScore sandbox.";
 $replacement = "# CANDIDATE V2 ROOT, NOT ACTIVE: validate against current DEV before controlled switch.\n# EZScore sites are identical to the active Caddyfile.dev.";
-$expected = str_replace([$prefix, 'root * H:/EZS_orchestrator/web/public'], [$replacement, 'root * H:/EZS_orchestrator/public'], $active);
+// Git peut extraire les Caddyfiles en CRLF sous Windows. Comparer la semantique
+// exacte apres normalisation des seules fins de ligne, sans ignorer d'autres ecarts.
+$normalizeEol = static fn (string $value): string => str_replace(["\r\n", "\r"], "\n", $value);
+$expected = str_replace([$prefix, 'root * H:/EZS_orchestrator/web/public'], [$replacement, 'root * H:/EZS_orchestrator/public'], $normalizeEol($active));
+$candidate = $normalizeEol($candidate);
 if ($candidate !== $expected) {
     throw new RuntimeException('CADDY_CANDIDATE_CHANGED_OTHER_SITE_OR_SECURITY_SETTING');
 }
