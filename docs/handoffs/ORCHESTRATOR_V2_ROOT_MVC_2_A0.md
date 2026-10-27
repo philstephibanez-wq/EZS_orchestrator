@@ -88,3 +88,12 @@ $PHP = "H:\PHP\php-8.5-x64\php.exe"
 & "H:\Caddy\caddy.exe" validate --config .\config\caddy\Caddyfile.orchestrator-root-preview --adapter caddyfile
 ```
 Attendu : `SYMFONY_ROOT_HTTP_KERNEL_OK`, templates Twig valides, `Valid configuration`. Rien n'est démarré ou redirigé. Si échec du test, ne pas modifier Caddy actif, joindre le log.
+
+
+## Recette MAIN confirmée — HTTP in-process et Caddy statique (27/10/2026)
+- `SYMFONY_ROOT_HTTP_KERNEL_OK`.
+- `bin/console lint:twig templates` : 2 fichiers Twig valides.
+- `caddy validate --config config/caddy/Caddyfile.orchestrator-root-preview --adapter caddyfile` : `Valid configuration`. Avertissement de formatage non bloquant.
+- **Aucun listener preview lancé ni chaîne FastCGI réelle validée** par ces contrôles. Ne pas présenter la bascule HTTP comme terminée.
+- Ajout du test PHP en lecture seule `tests/SymfonyRootPreviewProbeTest.php`. Il ne lance rien, refuse l'absence de port 8890 avec `ROOT_PREVIEW_NOT_RUNNING`, et contrôle les réponses HTTP 200 HTML et JSON si un preview a été démarré séparément et explicitement.
+- Prochain gate avant activation isolée : une méthode de lancement Windows réellement sans fenêtre console, avec propriété PID stricte et rollback, et une recette manuelle autorisée sur 8890/8891. Ne pas démarrer les services par simple installation ou pull.
