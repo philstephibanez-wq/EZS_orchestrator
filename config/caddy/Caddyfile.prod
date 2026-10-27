@@ -5,7 +5,7 @@
 
 # PROD edge only. Do not activate until runtime/backend migration is verified.
 # Cloudflare and Google OAuth keep the existing public hostname and port.
-http://127.0.0.1:8501 {
+:8501 {
     bind 127.0.0.1
     @media path /media/*
     handle @media {
