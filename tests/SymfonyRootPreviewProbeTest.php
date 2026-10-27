@@ -35,8 +35,13 @@ function readRootPreview(string $host, string $path, int $expectedStatus, string
 }
 
 $home = readRootPreview($host, '/', 200, 'text/html');
-if (!str_contains($home, 'EZS Orchestrator') || !str_contains($home, 'view-infrastructure')) {
-    throw new RuntimeException('ROOT_PREVIEW_HOME_NOT_HISTORIC_SYMFONY');
+if (!str_contains($home, 'EZS Orchestrator')
+    || !str_contains($home, 'ezs-performance-panel')
+    || !str_contains($home, 'DEV · EZScore')
+    || !str_contains($home, 'PROD · EZScore')
+    || !str_contains($home, 'LAB · EZStudio')
+    || !str_contains($home, 'Assistant')) {
+    throw new RuntimeException('ROOT_PREVIEW_HOME_NOT_FOUR_CARDS');
 }
 $status = json_decode(readRootPreview($host, '/api/status', 200, 'application/json'), true, 512, JSON_THROW_ON_ERROR);
 if (($status['source'] ?? null) !== 'symfony_root'

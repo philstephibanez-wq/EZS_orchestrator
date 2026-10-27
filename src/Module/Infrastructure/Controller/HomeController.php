@@ -16,6 +16,6 @@ final class HomeController
     {
         $versionFile = dirname(__DIR__, 4) . DIRECTORY_SEPARATOR . 'VERSION';
         $version = is_file($versionFile) ? trim((string) file_get_contents($versionFile)) : 'inconnue';
-        return new Response($twig->render('infrastructure/legacy_home.html.twig', ['environments' => $catalog->all(), 'orchestrator_version' => $version, 'dev_version' => '—', 'lab_version' => '—', 'assistant_version' => '—']), 200, ['Content-Type' => 'text/html; charset=UTF-8', 'Cache-Control' => 'no-store']);
+        return new Response($twig->render('infrastructure/index.html.twig', ['environments' => $catalog->all(), 'orchestrator_version' => $version, 'dev_version' => '—', 'lab_version' => '—', 'assistant_version' => '—']), 200, ['Content-Type' => 'text/html; charset=UTF-8', 'Cache-Control' => 'no-store']);
     }
 }

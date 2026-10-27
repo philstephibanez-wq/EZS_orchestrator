@@ -6,7 +6,7 @@ $kernel = new \Ezs\Web\Kernel('dev', true);
 try {
     $kernel->boot();
     foreach ([
-        ['/',200,['EZS Orchestrator','view-infrastructure']],
+        ['/',200,['EZS Orchestrator','ezs-performance-panel','DEV · EZScore','PROD · EZScore','LAB · EZStudio','Assistant']],
         ['/api/status',200,['symfony_root','migration']],
         ['/api/jobs',503,['jobs_migration_pending']],
     ] as [$path,$expected,$markers]) {

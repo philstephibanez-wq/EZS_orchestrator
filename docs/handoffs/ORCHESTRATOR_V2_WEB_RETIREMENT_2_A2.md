@@ -20,3 +20,6 @@ La première recette MAIN de v2.a2 a échoué avec `LEGACY_IGNORE_PROTECTION_MIS
 
 ## v2.a4 — identité HTTP preview Symfony
 La sonde HTTP isolée exige désormais, outre la page Twig, les signatures JSON spécifiques de `/api/status` et la barrière jobs `/api/jobs` HTTP 503. Cela empêche de qualifier par erreur une vieille interface comme Symfony V2. Aucune activation de service et aucune suppression de `web/`. Test réseau MAIN non exécuté à la publication.
+
+## v2.a5 — accueil sonde + quatre pavés
+Correction du routage `/` : rendu de `infrastructure/index.html.twig` (sonde GPU et cartes DEV, PROD, LAB, Assistant). Le template historique complet est conservé comme référence sans être actif. Tests in-process et probe HTTP adaptés ; recette visuelle MAIN encore nécessaire. Aucun Caddy ni service modifié.
