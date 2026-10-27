@@ -13,3 +13,6 @@ Si un rapport consolidé doit inclure à la fois analyse et expertise, ne pas pu
 - Issues : #18 et #15.
 - Ancien `scripts/publish_jobs_report.py` = snapshot de queue et publication rolling ; ce n'est **pas** le contrat demandé et sera retiré à la bascule après audit.
 - Aucun worker ou service démarré, aucun job existant consommé ; statut **contrat uniquement**.
+
+## Exception bootstrap initial : start
+Le seul point d'entrée autorisé hors du runtime PHP/Symfony est le **bootstrap initial `start`**, nécessaire lorsque le serveur et Symfony ne sont pas encore actifs. Il peut s'agir d'un lanceur Windows minimal et stable. Cette exception ne permet ni logique de queue, ni Git, ni déploiement, ni supervision parallèle, ni deuxième cycle de vie. Après initialisation, PHP/Symfony reprend intégralement le contrôle des opérations d'orchestration. Aucun double démarrage, singleton et ownership obligatoires. La forme exacte du lanceur sera qualifiée avant implémentation.
