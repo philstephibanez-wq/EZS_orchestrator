@@ -6,7 +6,7 @@ declare(strict_types=1);
  * HTTP et la parité des API historiques ne sont pas acquises.
  */
 $root = dirname(__DIR__);
-$ignore = (string) file_get_contents($root . '/.gitignore');
+$ignore = preg_split('/\\r\\n|\\n|\\r/', (string) file_get_contents($root . '/.gitignore'));
 foreach ([
     '/web/vendor/',
     '/web/var/',
@@ -14,7 +14,7 @@ foreach ([
     '/web/.env.*.local',
     '/web/config/reference.php',
 ] as $rule) {
-    if (!preg_match('/^' . preg_quote($rule, '/') . '$/m', $ignore)) {
+    if (!in_array($rule, $ignore, true)) {
         throw new RuntimeException('LEGACY_IGNORE_PROTECTION_MISSING:' . $rule);
     }
 }
@@ -22,12 +22,15 @@ $legacyIgnore = $root . '/web/.gitignore';
 if (!is_file($legacyIgnore)) {
     throw new RuntimeException('LEGACY_WEB_REMOVED_BEFORE_RUNTIME_GATE');
 }
+$legacyRules = is_file($legacyIgnore)
+    ? preg_split('/\\r\\n|\\n|\\r/', (string) file_get_contents($legacyIgnore))
+    : [];
 foreach ([
     '/vendor/',
     '/var/',
     '/config/reference.php',
 ] as $rule) {
-    if (!preg_match('/^' . preg_quote($rule, '/') . '$/m', (string) file_get_contents($legacyIgnore))) {
+    if (!in_array($rule, $legacyRules, true)) {
         throw new RuntimeException('LEGACY_NESTED_IGNORE_MISSING:' . $rule);
     }
 }

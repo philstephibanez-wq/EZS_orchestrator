@@ -14,3 +14,6 @@ Aucun fichier de `web/` supprimé, aucun fichier Caddy modifié, aucun lanceur m
 
 ## Suite bloquée
 Implémenter la parité Symfony des API/actions/queues/lifecycle et valider Caddy root en HTTP réel dans une recette isolée et réversible. Après cela uniquement : transfert des tests historiques, bascule, retrait de `web/` et remplacement du test de transition par un test de non-régression final. Maintenir l'issue #18 ouverte.
+
+## Correction v2.a3 — fins de ligne Windows
+La première recette MAIN de v2.a2 a échoué avec `LEGACY_IGNORE_PROTECTION_MISSING:/web/vendor/` alors que `.gitignore` contient la règle et que `git status` est propre. Le contrôle `preg_match(...$/m)` ne gérait pas les fins de ligne CRLF Windows : le caractère `\r` précède la fin de ligne et empêche l'égalité. v2.a3 remplace les correspondances de regex par une lecture ligne à ligne (`CRLF`, `LF`, `CR`) et une comparaison stricte. Aucun changement de règles Git, de services ou de chemin runtime. Validation statique et contre-exemple PHP local effectués ; recette Windows intégrale à refaire.
