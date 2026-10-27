@@ -10,5 +10,7 @@ class ReviewEventTests(unittest.TestCase):
  def test_refuses_to_publish_backlog(self):
   from pathlib import Path
   code=(Path(__file__).resolve().parents[1]/"reports_review_event.py").read_text()
-  self.assertIn("requires_targeted_summary_publisher",code)
+  self.assertIn("publish_review_event.py",code)
+  self.assertIn('"--revision-id"',code)
+  self.assertIn("review_not_completed",code)
   self.assertNotIn('"--once"',code)
