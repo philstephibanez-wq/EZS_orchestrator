@@ -7,7 +7,7 @@ final class GpuTelemetryParser
     public function parse(string $output): array
     {
         $line = trim(explode("\n", trim($output))[0] ?? '');
-        $fields = str_getcsv($line);
+        $fields = str_getcsv($line, ',', '"', '');
         if (count($fields) !== 5) {
             throw new \UnexpectedValueException('gpu_invalid_field_count');
         }
