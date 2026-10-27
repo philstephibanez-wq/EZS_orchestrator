@@ -27,8 +27,12 @@ final class GpuDashboardController
                 'timestamp_ms' => (int)round(microtime(true) * 1000),
                 'gpu' => $result['gpu'],
             ], 200, ['Cache-Control' => 'no-store']);
-        } catch (\Throwable) {
-            return new JsonResponse(['available' => false, 'error' => 'gpu_unavailable'], 503);
+        } catch (\Throwable $exception) {
+            $reason = $exception->getMessage();
+            if (!in_array($reason, ['gpu_probe_execution_failed', 'gpu_probe_binary_missing'], true)) {
+                $reason = 'gpu_probe_parse_or_unexpected_failure';
+            }
+            return new JsonResponse(['available' => false, 'error' => 'gpu_unavailable', 'reason' => $reason], 503, ['Cache-Control' => 'no-store']);
         }
     }
 }
