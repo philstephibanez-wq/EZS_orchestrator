@@ -14,6 +14,8 @@ final class HomeController
     #[Route('/', name: 'ezs_v2_home', methods: ['GET'])]
     public function index(Environment $twig, EnvironmentCatalog $catalog): Response
     {
-        return new Response($twig->render('infrastructure/index.html.twig', ['environments' => $catalog->all()]));
+        $versionFile = dirname(__DIR__, 5) . DIRECTORY_SEPARATOR . 'VERSION';
+        $version = is_file($versionFile) ? trim((string) file_get_contents($versionFile)) : 'inconnue';
+        return new Response($twig->render('infrastructure/index.html.twig', ['environments' => $catalog->all(), 'orchestrator_version' => $version]));
     }
 }

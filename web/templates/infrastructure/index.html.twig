@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>EZS Orchestrator V2 — Infrastructure</title>
+    <title>EZS Orchestrator — Infrastructure</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="/assets/ezs-infrastructure.css">
     <script src="https://code.jquery.com/jquery-3.7.1.min.js" defer></script>
@@ -13,73 +13,49 @@
 <body>
     <header class="navbar navbar-dark bg-dark">
         <div class="container-fluid">
-            <span class="navbar-brand mb-0 h1">EZS Orchestrator V2</span>
+            <span class="navbar-brand mb-0 h1">EZS Orchestrator <small class="text-secondary">v{{ orchestrator_version }}</small></span>
             <span class="badge text-bg-secondary">DEV · Consultation</span>
         </div>
     </header>
     {% include 'infrastructure/_gpu_monitor.html.twig' %}
     <nav class="ezs-nav" aria-label="Navigation principale"><a href="/" aria-current="page">Infrastructure</a><span>Files &amp; Jobs · en migration</span><span>Déploiements · en migration</span></nav>
     <main class="container-fluid py-4 ezs-main">
-        <h1 class="h3 mb-2">Infrastructure</h1>
-        <p class="text-body-secondary">Environnements autorisés. Aucun service ni job ne peut être démarré depuis cette page.</p>
-        <section class="card shadow-sm" aria-labelledby="environments-title">
-            <div class="card-header d-flex align-items-center justify-content-between gap-3 flex-wrap">
-                <h2 id="environments-title" class="h5 mb-0">Environnements</h2>
-                <button type="button" class="btn btn-outline-primary btn-sm" id="refresh-environments">Actualiser</button>
-            </div>
+        <div class="ezs-statusline mb-2"><strong>Infrastructure</strong><span class="text-body-secondary">État des environnements — lecture seule, actions en migration</span><span id="dev-health-feedback" role="status" aria-live="polite">En attente…</span><button type="button" id="refresh-dev-health" class="btn btn-outline-info btn-sm">Actualiser</button></div>
+        <div class="ezs-server-grid">
+          <section class="card ezs-server-card border-primary" aria-labelledby="dev-title">
+            <div class="card-header d-flex justify-content-between align-items-center"><h2 id="dev-title" class="h6 mb-0">DEV · EZScore</h2><span id="state-dev" class="badge text-bg-secondary">Inconnu</span></div>
             <div class="card-body">
-                <p class="small text-body-secondary" id="environment-feedback" role="status" aria-live="polite">Catalogue initial affiché.</p>
-                <div class="table-responsive">
-                    <table class="table table-striped table-hover align-middle">
-                        <thead><tr><th scope="col">Composant</th><th scope="col">Environnement</th><th scope="col">Maintenance</th></tr></thead>
-                        <tbody id="environment-rows">
-                            {% for environment in environments %}
-                                <tr>
-                                    <td>{{ environment.component }}</td>
-                                    <td>{{ environment.environment|upper }}</td>
-                                    <td>{{ environment.maintenance ? 'Disponible' : 'Non applicable' }}</td>
-                                </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
+              <div class="ezs-server-summary"><div>Public <strong>8502</strong></div><div>HTTP <strong id="http-dev">—</strong></div><div>TCP <strong id="tcp-dev">—</strong></div></div>
+              <div class="ezs-server-actions"><a class="btn btn-outline-primary btn-sm" href="http://127.0.0.1:8502/fr/catalog" target="_blank" rel="noopener noreferrer">Ouvrir DEV</a><button class="btn btn-outline-secondary btn-sm" disabled title="Commande non migrée">Démarrer</button><button class="btn btn-outline-secondary btn-sm" disabled title="Commande non migrée">Arrêter</button></div>
+              <details><summary>Détails techniques</summary><p class="small text-body-secondary mt-2 mb-0">Serveur, Caddy DEV et propriété des processus : supervision à raccorder. Pas de contrôle automatique de DEV.</p></details>
             </div>
-        </section>
-        <section class="card shadow-sm mt-3" aria-labelledby="dev-health-title">
-            <div class="card-header d-flex align-items-center justify-content-between gap-2">
-                <h2 id="dev-health-title" class="h5 mb-0">Services DEV — supervision HTTP</h2>
-                <button type="button" id="refresh-dev-health" class="btn btn-outline-info btn-sm">Actualiser</button>
-            </div>
+          </section>
+          <section class="card ezs-server-card border-warning" aria-labelledby="prod-title">
+            <div class="card-header d-flex justify-content-between align-items-center"><h2 id="prod-title" class="h6 mb-0">PROD · EZScore</h2><span class="badge text-bg-secondary">État inconnu</span></div>
             <div class="card-body">
-                <p id="dev-health-feedback" role="status" aria-live="polite" class="small text-body-secondary">En attente de la première mesure.</p>
-                <div class="table-responsive"><table class="table table-striped align-middle">
-                    <thead><tr><th>Service</th><th>Port DEV</th><th>TCP</th><th>Réponse HTTP</th></tr></thead>
-                    <tbody id="dev-health-rows"></tbody>
-                </table></div>
-                <p class="small text-body-secondary">Contrôle HTTP local uniquement. Une réponse ne garantit pas la disponibilité fonctionnelle. Aucun appel PROD.</p>
+              <div class="ezs-server-summary"><div>Public <strong>8501</strong></div><div>Maintenance <strong>Indéterminée</strong></div><div>Caddy <strong>PROD distinct</strong></div></div>
+              <div class="ezs-server-actions"><a class="btn btn-outline-warning btn-sm" href="https://ezscore.logandplay.com/fr/catalog" target="_blank" rel="noopener noreferrer">Ouvrir PROD</a><button class="btn btn-outline-secondary btn-sm" disabled title="Contrôleur sécurisé non migré">Maintenance</button><button class="btn btn-outline-secondary btn-sm" disabled title="Contrôleur sécurisé non migré">Mode normal</button></div>
+              <details><summary>Exploitation protégée</summary><p class="small text-body-secondary mt-2 mb-0">État de maintenance, autorisation et audit non raccordés. Aucune requête de sonde vers PROD et aucune modification du Caddy PROD.</p></details>
             </div>
-        </section>
-        <section class="card shadow-sm mt-3" aria-labelledby="prod-maintenance-title">
-            <div class="card-header"><h2 id="prod-maintenance-title" class="h5 mb-0">EZScore PROD — maintenance</h2></div>
+          </section>
+          <section class="card ezs-server-card border-info" aria-labelledby="lab-title">
+            <div class="card-header d-flex justify-content-between align-items-center"><h2 id="lab-title" class="h6 mb-0">LAB · EZStudio</h2><span id="state-lab" class="badge text-bg-secondary">Inconnu</span></div>
             <div class="card-body">
-                <p><span class="badge text-bg-secondary">État indéterminé</span> Aucun mécanisme PROD vérifié n'est encore raccordé.</p>
-                <p class="small text-body-secondary mb-0">Activation et désactivation indisponibles : contrôles d'autorisation, état réel persistant, audit et isolation Caddy PROD obligatoires avant mise en service. Le port 8501 reste inchangé.</p>
+              <div class="ezs-server-summary"><div>Interface <strong>8702</strong></div><div>HTTP <strong id="http-lab">—</strong></div><div>TCP <strong id="tcp-lab">—</strong></div></div>
+              <div class="ezs-server-actions"><a class="btn btn-outline-info btn-sm" href="http://127.0.0.1:8702/" target="_blank" rel="noopener noreferrer">Ouvrir LAB</a><button class="btn btn-outline-secondary btn-sm" disabled title="Commande non migrée">Démarrer</button><button class="btn btn-outline-secondary btn-sm" disabled title="Commande non migrée">Arrêter</button></div>
+              <details><summary>Détails techniques</summary><p class="small text-body-secondary mt-2 mb-0">Sonde HTTP sur la façade 8702. Le backend historique 8701 n'est pas modifié.</p></details>
             </div>
-        </section>
-        <section class="card shadow-sm mt-3" aria-labelledby="listeners-title">
-            <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-                <h2 class="h5 mb-0" id="listeners-title">Ports DEV — état TCP</h2>
-                <button class="btn btn-outline-primary btn-sm" type="button" id="refresh-listeners">Vérifier</button>
-            </div>
+          </section>
+          <section class="card ezs-server-card border-success" aria-labelledby="assistant-title">
+            <div class="card-header d-flex justify-content-between align-items-center"><h2 id="assistant-title" class="h6 mb-0">Assistant</h2><span id="state-assistant" class="badge text-bg-secondary">Inconnu</span></div>
             <div class="card-body">
-                <p class="text-body-secondary small" id="listeners-feedback" role="status" aria-live="polite">État non vérifié.</p>
-                <div class="table-responsive"><table class="table table-striped">
-                    <thead><tr><th>Composant</th><th>Port</th><th>Écoute TCP</th></tr></thead>
-                    <tbody id="listener-rows"></tbody>
-                </table></div>
-                <p class="small text-body-secondary">Une écoute TCP ne prouve ni la santé applicative ni le propriétaire du processus. Aucun test PROD.</p>
+              <div class="ezs-server-summary"><div>Interface <strong>8712</strong></div><div>HTTP <strong id="http-assistant">—</strong></div><div>TCP <strong id="tcp-assistant">—</strong></div></div>
+              <div class="ezs-server-actions"><a class="btn btn-outline-success btn-sm" href="http://127.0.0.1:8712/" target="_blank" rel="noopener noreferrer">Ouvrir Assistant</a><button class="btn btn-outline-secondary btn-sm" disabled title="Commande non migrée">Démarrer</button><button class="btn btn-outline-secondary btn-sm" disabled title="Commande non migrée">Arrêter</button></div>
+              <details><summary>Détails techniques</summary><p class="small text-body-secondary mt-2 mb-0">Supervision HTTP locale uniquement ; déploiement et état XPS à raccorder.</p></details>
             </div>
-        </section>
+          </section>
+        </div>
+        <div class="ezs-footerline mt-3"><strong>Orchestrator</strong> <span class="badge text-bg-success">HTTP actif</span><span>v{{ orchestrator_version }}</span><span>Port local 8790</span><span>GPU : panneau gauche</span><span class="text-body-secondary">Queues & Jobs / Logs / Déploiement : fonctions Python en cours de migration</span></div>
     </main>
 </body>
 </html>
