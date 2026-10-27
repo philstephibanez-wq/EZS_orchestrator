@@ -54,4 +54,12 @@ if (($jobs['error'] ?? null) !== 'jobs_migration_pending'
     || ($jobs['ok'] ?? null) !== false) {
     throw new RuntimeException('ROOT_PREVIEW_JOBS_GATE_MISMATCH');
 }
+$css = readRootPreview($host, '/assets/ezs-infrastructure.css', 200, 'text/css');
+if (!str_contains($css, 'EZS Orchestrator: Bootstrap 5')) {
+    throw new RuntimeException('ROOT_PREVIEW_CSS_ASSET_MISMATCH');
+}
+$js = readRootPreview($host, '/assets/ezs-gpu-monitor.js', 200, 'javascript');
+if (!str_contains($js, 'ezsGpuMonitorBooted')) {
+    throw new RuntimeException('ROOT_PREVIEW_GPU_JS_ASSET_MISMATCH');
+}
 echo "SYMFONY_ROOT_PREVIEW_HTTP_OK\n";
