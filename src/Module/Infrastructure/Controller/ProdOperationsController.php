@@ -5,7 +5,6 @@ namespace Ezs\Web\Module\Infrastructure\Controller;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Attribute\Route;
-use Symfony\Component\Process\Process;
 
 final class ProdOperationsController
 {
@@ -70,15 +69,8 @@ final class ProdOperationsController
         $token=$this->sessionToken();
         if (!hash_equals($token,(string)$request->headers->get('X-EZS-CSRF',''))) return new JsonResponse(['error'=>'csrf'],403);
         if ((string)$request->request->get('confirmation','') !== 'MAINTENANCE') return new JsonResponse(['error'=>'confirmation_required'],400);
-        $root=dirname(__DIR__, 4);
-        $python='H:/Python/pythoncore-3.14-64/python.exe';
-        $code='from config.loader import load_runtime_config; from gateway_manager.manager import GatewayManager; g=GatewayManager(load_runtime_config()); s=g.set_maintenance(True); assert s.maintenance is True and s.http_alive';
-        $process=new Process([$python,'-c',$code],$root,null,null,12);
-        $process->run();
-        if (!$process->isSuccessful()) return new JsonResponse(['error'=>'maintenance_failed'],503);
-        $logdir=$root.'/runtime/prod-control';
-        if (!is_dir($logdir)) mkdir($logdir,0700,true);
-        file_put_contents($logdir.'/audit.log',gmdate('c')." action=maintenance origin=loopback result=ok\n",FILE_APPEND|LOCK_EX);
-        return new JsonResponse(['status'=>'maintenance'],200,['Cache-Control'=>'no-store']);
+        // V2 fail-closed until an authenticated Symfony-native gateway lifecycle exists.
+        // Never invoke the legacy Python maintenance manager from the root application.
+        return new JsonResponse(['error'=>'prod_lifecycle_migration_pending'],503,['Cache-Control'=>'no-store']);
     }
 }
