@@ -29,3 +29,33 @@ Depuis `H:\EZS_orchestrator` :
 
 ## Prochain lot
 Rendre le root Symfony bootable et faire les tests fonctionnels Caddy/Twig/API en lecture seule ; migrer les Controllers/Services sensibles et la supervision Windows sans console ; préparer une bascule réversible avant de supprimer `web/`. Tous les jobs existants et les services restent inchangés.
+
+
+## Lot root MVC complémentaire — 27/10/2026
+- `web/config/caddy/*` a été **copié** dans `config/caddy/*` sous Symfony root (ancien chemin encore préservé pour runtime V1).
+- Préflight PHP root pointe maintenant vers `config/caddy/Caddyfile.prod-internal-candidate`.
+- Route mutante PROD dans la copie root : fail-closed HTTP 503 `prod_lifecycle_migration_pending`, **sans** invocation Python ; ancien `web/` inchangé.
+- Nouveau contrat statique : `tests/SymfonyRootRuntimeContractTest.php`.
+- Composer root n'a pas encore son `vendor/` : les erreurs `autoload_runtime.php` rapportées proviennent de l'absence d'installation, pas d'une preuve d'échec Kernel.
+- La supposition antérieure `H:\PHP\composer.phar` était incorrecte ; découverte de Composer avant installation obligatoire. Ne pas copier `web/vendor`.
+
+### Commandes de recette MAIN, sans activation de services
+```powershell
+cd H:\EZS_orchestrator
+git pull --ff-only origin master
+$PHP = "H:\PHP\php-8.5-x64\php.exe"
+& $PHP .\tests\SymfonyRootStructureTest.php
+& $PHP .\tests\SymfonyRootRuntimeContractTest.php
+$composer = Get-Command composer -ErrorAction SilentlyContinue
+if (-not $composer) { throw "COMPOSER_NOT_FOUND: installer/retrouver Composer avant la suite" }
+& $composer.Source validate --no-check-publish
+if ($LASTEXITCODE -ne 0) { throw "COMPOSER_VALIDATE_FAILED" }
+& $composer.Source install --no-interaction --prefer-dist --no-scripts
+if ($LASTEXITCODE -ne 0) { throw "COMPOSER_INSTALL_FAILED" }
+& $PHP .\bin\console about
+& $PHP .\bin\console debug:router
+& $PHP .\bin\console ezs:prod:fastcgi-preflight
+```
+Si `composer` est une commande `.cmd`, elle est exécutée **seulement dans la console de recette déjà ouverte**, pas dans le runtime Orchestrator. Ne pas déclencher de processus en tâche de fond ou de changement Caddy ici.
+
+**État : code livré, recette MAIN de ce complément en attente ; aucune suppression `web/` autorisée avant bascule validée.**
