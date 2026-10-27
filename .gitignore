@@ -15,3 +15,11 @@ logs/*
 /var/
 /.env.local
 /.env.*.local
+
+# Protection transitoire du runtime Symfony historique.
+# Ces règles DOIVENT survivre à la suppression future de web/.gitignore.
+/web/vendor/
+/web/var/
+/web/.env.local
+/web/.env.*.local
+/web/config/reference.php
