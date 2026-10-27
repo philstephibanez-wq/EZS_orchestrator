@@ -59,3 +59,13 @@ if ($LASTEXITCODE -ne 0) { throw "COMPOSER_INSTALL_FAILED" }
 Si `composer` est une commande `.cmd`, elle est exécutée **seulement dans la console de recette déjà ouverte**, pas dans le runtime Orchestrator. Ne pas déclencher de processus en tâche de fond ou de changement Caddy ici.
 
 **État : code livré, recette MAIN de ce complément en attente ; aucune suppression `web/` autorisée avant bascule validée.**
+
+
+## Recette MAIN root validée — 27/10/2026
+- `SYMFONY_ROOT_STRUCTURE_OK` et `SYMFONY_ROOT_RUNTIME_CONTRACT_OK`.
+- Composer installé sur MAIN depuis la commande détectée sur le PATH : **42 packages** et autoload généré dans le vendor racine ; `composer install --no-scripts` a terminé avec code 0.
+- `bin/console about` : Symfony 7.4.21 LTS, PHP 8.5.11, Kernel `Ezs\\Web\\Kernel`, environnement `dev`.
+- `bin/console debug:router` : routes MVC racine détectées (dont `/`, `/api/v2/environments`, `/api/v2/gpu/main`, `/api/v2/infrastructure/prod-control`).
+- `bin/console ezs:prod:fastcgi-preflight` : maintenance true, ports 8511/8512 libres, candidate_only true.
+- `composer validate` signalait un `composer.lock` non synchronisé suite au changement de nom de package `ezs/orchestrator-web` vers `ezs/orchestrator`. Correctif sur master : **mise à jour ciblée du `content-hash` Composer** (`07229fc62a5472051ff874f2b6c5cd9e`), calculée avec l'algorithme du Locker Composer et vérifiée contre le hash de l'ancien package. Aucune version de dépendance changée. Validation Composer locale après pull encore requise.
+- Ne pas supprimer `web/` : Caddy/runtime V1 n'est pas encore basculé ni testé en HTTP sur le root. Ne pas activer PROD, ni traiter les jobs en attente.
