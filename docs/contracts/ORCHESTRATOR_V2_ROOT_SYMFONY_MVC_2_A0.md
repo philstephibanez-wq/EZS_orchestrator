@@ -24,3 +24,6 @@ Le premier lot **copie** au root les éléments Symfony de `web/` (src, public, 
 
 ## Statut de preuve
 Les fichiers sont versionnés sur GitHub ; **les tests Windows au root ne sont pas encore exécutés**. Le contrat ne prétend pas que la migration des queues, des incidents, de la supervision ou de Python soit finie.
+
+## Complément implémenté — root Caddy / sécurité (27/10/2026)
+Les six Caddyfiles versionnés ont été copiés dans `config/caddy/` à la racine ; l'ancien chemin `web/config/caddy/` reste utilisable par les services encore actifs. Le préflight PHP racine utilise désormais le nouveau chemin. Le contrôleur de maintenance PROD de la copie racine ne doit plus exécuter Python : réponse HTTP 503 `prod_lifecycle_migration_pending` en attendant un lifecycle Symfony natif authentifié et testé. Contrat statique `tests/SymfonyRootRuntimeContractTest.php`. Composer doit être découvert sur MAIN, pas supposé à `H:\PHP\composer.phar`; installation root de vendor avec scripts désactivés au premier essai, puis tests Symfony. **Pas de bascule Caddy ni suppression `web/` dans ce lot**.
