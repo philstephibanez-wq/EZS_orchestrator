@@ -35,12 +35,15 @@ function Port-Owned([int]$port, [int]$processId) {
     return ($listeners.Count -eq 1 -and [int]$listeners[0].OwningProcess -eq $processId)
 }
 function Wait-Port([int]$port, [int]$processId) {
+    # Windows may expose a TCP listener before its OwningProcess stabilizes.
+    # A transient mismatch must not be reported as a definitive startup failure.
     for ($i = 0; $i -lt 40; $i++) {
         if (Port-Owned $port $processId) { return $true }
-        if ((@(Listening $port)).Count -gt 0) { return $false }
+        $live = ProcessInfo $processId
+        if ($null -eq $live) { return $false }
         Start-Sleep -Milliseconds 250
     }
-    return $false
+    return (Port-Owned $port $processId)
 }
 function Refuse-OtherDevListeners([int]$caddyPid) {
     foreach ($port in @(8502, 8852)) {

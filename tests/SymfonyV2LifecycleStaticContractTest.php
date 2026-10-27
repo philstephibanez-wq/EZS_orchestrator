@@ -16,4 +16,14 @@ foreach (['Refuse-OtherDevListeners $c', '@(8502, 8852)', 'OwningProcess -ne $ca
 foreach (['EZS_FASTCGI_DIAGNOSTIC', 'EZS_FASTCGI_STDERR', 'EZS_START_FASTCGI_FAILED_DIAGNOSTIC_AVAILABLE', 'RedirectStandardError', 'RedirectStandardOutput'] as $marker) {
     if (!str_contains($source, $marker)) throw new RuntimeException('FASTCGI_DIAGNOSTIC_MISSING:' . $marker);
 }
+$start = strpos($source, 'function Wait-Port(');
+$end = strpos($source, 'function Refuse-OtherDevListeners(', $start);
+if ($start === false || $end === false) throw new RuntimeException('WAIT_PORT_FUNCTION_NOT_FOUND');
+$waitPort = substr($source, $start, $end - $start);
+if (str_contains($waitPort, 'if ((@(Listening $port)).Count -gt 0) { return $false }')
+    || !str_contains($waitPort, 'if (Port-Owned $port $processId) { return $true }')
+    || !str_contains($waitPort, 'if ($null -eq $live) { return $false }')
+    || !str_contains($waitPort, 'return (Port-Owned $port $processId)')) {
+    throw new RuntimeException('WAIT_PORT_EARLY_REJECTION_REGRESSION');
+}
 echo "EZS_V2_LIFECYCLE_STATIC_CONTRACT_OK\n";
