@@ -17,3 +17,6 @@ Implémenter la parité Symfony des API/actions/queues/lifecycle et valider Cadd
 
 ## Correction v2.a3 — fins de ligne Windows
 La première recette MAIN de v2.a2 a échoué avec `LEGACY_IGNORE_PROTECTION_MISSING:/web/vendor/` alors que `.gitignore` contient la règle et que `git status` est propre. Le contrôle `preg_match(...$/m)` ne gérait pas les fins de ligne CRLF Windows : le caractère `\r` précède la fin de ligne et empêche l'égalité. v2.a3 remplace les correspondances de regex par une lecture ligne à ligne (`CRLF`, `LF`, `CR`) et une comparaison stricte. Aucun changement de règles Git, de services ou de chemin runtime. Validation statique et contre-exemple PHP local effectués ; recette Windows intégrale à refaire.
+
+## v2.a4 — identité HTTP preview Symfony
+La sonde HTTP isolée exige désormais, outre la page Twig, les signatures JSON spécifiques de `/api/status` et la barrière jobs `/api/jobs` HTTP 503. Cela empêche de qualifier par erreur une vieille interface comme Symfony V2. Aucune activation de service et aucune suppression de `web/`. Test réseau MAIN non exécuté à la publication.
