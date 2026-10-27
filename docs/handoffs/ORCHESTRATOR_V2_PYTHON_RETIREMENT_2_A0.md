@@ -30,3 +30,10 @@ Après recette PASS : recenser les références du préflight Python et remplace
 3. Migration API/supervision, queues Symfony Messenger et persistance.
 4. Transport Git et publication événementielle des résultats en fin confirmée de traitements.
 5. Supprimer les Python et scripts legacy restants seulement avec équivalence attestée, puis gate automatisé zéro .py.
+
+## Lot suivant : remplacement du point d'entrée Python par Symfony CLI
+- Ajout de `web/src/Module/Infrastructure/Command/ProdFastcgiPreflightCommand.php` (`ezs:prod:fastcgi-preflight`) utilisant `ProdFastcgiPreflight::inspect()` ; lecture seule, aucun lancement de service.
+- Ajout du test `web/tests/ProdFastcgiSymfonyCommandContractTest.php`.
+- Prochaine recette MAIN : `php web/bin/console ezs:prod:fastcgi-preflight` depuis la racine, avec `APP_ENV=dev` et dépendances Composer disponibles, puis comparaison au JSON de l'ancien préflight (maintenance, occupation des ports, candidate_only).
+- **Retrait différé** des deux anciens fichiers Python jusqu'à cette recette et au contrôle des références : ce commit n'affirme pas l'équivalence live. Toute documentation de l'ancienne commande devient historique après bascule.
+- La commande CLI de recette s'exécute depuis la console déjà ouverte ; l'exigence zéro fenêtre flash reste obligatoire sur le runtime final.
