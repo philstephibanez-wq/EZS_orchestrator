@@ -4,6 +4,34 @@
     if (!$) { return; }
 
     $(function () {
+        function refreshDevHealth() {
+            const $trigger = $('#refresh-dev-health');
+            const $feedback = $('#dev-health-feedback');
+            $trigger.prop('disabled', true);
+            $.ajax({url:'/api/v2/infrastructure/dev-health', method:'GET', dataType:'json', timeout:5000, cache:false})
+                .done(function(payload) {
+                    if (!payload || payload.schema !== 'ezs.dev_health.v1' || !Array.isArray(payload.items)) {
+                        $feedback.text('Réponse supervision invalide.'); return;
+                    }
+                    const $fragment = $(document.createDocumentFragment());
+                    payload.items.forEach(function(item) {
+                        if (!item || typeof item.component !== 'string' || !Number.isInteger(item.port)) return;
+                        const $row = $('<tr>');
+                        $('<td>').text(item.component).appendTo($row);
+                        $('<td>').text(String(item.port)).appendTo($row);
+                        $('<td>').text(item.tcp_listening ? 'Ouvert' : 'Fermé').appendTo($row);
+                        $('<td>').text(item.http_status === null ? 'Sans réponse' : String(item.http_status)).appendTo($row);
+                        $fragment.append($row);
+                    });
+                    $('#dev-health-rows').empty().append($fragment);
+                    $feedback.text('Mesure effectuée : ' + payload.timestamp_utc + '.');
+                })
+                .fail(function(xhr) { $feedback.text('Supervision indisponible (HTTP ' + xhr.status + ').'); })
+                .always(function() { $trigger.prop('disabled', false); });
+        }
+        $('#refresh-dev-health').on('click', refreshDevHealth);
+        refreshDevHealth();
+        window.setInterval(function(){ if (!document.hidden) refreshDevHealth(); }, 15000);
         const $button = $('#refresh-environments');
         const $rows = $('#environment-rows');
         const $feedback = $('#environment-feedback');

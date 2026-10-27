@@ -45,6 +45,27 @@
                 </div>
             </div>
         </section>
+        <section class="card shadow-sm mt-3" aria-labelledby="dev-health-title">
+            <div class="card-header d-flex align-items-center justify-content-between gap-2">
+                <h2 id="dev-health-title" class="h5 mb-0">Services DEV — supervision HTTP</h2>
+                <button type="button" id="refresh-dev-health" class="btn btn-outline-info btn-sm">Actualiser</button>
+            </div>
+            <div class="card-body">
+                <p id="dev-health-feedback" role="status" aria-live="polite" class="small text-body-secondary">En attente de la première mesure.</p>
+                <div class="table-responsive"><table class="table table-striped align-middle">
+                    <thead><tr><th>Service</th><th>Port DEV</th><th>TCP</th><th>Réponse HTTP</th></tr></thead>
+                    <tbody id="dev-health-rows"></tbody>
+                </table></div>
+                <p class="small text-body-secondary">Contrôle HTTP local uniquement. Une réponse ne garantit pas la disponibilité fonctionnelle. Aucun appel PROD.</p>
+            </div>
+        </section>
+        <section class="card shadow-sm mt-3" aria-labelledby="prod-maintenance-title">
+            <div class="card-header"><h2 id="prod-maintenance-title" class="h5 mb-0">EZScore PROD — maintenance</h2></div>
+            <div class="card-body">
+                <p><span class="badge text-bg-secondary">État indéterminé</span> Aucun mécanisme PROD vérifié n'est encore raccordé.</p>
+                <p class="small text-body-secondary mb-0">Activation et désactivation indisponibles : contrôles d'autorisation, état réel persistant, audit et isolation Caddy PROD obligatoires avant mise en service. Le port 8501 reste inchangé.</p>
+            </div>
+        </section>
         <section class="card shadow-sm mt-3" aria-labelledby="listeners-title">
             <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
                 <h2 class="h5 mb-0" id="listeners-title">Ports DEV — état TCP</h2>
