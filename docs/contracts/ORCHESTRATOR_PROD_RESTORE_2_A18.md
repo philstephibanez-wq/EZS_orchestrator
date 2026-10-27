@@ -1,0 +1,7 @@
+# v2.a18 — restauration contrôlée DEV / PROD
+
+Le serveur Gateway HTTP historique est restauré en source (protocole ezscore.online-gateway.v3). PROD possède un lifecycle PowerShell indépendant : PHP-CGI 8512, Caddy HTTP interne 8511, Gateway 8510, Caddy public 8501. Le démarrage garde la maintenance active. La sortie en mode normal nécessite une commande explicite et une vérification de la réponse Symfony interne. PID, ports, vérifications d'exécutables et signatures doivent correspondre avant toute action destructive. Aucun PHP -S n'est utilisé.
+
+Recette en un seul orchestrateur : scripts/infrastructure_restore.ps1 -Action preflight, puis -Action start sur MAIN après préflight OK ; -Action status, -Action normal et -Action maintenance sont disponibles. Il faut confirmer SSO Google, Cloudflare et médias avant de déclarer le fonctionnement normal validé. Caddy DEV 8790/8502/8852 est réutilisé via v2_lifecycle existant, pas recréé si le singleton est en service ; PROD n'est pas démarrée lors d'un git pull.
+
+Limites : le gestionnaire Caddy DEV autonome et les boutons PROD dans l'interface Symfony ne sont pas livrés ici. Ce commit est un jalon de restauration contrôlée et non une validation de parité totale. Les tests statiques ajoutés ne remplacent pas la recette Windows. Toute occupation inconnue d'un port PROD doit bloquer le démarrage. L'ancien serveur de Gateway est issu du dépôt historique antérieur à la suppression v2.a0.
