@@ -1,4 +1,4 @@
 @echo off
 setlocal
-call "%~dp0..\launch.bat"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0v2_lifecycle.ps1" start
 exit /b %ERRORLEVEL%
