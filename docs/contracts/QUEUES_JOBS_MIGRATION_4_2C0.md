@@ -7,7 +7,7 @@ La série 4.2b demeure référence stable ; 4.2c0 corrige le manque de portage d
 - LAB : file scientifique `analysis_jobs` (handoff R3B6) et service de lease distribué ; ne pas réactiver l'ancien LabJobStore STEMS JSON.
 - EZScore : AnalysisJobManager / AnalysisJobRepository conservent l'état métier.
 - Assistant : file IA et exécution séparées, contrats REST à vérifier sur MAIN avant activation ; aucune référence exécutable XPS/Docker historique.
-- Orchestrator : coordination, transport, arbitrage GPU et observabilité ; payload scientifique opaque.
+- Orchestrator : coordination, transport Symfony Messenger, arbitrage GPU et observabilité ; payload scientifique opaque.
 
 ## Parité V1 requise
 - Cibles DEV, PROD, LAB distinctes et attribuées irréversiblement au claim.
