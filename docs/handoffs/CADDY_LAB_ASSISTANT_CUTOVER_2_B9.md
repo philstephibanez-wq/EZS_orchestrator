@@ -1,0 +1,9 @@
+# v2.b9 — bascule contrôlée Caddy DEV pour LAB + Assistant
+
+MAIN : LAB backend 8701 PID 31948 et Assistant backend 8713 PID 22908 attestés, mais 8702/8712 absents dans Caddy DEV v2.b8. SSO EZScore DEV confirmé auparavant, PROD maintenance activée volontairement et hors périmètre.
+
+Migration : `scripts/caddy-dev-lab-assistant-cutover.ps1` valide le candidat Caddy, vérifie le Caddy V2 propriétaire actuel (PID, exécutable, ligne de commande, listeners), les deux backends, HTTP pré-bascule et la variable MEDIA_ROOT puis arrête/recrée **uniquement** le Caddy DEV, pas le Caddy PROD. Vérifie cinq façades et HTTP, met à jour `runtime/v2-dev/processes.json` ; sur erreur essaie de restaurer le Caddy précédent et son PID. `v2_lifecycle.ps1` reconnaît les deux signatures Caddy de transition et démarre avec le candidat à l'avenir. STOP conserve sa sémantique maintenance PROD. Le Caddy DEV subira une courte interruption, donc le SSO et les médias doivent être recettés après bascule.
+
+Préflight MAIN : `git pull --ff-only origin master`, `php tests/CaddyLabAssistantCutover2B9ContractTest.php`, `powershell -ExecutionPolicy Bypass -File .\scripts\caddy-dev-lab-assistant-cutover.ps1 -Action preflight`. Vérifier `EZSCORE_MEDIA_ROOT` dans la session (ne pas en révéler le contenu si confidentiel) ; sinon opération APPLY refusée avant mutation. Ensuite `-Action apply`. Aucun test MAIN ni bascule exécutés lors de publication, aucune preuve de disponibilité des workers/Qwen. Ne pas lancer de stop global pour cette opération.
+
+Risques : même avec rollback, les sessions DEV peuvent être transitoirement interrompues. Les états d'échec exigeant intervention manuelle sont signalés explicitement ; ne jamais tuer un PID non attesté. Le code ne modifie pas la source EZScore PROD, le Caddy PROD, les moteurs scientifiques ni les presets.

@@ -6,7 +6,7 @@ $stateFile = Join-Path $runtime 'processes.json'
 $lockFile = Join-Path $runtime 'lifecycle.lock'
 $php = 'H:\PHP\php-8.5-x64\php-cgi.exe'
 $caddy = 'H:\Caddy\caddy.exe'
-$config = Join-Path $root 'config\caddy\Caddyfile.dev-root-candidate'
+$config = Join-Path $root 'config\caddy\Caddyfile.dev-lab-assistant-candidate'
 New-Item -ItemType Directory -Force -Path $runtime | Out-Null
 
 function Listening([int]$port) {
@@ -21,6 +21,10 @@ function Owned([int]$processId, [string]$binary, [string]$signature) {
     if ($null -eq $p) { return $false }
     return [string]::Equals([string]$p.ExecutablePath, $binary, [System.StringComparison]::OrdinalIgnoreCase) -and
         ([string]$p.CommandLine).Contains($signature)
+}
+function OwnedDevCaddy([int]$processId) {
+    return (Owned $processId $caddy 'Caddyfile.dev-root-candidate') -or
+        (Owned $processId $caddy 'Caddyfile.dev-lab-assistant-candidate')
 }
 function State {
     if (-not (Test-Path -LiteralPath $stateFile)) { return $null }
@@ -71,7 +75,7 @@ try {
         $caddyOk = $false
         if ($null -ne $s) {
             $phpOk = (Owned ([int]$s.php_pid) $php '-b 127.0.0.1:8791') -and (Port-Owned 8791 ([int]$s.php_pid))
-            $caddyOk = (Owned ([int]$s.caddy_pid) $caddy 'Caddyfile.dev-root-candidate') -and (Port-Owned 8790 ([int]$s.caddy_pid))
+            $caddyOk = (OwnedDevCaddy ([int]$s.caddy_pid)) -and (Port-Owned 8790 ([int]$s.caddy_pid))
         }
         Write-Host "EZS_STATUS php_owned=$phpOk caddy_owned=$caddyOk state_present=$($null -ne $s)"
         return
@@ -80,7 +84,7 @@ try {
         if ($null -eq $s) { throw 'EZS_DEV_REPAIR_REFUSED_NO_STATE' }
         $oldPid = [int]$s.php_pid
         $caddyPid = [int]$s.caddy_pid
-        if (-not (Owned $caddyPid $caddy 'Caddyfile.dev-root-candidate') -or
+        if (-not (OwnedDevCaddy $caddyPid) -or
             -not (Port-Owned 8790 $caddyPid) -or -not (Port-Owned 8502 $caddyPid) -or
             -not (Port-Owned 8852 $caddyPid)) {
             throw 'EZS_DEV_REPAIR_REFUSED_CADDY_NOT_VERIFIED'
@@ -117,7 +121,7 @@ try {
         $p = [int]$s.php_pid
         $c = [int]$s.caddy_pid
         if (-not (Owned $p $php '-b 127.0.0.1:8791') -or -not (Port-Owned 8791 $p) -or
-            -not (Owned $c $caddy 'Caddyfile.dev-root-candidate') -or -not (Port-Owned 8790 $c)) {
+            -not (OwnedDevCaddy $c) -or -not (Port-Owned 8790 $c)) {
             throw 'EZS_STOP_REFUSED_UNVERIFIED_PROCESS_OWNERSHIP'
         }
         Refuse-OtherDevListeners $c
@@ -131,7 +135,7 @@ try {
         $phpId = [int]$s.php_pid
         $caddyId = [int]$s.caddy_pid
         $healthy = (Owned $phpId $php '-b 127.0.0.1:8791') -and (Port-Owned 8791 $phpId) -and
-            (Owned $caddyId $caddy 'Caddyfile.dev-root-candidate') -and (Port-Owned 8790 $caddyId) -and
+            (OwnedDevCaddy $caddyId) -and (Port-Owned 8790 $caddyId) -and
             (Port-Owned 8502 $caddyId) -and (Port-Owned 8852 $caddyId)
         if (-not $healthy) { throw 'EZS_START_REFUSED_EXISTING_OR_STALE_STATE' }
         Write-Host 'EZS_DEV_ALREADY_RUNNING_VERIFIED'
@@ -179,7 +183,7 @@ try {
         if (-not (Wait-Port 8790 ([int]$edge.Id))) { throw 'EZS_START_CADDY_FAILED' }
         Save-State ([pscustomobject]@{ php_pid = [int]$backend.Id; caddy_pid = [int]$edge.Id; started_utc = [DateTime]::UtcNow.ToString('o') })
     } catch {
-        if ($null -ne $edge -and (Owned ([int]$edge.Id) $caddy 'Caddyfile.dev-root-candidate')) { Stop-Process -Id $edge.Id -ErrorAction SilentlyContinue }
+        if ($null -ne $edge -and (OwnedDevCaddy ([int]$edge.Id))) { Stop-Process -Id $edge.Id -ErrorAction SilentlyContinue }
         if (Owned ([int]$backend.Id) $php '-b 127.0.0.1:8791') { Stop-Process -Id $backend.Id -ErrorAction SilentlyContinue }
         throw
     }
