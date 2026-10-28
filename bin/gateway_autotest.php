@@ -71,12 +71,12 @@ try {
   1=>['pipe','w'],2=>['pipe','w']],$pipes,$root,$env,
   PHP_OS_FAMILY==='Windows'?['bypass_shell'=>true,'create_new_console'=>false]:[]);
  if(!is_resource($proc))throw new RuntimeException('EZS_RECIPE_COMPARE_START_FAILED');
- fclose($pipes[0]);$out=stream_get_contents($pipes[1]);fclose($pipes[1]);
+ $out=stream_get_contents($pipes[1]);fclose($pipes[1]);
  $err=stream_get_contents($pipes[2]);fclose($pipes[2]);
  $code=proc_close($proc);
  echo $out;
  if($err!=='')fwrite(STDERR,$err);
- if($code!==0)throw new RuntimeException('EZS_RECIPE_COMPARE_FAILED');
+ if($code!==0 || !str_contains($out,'EZS_PHP_GATEWAY_RECIPE_PARITY_OK'))throw new RuntimeException('EZS_RECIPE_COMPARE_FAILED');
  echo "EZS_GATEWAY_AUTOTEST_OK\n";
 } catch(Throwable $e) {
  fwrite(STDERR,$e->getMessage()."\n");
