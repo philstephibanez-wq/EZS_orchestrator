@@ -6,11 +6,11 @@ namespace Ezs\Web\Module\Coordination;
 /** Read-only LAB queue probe. No claim, command, or side effects. */
 final class LabQueueProbe
 {
-    public function __construct(private readonly ?\Closure $fetch = null) {}
+    public function __construct(private readonly ?\Closure $fetch = null, private readonly string $labRoot = 'H:\\EZStudio_lab') {}
 
     public function status(): array
     {
-        $token = trim((string) (getenv('EZS_LAB_ANALYSIS_TOKEN') ?: ''));
+        $token = $this->resolveToken();
         if ($token === '') {
             return ['connected' => false, 'reason' => 'token_not_configured', 'jobs' => [], 'source' => 'lab_queue_live'];
         }
@@ -64,4 +64,46 @@ final class LabQueueProbe
             return ['connected' => false, 'reason' => 'lab_queue_unavailable_or_invalid', 'jobs' => [], 'source' => 'lab_queue_live'];
         }
     }
+    /** LAB owns the token. Read in memory only; never log or persist it. */
+    private function resolveToken(): string
+    {
+        $explicit = trim((string) (getenv('EZS_LAB_ANALYSIS_TOKEN') ?: ''));
+        if ($explicit !== '') {
+            return $this->validToken($explicit);
+        }
+        $path = rtrim($this->labRoot, '/\\\\') . DIRECTORY_SEPARATOR . '.env.local';
+        if (!is_file($path) || !is_readable($path)) {
+            return '';
+        }
+        $handle = @fopen($path, 'rb');
+        if ($handle === false) {
+            return '';
+        }
+        try {
+            while (($line = fgets($handle, 16384)) !== false) {
+                $line = trim($line);
+                if ($line === '' || str_starts_with($line, '#') || !str_contains($line, '=')) {
+                    continue;
+                }
+                [$key, $value] = explode('=', $line, 2);
+                if (trim($key) !== 'EZSTUDIO_ANALYSIS_WORKER_TOKEN') {
+                    continue;
+                }
+                $value = trim($value);
+                if (strlen($value) >= 2 && (($value[0] === '"' && substr($value, -1) === '"') || ($value[0] === "'" && substr($value, -1) === "'"))) {
+                    $value = substr($value, 1, -1);
+                }
+                return $this->validToken(trim($value));
+            }
+        } finally {
+            fclose($handle);
+        }
+        return '';
+    }
+
+    private function validToken(string $token): string
+    {
+        return strlen($token) <= 4096 && !preg_match('/[\\r\\n\\x00-\\x1F\\x7F]/', $token) ? $token : '';
+    }
+
 }
