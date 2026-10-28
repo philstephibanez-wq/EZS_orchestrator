@@ -1,4 +1,4 @@
-param([ValidateSet('start','stop','status','normal','maintenance')][string]$Action='status')
+param([ValidateSet('start','stop','status','normal','maintenance','repair-fastcgi')][string]$Action='status')
 $ErrorActionPreference='Stop'
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $runtime=Join-Path $root 'runtime\v2-prod'
@@ -56,6 +56,33 @@ try {
         Write-Host "EZS_PROD_STATUS ready=$ready state_present=$($null -ne $s)"
         return
     }
+    if($Action -eq 'repair-fastcgi'){
+        if($null -eq $s){throw 'EZS_PROD_FASTCGI_REPAIR_REFUSED_NO_STATE'}
+        $oldPid=[int]$s.php_pid
+        if(-not (Own ([int]$s.internal_pid) $caddy 'Caddyfile.prod-internal-candidate') -or -not (OwnPort 8511 ([int]$s.internal_pid)) -or
+           -not (Own ([int]$s.gateway_pid) $python 'runtime_components\prod_gateway\server.py') -or -not (OwnPort 8510 ([int]$s.gateway_pid)) -or
+           -not (Own ([int]$s.edge_pid) $caddy 'Caddyfile.prod') -or -not (OwnPort 8501 ([int]$s.edge_pid))) {
+            throw 'EZS_PROD_FASTCGI_REPAIR_REFUSED_OTHER_COMPONENTS_UNVERIFIED'
+        }
+        if((Own $oldPid $php '-b 127.0.0.1:8512') -and (OwnPort 8512 $oldPid)){
+            Write-Host 'EZS_PROD_FASTCGI_REPAIR_NOT_NEEDED';return
+        }
+        if(@(Listener 8512).Count -gt 0 -or $null -ne (Info $oldPid)){
+            throw 'EZS_PROD_FASTCGI_REPAIR_REFUSED_PROCESS_OR_PORT_PRESENT'
+        }
+        if(-not (Test-Path -LiteralPath $php -PathType Leaf)){throw 'EZS_PROD_FASTCGI_REPAIR_MISSING_BINARY'}
+        $env:APP_ENV='prod';$env:APP_DEBUG='0'
+        $env:PHP_FCGI_MAX_REQUESTS='0'
+        $p=Start-Process -FilePath $php -ArgumentList '-b 127.0.0.1:8512' -WorkingDirectory $prod -WindowStyle Hidden -PassThru
+        if(-not (AwaitPort 8512 ([int]$p.Id)) -or -not (Own ([int]$p.Id) $php '-b 127.0.0.1:8512')){
+            if(Own ([int]$p.Id) $php '-b 127.0.0.1:8512'){Stop-Process -Id $p.Id -ErrorAction SilentlyContinue}
+            throw 'EZS_PROD_FASTCGI_REPAIR_FAILED'
+        }
+        $s.php_pid=[int]$p.Id
+        WriteUtf8 $statePath ($s | ConvertTo-Json)
+        Write-Host 'EZS_PROD_FASTCGI_REPAIR_OK_OTHER_COMPONENTS_PRESERVED'
+        return
+    }
     if($Action -eq 'start'){
         if($null -ne $s){throw 'EZS_PROD_REFUSED_EXISTING_STATE'}
         foreach($port in @(8501,8510,8511,8512,2020,2022)){if(@(Listener $port).Count -gt 0){throw "EZS_PROD_REFUSED_OCCUPIED_$port"}}
@@ -66,6 +93,7 @@ try {
         & $caddy validate --config $edge --adapter caddyfile | Out-Null
         if($LASTEXITCODE -ne 0){throw 'EZS_PROD_EDGE_CONFIG_INVALID'}
         $env:APP_ENV='prod';$env:APP_DEBUG='0'
+        $env:PHP_FCGI_MAX_REQUESTS='0'
         $started=@()
         try {
             $p=Start-Process -FilePath $php -ArgumentList '-b 127.0.0.1:8512' -WorkingDirectory $prod -WindowStyle Hidden -PassThru
