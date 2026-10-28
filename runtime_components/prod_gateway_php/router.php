@@ -6,6 +6,15 @@ declare(strict_types=1);
  * This router relies on PHP's built-in server; it is not a production process manager.
  */
 $config='H:/EZScore/var/runtime/online-gateway.json';
+// Test override is forbidden on PROD 8510 and requires an existing isolated config.
+$testConfig=getenv('EZS_GATEWAY_RECIPE_CONFIG');
+if(is_string($testConfig)&&$testConfig!==''){
+ if((int)($_SERVER['SERVER_PORT']??0)===8510||!is_file($testConfig)||
+    !in_array((string)($_SERVER['SERVER_ADDR']??''),['127.0.0.1','::1'],true)){
+  http_response_code(503);echo 'gateway_recipe_refused';return;
+ }
+ $config=$testConfig;
+}
 $uri=$_SERVER['REQUEST_URI']??'/';
 $path=(string)(parse_url($uri,PHP_URL_PATH)??'/');
 $method=$_SERVER['REQUEST_METHOD']??'GET';
@@ -39,7 +48,8 @@ function maintenancePage(): void {
 if($maintenance&&!$isInternal){maintenancePage();return;}
 $host=(string)($settings['backend_host']??'127.0.0.1');
 $port=(int)($settings['backend_port']??8511);
-if($host!=='127.0.0.1'||$port!==8511){reply(503,'{"error":"invalid_gateway_backend"}','application/json');return;}
+$recipeActive=is_string($testConfig)&&$testConfig!=='';
+if($host!=='127.0.0.1'||($recipeActive?$port!==18511:$port!==8511)){reply(503,'{"error":"invalid_gateway_backend"}','application/json');return;}
 $headers=[];
 foreach(getallheaders() as $key=>$value){
  if(in_array(strtolower($key),['host','connection','proxy-connection','keep-alive','proxy-authenticate','proxy-authorization','te','trailer','transfer-encoding','upgrade','content-length','x-forwarded-proto','x-forwarded-host','x-forwarded-for'],true))continue;
@@ -55,7 +65,7 @@ $body=file_get_contents('php://input');
 $headers[]='Content-Length: '.strlen($body);
 $context=stream_context_create(['http'=>['method'=>$method,'header'=>implode("\r\n",$headers),'content'=>$body,
  'timeout'=>60,'ignore_errors'=>true,'follow_location'=>0,'protocol_version'=>1.1]]);
-$stream=@fopen('http://127.0.0.1:8511'.$uri,'rb',false,$context);
+$stream=@fopen('http://127.0.0.1:'.$port.$uri,'rb',false,$context);
 if($stream===false){
  if($isInternal)reply(503,'{"error":"online_backend_unavailable"}','application/json');
  else maintenancePage();
