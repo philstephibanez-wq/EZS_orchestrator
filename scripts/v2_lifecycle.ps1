@@ -117,28 +117,51 @@ try {
         return
     }
     if ($Action -eq 'stop') {
-        if ($null -eq $s) { Write-Host 'EZS_STOP_NO_OWNED_STATE'; return }
+        if ($null -eq $s) { throw 'EZS_STOP_REFUSED_NO_OWNED_STATE_SHARED_CADDY_PRESERVED' }
         $p = [int]$s.php_pid
         $c = [int]$s.caddy_pid
-        if (-not (Owned $p $php '-b 127.0.0.1:8791') -or -not (Port-Owned 8791 $p) -or
-            -not (OwnedDevCaddy $c) -or -not (Port-Owned 8790 $c)) {
-            throw 'EZS_STOP_REFUSED_UNVERIFIED_PROCESS_OWNERSHIP'
+        if (-not (OwnedDevCaddy $c) -or -not (Port-Owned 8790 $c) -or
+            -not (Port-Owned 8502 $c) -or -not (Port-Owned 8852 $c)) {
+            throw 'EZS_STOP_REFUSED_UNVERIFIED_SHARED_CADDY'
         }
-        Refuse-OtherDevListeners $c
+        if ($p -eq 0 -and @(Listening 8791).Count -eq 0) {
+            Write-Host 'EZS_STOP_ORCHESTRATOR_ALREADY_STOPPED_SHARED_CADDY_PRESERVED'
+            return
+        }
+        if (-not (Owned $p $php '-b 127.0.0.1:8791') -or -not (Port-Owned 8791 $p)) {
+            throw 'EZS_STOP_REFUSED_UNVERIFIED_ORCHESTRATOR_BACKEND'
+        }
         Stop-Process -Id $p -ErrorAction Stop
-        Stop-Process -Id $c -ErrorAction Stop
-        Remove-Item -LiteralPath $stateFile -Force
-        Write-Host 'EZS_STOP_OWNED_ORCHESTRATOR_AND_CADDY_OK_PROD_UNTOUCHED'
+        $s.php_pid = 0
+        Save-State $s
+        Write-Host 'EZS_STOP_ORCHESTRATOR_BACKEND_OK_SHARED_CADDY_PRESERVED'
         return
     }
     if ($null -ne $s) {
         $phpId = [int]$s.php_pid
         $caddyId = [int]$s.caddy_pid
-        $healthy = (Owned $phpId $php '-b 127.0.0.1:8791') -and (Port-Owned 8791 $phpId) -and
-            (OwnedDevCaddy $caddyId) -and (Port-Owned 8790 $caddyId) -and
-            (Port-Owned 8502 $caddyId) -and (Port-Owned 8852 $caddyId)
-        if (-not $healthy) { throw 'EZS_START_REFUSED_EXISTING_OR_STALE_STATE' }
-        Write-Host 'EZS_DEV_ALREADY_RUNNING_VERIFIED'
+        $edgeHealthy = (OwnedDevCaddy $caddyId) -and
+            (Port-Owned 8790 $caddyId) -and (Port-Owned 8502 $caddyId) -and
+            (Port-Owned 8852 $caddyId)
+        if (-not $edgeHealthy) { throw 'EZS_START_REFUSED_SHARED_CADDY_NOT_VERIFIED' }
+        if ($phpId -gt 0 -and (Owned $phpId $php '-b 127.0.0.1:8791') -and (Port-Owned 8791 $phpId)) {
+            Write-Host 'EZS_DEV_ALREADY_RUNNING_VERIFIED'
+            return
+        }
+        if ($phpId -ne 0 -or @(Listening 8791).Count -gt 0) {
+            throw 'EZS_START_REFUSED_STALE_OR_FOREIGN_ORCHESTRATOR_BACKEND'
+        }
+        $env:APP_ENV = 'dev'
+        $env:APP_DEBUG = '1'
+        $env:PHP_FCGI_MAX_REQUESTS = '0'
+        $backend = Start-Process -FilePath $php -ArgumentList '-b 127.0.0.1:8791' -WorkingDirectory $root -WindowStyle Hidden -PassThru
+        if (-not (Wait-Port 8791 ([int]$backend.Id)) -or -not (Owned ([int]$backend.Id) $php '-b 127.0.0.1:8791')) {
+            if (Owned ([int]$backend.Id) $php '-b 127.0.0.1:8791') { Stop-Process -Id $backend.Id -ErrorAction SilentlyContinue }
+            throw 'EZS_START_ORCHESTRATOR_BACKEND_FAILED_SHARED_CADDY_PRESERVED'
+        }
+        $s.php_pid = [int]$backend.Id
+        Save-State $s
+        Write-Host 'EZS_START_ORCHESTRATOR_BACKEND_OK_SHARED_CADDY_PRESERVED'
         return
     }
     if ((@(Listening 8790)).Count -gt 0 -or (@(Listening 8791)).Count -gt 0) {
