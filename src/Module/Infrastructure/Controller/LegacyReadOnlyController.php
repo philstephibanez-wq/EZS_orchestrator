@@ -35,14 +35,15 @@ final class LegacyReadOnlyController
     public function jobs(Request $request): JsonResponse
     {
         if (!$this->loopback($request)) {
-            return new JsonResponse(['ok' => false, 'error' => 'forbidden'], 403);
-        }
+            $history=(new LegacyJobHistoryReader(dirname(__DIR__, 4)))->recent();
         return new JsonResponse([
-            'ok' => false,
-            'error' => 'jobs_migration_pending',
-            'jobs' => [],
-            'note' => 'Aucun job n’est interrogé ou exécuté par cette route.',
-        ], 503, ['Cache-Control' => 'no-store']);
+            'ok'=>true,
+            'source'=>'historical_result_json',
+            'live_queue'=>false,
+            'count'=>count($history),
+            'jobs'=>$history,
+        ],200,['Cache-Control'=>'no-store']);
+
     }
 
     private function loopback(Request $request): bool

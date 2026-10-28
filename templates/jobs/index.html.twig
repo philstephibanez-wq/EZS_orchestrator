@@ -1,15 +1,24 @@
 {% extends 'layout/base.html.twig' %}
 {% block title %}EZS Orchestrator — Files &amp; Jobs{% endblock %}
 {% block content %}
-    <main class="container-fluid py-4 ezs-main">
-        <div class="ezs-statusline mb-3"><strong>Files &amp; Jobs</strong><span class="text-body-secondary">Migration V1 → Symfony — aucune exécution depuis cette vue</span></div>
-        <section class="card mb-3">
-            <div class="card-header"><strong>État de la migration</strong></div>
-            <div class="card-body">
-                <p>La navigation est disponible. Les données de queues et les commandes de workers ne sont pas encore raccordées à Symfony ; aucun job n'est présenté comme actif sans source vérifiée.</p>
-                <p class="mb-0">Composants réalisés : projection des états et registre local des attempts. Restent à migrer et à valider : discovery des files DEV/PROD/LAB, claim et leases, arbitrage GPU, finalisation, reprises, historique et actualisation en temps réel.</p>
-            </div>
-        </section>
-        <p class="text-body-secondary">API de compatibilité <code>/api/jobs</code> : indisponible (HTTP 503) jusqu'à la migration effective. Aucune requête ne consomme de job depuis cette page.</p>
-    </main>
+<main class="container-fluid py-4 ezs-main">
+  <div class="ezs-statusline mb-3"><strong>Files &amp; Jobs</strong><span class="text-body-secondary">Historique V1 en lecture seule · Snapshot result.json uniquement</span></div>
+  <div class="alert alert-secondary" role="status">Les lignes ci-dessous sont des archives de runs : elles ne représentent pas l'état actuel de la queue. Aucune action n'est disponible.</div>
+  <section class="card mb-3">
+    <div class="card-header"><strong>Dernières tentatives archivées</strong> <span class="text-body-secondary">({{ history|length }})</span></div>
+    <div class="table-responsive">
+      <table class="table table-dark table-striped table-sm mb-0">
+        <thead><tr><th>Cible</th><th>Job</th><th>Run</th><th>Type</th><th>Chanson</th><th>État archivé</th><th>RC analyse</th><th>Finalisation</th><th>Horodatage fichier</th></tr></thead>
+        <tbody>
+        {% for item in history %}
+          <tr><td>{{ item.target }}</td><td>{{ item.job_id }}</td><td>{{ item.run }}</td><td>{{ item.kind }}</td><td>{{ item.song_title ?: (item.song_id ?? '—') }}</td><td>{{ item.state }}</td><td>{{ item.analysis_returncode ?? '—' }}</td><td>{{ item.finalize_status ?: '—' }}</td><td>{{ item.timestamp }}</td></tr>
+        {% else %}
+          <tr><td colspan="9" class="text-body-secondary">Aucun result.json historique trouvé. Cela ne signifie pas que les queues sont vides.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  <p class="text-body-secondary">Lecture locale sans accès BDD externe, sans lecture execution.log, sans appel claim/complete/fail. Les queues temps réel et les workers Symfony restent en migration.</p>
+</main>
 {% endblock %}

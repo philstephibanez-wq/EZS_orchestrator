@@ -14,7 +14,9 @@ final class JobsPageController
     {
         $versionFile = dirname(__DIR__, 4) . DIRECTORY_SEPARATOR . 'VERSION';
         $version = is_file($versionFile) ? trim((string) file_get_contents($versionFile)) : 'inconnue';
-        return new Response($twig->render('jobs/index.html.twig', ['orchestrator_version' => $version, 'active_page' => 'jobs']), 200, [
+        $reader = new LegacyJobHistoryReader(dirname(__DIR__, 4));
+        $history = $reader->recent();
+        return new Response($twig->render('jobs/index.html.twig', ['orchestrator_version' => $version, 'active_page' => 'jobs', 'history' => $history]), 200, [
             'Content-Type' => 'text/html; charset=UTF-8',
             'Cache-Control' => 'no-store',
         ]);
