@@ -6,11 +6,12 @@ declare(strict_types=1);
  * This router relies on PHP's built-in server; it is not a production process manager.
  */
 $config='H:/EZScore/var/runtime/online-gateway.json';
+// SERVER_PORT under FastCGI denotes the frontend Caddy port (18514), not the PHP listener (18515).
 // Test override is forbidden on PROD 8510 and requires an existing isolated config.
 $testConfig=getenv('EZS_GATEWAY_RECIPE_CONFIG');
 if(is_string($testConfig)&&$testConfig!==''){
  if((int)($_SERVER['SERVER_PORT']??0)===8510||!is_file($testConfig)||
-    !in_array((int)($_SERVER['SERVER_PORT']??0),[18513,18515],true)){
+    !in_array((int)($_SERVER['SERVER_PORT']??0),[18513,18514,18515],true)){
   http_response_code(503);echo 'gateway_recipe_refused';return;
  }
  $config=$testConfig;
