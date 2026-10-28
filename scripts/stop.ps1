@@ -34,5 +34,7 @@ try{
         throw 'EZS_DEV_APP_STOP_REFUSED_UNOWNED_LISTENER'
     }
 }finally{$lock.Dispose()}
+& (Join-Path $PSScriptRoot 'lab-assistant.ps1') -Action stop
+if(-not $?){throw 'EZS_LA_STOP_FAILED_SHARED_CADDY_PRESERVED'}
 & (Join-Path $PSScriptRoot 'v2_lifecycle.ps1') -Action stop
 if(-not $?){throw 'EZS_DEV_ROOT_STOP_FAILED_PROD_MAINTENANCE_PRESERVED'}

@@ -1,4 +1,4 @@
-param([ValidateSet('preflight','start','status')][string]$Action='preflight')
+param([ValidateSet('preflight','start','status','stop')][string]$Action='preflight')
 $ErrorActionPreference='Stop'
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $caddy='H:\Caddy\caddy.exe'
@@ -44,6 +44,30 @@ $lock=$null
 try{$lock=[IO.File]::Open($lockPath,[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)}
 catch{throw 'EZS_LA_CONCURRENT_OPERATION'}
 try{
+    if($Action -eq 'stop'){
+        if(-not(Test-Path -LiteralPath $statePath)){
+            foreach($t in $targets){
+                if(@(Listener $t.port).Count -gt 0){throw "EZS_LA_STOP_REFUSED_UNOWNED_PORT_$($t.port)"}
+            }
+            Write-Host 'EZS_LA_STOP_ALREADY_STOPPED'
+            return
+        }
+        $state=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8 | ConvertFrom-Json
+        if($state.schema -ne 'ezs.la.backends.v1'){throw 'EZS_LA_STOP_REFUSED_INVALID_STATE'}
+        foreach($t in $targets){
+            $entry=if($t.name -eq 'LAB'){$state.lab}else{$state.assistant}
+            if(-not(Attested $t.port ([int]$entry.pid) ([string]$entry.stamp))){
+                throw "EZS_LA_STOP_REFUSED_UNVERIFIED_OWNER_$($t.name)"
+            }
+        }
+        foreach($t in $targets){
+            $entry=if($t.name -eq 'LAB'){$state.lab}else{$state.assistant}
+            Stop-Process -Id ([int]$entry.pid) -ErrorAction Stop
+        }
+        Remove-Item -LiteralPath $statePath -Force
+        Write-Host 'EZS_LA_BACKENDS_STOP_OK_8701_8713_SHARED_CADDY_PRESERVED'
+        return
+    }
     if(Test-Path -LiteralPath $statePath){
         $state=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8 | ConvertFrom-Json
         if($state.schema -ne 'ezs.la.backends.v1'){throw 'EZS_LA_STATE_INVALID'}

@@ -1,0 +1,7 @@
+# v2.b14 — cycle global DEV cohérent : LAB + Assistant
+
+Constat MAIN : `stop.ps1` plaçait PROD en maintenance et arrêtait EZScore DEV, puis refusait le stop root en présence de LAB 8701 ; v2.b13 préserve désormais Caddy et n'arrête que backend Orchestrator. Il faut inclure les backends LAB et Assistant dans le STOP global sans jamais tuer un PID non attesté.
+
+Implémentation : l'action stop ajoutée à `scripts/lab-assistant.ps1` utilise le verrou et le fichier d'état LAB/Assistant existants, exige **les deux** attestations PID+port+exécutable+ligne de commande+création avant toute interruption, puis stoppe uniquement PHP-FastCGI 8701/8713 et efface l'état après réussite. Sans état, le script ne fait rien si les deux ports sont libres, sinon refuse. Le STOP global appelle ensuite l'arrêt du backend Orchestrator 8791, Caddy DEV partagé reste en écoute. START global redémarre les deux backends après les backends DEV. Aucun routeur ni serveur de modèle démarré/arrêté ici ; Qwen et workers non inclus.
+
+Répertoire et données propres à LAB et Assistant conservés. PROD maintenance préexistante inchangée. Test `php tests/LabAssistantGlobalLifecycle2B14ContractTest.php`. MAIN : pull, test, `powershell -ExecutionPolicy Bypass -File .\scripts\stop.ps1` (PROD maintenance confirmée), vérifier absence listeners 8701/8713/8791/8602/8862 et présence façades Caddy 8702/8712/8790 ; `powershell -ExecutionPolicy Bypass -File .\scripts\start.ps1` puis vérifier HTTP LAB/Assistant. Non testé physiquement sur MAIN lors de publication.

@@ -104,6 +104,8 @@ try{
             $previewReady=HttpReady 8852 '/fr/login'
             if(-not($devReady -and $previewReady)){throw 'EZS_DEV_APP_HTTP_UNHEALTHY'}
             Write-Host 'EZS_DEV_APPS_ALREADY_RUNNING_VERIFIED'
+            & (Join-Path $PSScriptRoot 'lab-assistant.ps1') -Action start
+            if(-not $?){throw 'EZS_LA_START_FAILED'}
             return
         }
     }
@@ -138,3 +140,6 @@ try{
         throw
     }
 }finally{$lock.Dispose()}
+
+& (Join-Path $PSScriptRoot 'lab-assistant.ps1') -Action start
+if(-not $?){throw 'EZS_LA_START_FAILED'}
