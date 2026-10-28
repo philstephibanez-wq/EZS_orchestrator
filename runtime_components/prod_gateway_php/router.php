@@ -15,7 +15,9 @@ if(is_string($testConfig)&&$testConfig!==''){
  }
  $config=$testConfig;
 }
-$uri=$_SERVER['REQUEST_URI']??'/';
+$uri=$_SERVER['HTTP_X_EZS_ORIGINAL_URI']??($_SERVER['REQUEST_URI']??'/');
+// Only the trusted loopback Caddy candidate is permitted to set this header in the recipe.
+if(!is_string($uri)||!str_starts_with($uri,'/')||str_starts_with($uri,'//')){http_response_code(400);return;}
 $path=(string)(parse_url($uri,PHP_URL_PATH)??'/');
 $method=$_SERVER['REQUEST_METHOD']??'GET';
 $head=$method==='HEAD';
