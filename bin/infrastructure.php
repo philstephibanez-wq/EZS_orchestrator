@@ -4,7 +4,7 @@ declare(strict_types=1);
 // Lecture d'état et préflight natifs PHP. Aucune création/arrêt de processus.
 $root=dirname(__DIR__);
 $action=$argv[1]??'status';
-if(!in_array($action,['status','preflight','fastcgi-incident'],true)){fwrite(STDERR,"EZS_PHP_UNKNOWN_ACTION\n");exit(2);}
+if(!in_array($action,['status','preflight','fastcgi-incident','observe-fastcgi'],true)){fwrite(STDERR,"EZS_PHP_UNKNOWN_ACTION\n");exit(2);}
 function fail(string $reason): never {fwrite(STDERR,$reason."\n");exit(1);}
 function state(string $file): ?array {
     if(!is_file($file))return null;
@@ -56,6 +56,18 @@ foreach([['dev_php',$dev,'php_pid',8791,'php-cgi.exe'],['dev_caddy',$dev,'caddy_
  if(is_array($state)&&isset($state[$key])&&is_numeric($state[$key]))$spec[$name]=[$port,(int)$state[$key],$image];
 }
 $ownership=\Ezs\Web\Module\Infrastructure\WindowsPortOwnership::snapshot($spec);
+if($action==='observe-fastcgi'){
+ require_once $root.'/src/Module/Infrastructure/FastcgiTransitionJournal.php';
+ $check=$ownership['checks']['dev_php']??[];
+ $observation=\Ezs\Web\Module\Infrastructure\FastcgiTransitionJournal::observe(
+  rtrim(sys_get_temp_dir(),'\\/').'/ezs-orchestrator',
+  isset($check['expected_pid'])?(int)$check['expected_pid']:null,
+  $check['listener_pids']??[],
+  $check['image']??null
+ );
+ echo json_encode($observation,JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR)."\n";
+ exit(0);
+}
 echo json_encode([
  'schema'=>'ezs.infrastructure.status.php.v1',
  'dev'=>['state_present'=>$dev!==null,'listeners_ready'=>$devListen,'ports'=>[8790,8791]],
