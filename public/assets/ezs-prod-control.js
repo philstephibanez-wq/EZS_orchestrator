@@ -3,7 +3,15 @@
   $(function(){
     const $status=$('#prod-control-status'),$mode=$('#prod-maintenance'),$edge=$('#prod-caddy');
     const $maintenance=$('#prod-maintenance-button'),$normal=$('#prod-normal-button');
-    let token='',busy=false;
+    const modalEl=document.getElementById('prod-action-modal');
+    const modal=modalEl && window.bootstrap ? new window.bootstrap.Modal(modalEl) : null;
+    const $title=$('#prod-action-modal-title'),$description=$('#prod-action-modal-description');
+    const $error=$('#prod-action-modal-error'),$confirm=$('#prod-action-confirm');
+    let token='',busy=false,pending=null,capabilities={maintenance:false,normal:false};
+    function setButtons(){
+      $maintenance.prop('disabled',busy||!capabilities.maintenance||!modal);
+      $normal.prop('disabled',busy||!capabilities.normal||!modal);
+    }
     function refreshProd(){
       $.ajax({url:'/api/v2/infrastructure/prod-control',dataType:'json',cache:false,timeout:5000})
        .done(function(d){
@@ -12,30 +20,49 @@
          $mode.text(d.maintenance===true?'Activée':d.maintenance===false?'Mode normal':'Indéterminée');
          $edge.text(d.caddy_listening?'Écoute 8501':'Arrêté');
          $status.text(d.gateway_online?(d.backend_ready?'Gateway et Symfony actifs':'Gateway active, backend indisponible'):'Gateway absente');
-         $maintenance.prop('disabled',busy||!d.actions.maintenance);
-         $normal.prop('disabled',busy||!d.actions.normal);
+         capabilities={maintenance:!!d.actions.maintenance,normal:!!d.actions.normal};
          $normal.attr('title',d.note||'');
+         setButtons();
        }).fail(function(){
          $status.text('État indisponible');
-         $maintenance.prop('disabled',true);$normal.prop('disabled',true);
+         capabilities={maintenance:false,normal:false};setButtons();
        });
     }
-    function command(action,confirmation,message){
-      if(busy||!token||!window.confirm(message)) return;
-      busy=true;$maintenance.prop('disabled',true);$normal.prop('disabled',true);
+    function ask(action){
+      if(busy||!token||!modal||!capabilities[action]) return;
+      pending=action;
+      const normal=action==='normal';
+      $title.text(normal?'Passer EZScore PROD en mode normal':'Activer la maintenance PROD');
+      $description.text(normal?
+        'Désactiver la maintenance et rendre EZScore PROD accessible sur Internet ? Vérifiez ensuite la connexion Google SSO.':
+        'Activer la maintenance publique d’EZScore PROD ? Les utilisateurs ne pourront plus accéder à l’application.');
+      $confirm.text(normal?'Activer le mode normal':'Activer la maintenance')
+        .toggleClass('btn-success',normal).toggleClass('btn-warning',!normal);
+      $error.prop('hidden',true).text('');
+      modal.show();
+    }
+    function execute(){
+      if(busy||!pending||!token||!capabilities[pending]) return;
+      const action=pending;
+      busy=true;setButtons();$confirm.prop('disabled',true);
       $.ajax({
         url:'/api/v2/infrastructure/prod-control/'+action,
-        method:'POST',data:{confirmation:confirmation},
+        method:'POST',data:{confirmation:action==='normal'?'NORMAL':'MAINTENANCE'},
         headers:{'X-EZS-CSRF':token},timeout:30000
       }).done(function(d){
         $status.text(d.result||'Commande exécutée');
+        modal.hide();
       }).fail(function(xhr){
         const d=xhr.responseJSON||{};
-        $status.text('Échec : '+(d.error||'commande refusée'));
-      }).always(function(){busy=false;refreshProd();});
+        $error.text('Commande refusée : '+(d.error||'échec technique')).prop('hidden',false);
+      }).always(function(){
+        busy=false;$confirm.prop('disabled',false);refreshProd();
+      });
     }
-    $maintenance.on('click',function(){command('maintenance','MAINTENANCE','Activer la maintenance EZScore PROD ?');});
-    $normal.on('click',function(){command('normal','NORMAL','Désactiver la maintenance et exposer EZScore PROD sur Internet ? Vérifier ensuite Google SSO.');});
+    $maintenance.on('click',function(){ask('maintenance');});
+    $normal.on('click',function(){ask('normal');});
+    $confirm.on('click',execute);
+    $(modalEl).on('hidden.bs.modal',function(){pending=null;$error.prop('hidden',true).text('');});
     refreshProd();
     window.setInterval(function(){if(!document.hidden&&!busy)refreshProd();},15000);
     $('#refresh-dev-health').on('click',refreshProd);
