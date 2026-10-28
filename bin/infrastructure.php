@@ -52,7 +52,7 @@ $prod=state($root.'/runtime/v2-prod/processes.json');
 $devListen=port(8790)&&port(8791);
 $prodListen=port(8501)&&port(8510)&&port(8511)&&port(8512);
 $spec=[];
-foreach([['dev_php',$dev,'php_pid',8791,'php-cgi.exe'],['dev_caddy',$dev,'caddy_pid',8790,'caddy.exe'],['prod_php',$prod,'php_pid',8512,'php-cgi.exe'],['prod_internal',$prod,'internal_pid',8511,'caddy.exe'],['prod_gateway',$prod,'gateway_pid',8510,'python.exe'],['prod_edge',$prod,'edge_pid',8501,'caddy.exe']] as [$name,$state,$key,$port,$image]) {
+foreach([['dev_php',$dev,'php_pid',8791,'php-cgi.exe'],['dev_caddy',$dev,'caddy_pid',8790,'caddy.exe'],['prod_php',$prod,'php_pid',8512,'php-cgi.exe'],['prod_internal',$prod,'internal_pid',8511,'caddy.exe'],['prod_gateway',$prod,'gateway_pid',8510,'php-cgi.exe'],['prod_edge',$prod,'edge_pid',8501,'caddy.exe']] as [$name,$state,$key,$port,$image]) {
  if(is_array($state)&&isset($state[$key])&&is_numeric($state[$key]))$spec[$name]=[$port,(int)$state[$key],$image];
 }
 $ownership=\Ezs\Web\Module\Infrastructure\WindowsPortOwnership::snapshot($spec);
