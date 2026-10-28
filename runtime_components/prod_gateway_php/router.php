@@ -14,15 +14,21 @@ if(is_string($testConfig)&&$testConfig!==''){
  $expected=realpath(__FILE__);
  $scriptReal=realpath($script);
  $exists=is_file($testConfig);
- $portAllowed=in_array($port,[18513,18514,18515],true);
+ $mode=getenv('EZS_GATEWAY_RECIPE_MODE');
+ $portAllowed=$port===18513 || $mode==='isolated-fastcgi-v1';
+ $realConfig=realpath($testConfig);
+ $tempRoot=realpath(sys_get_temp_dir());
+ $configIsTemp=$realConfig!==false&&$tempRoot!==false&&
+     str_starts_with(strtolower(str_replace('\\','/',$realConfig)),
+                     strtolower(rtrim(str_replace('\\','/',$tempRoot),'/').'/ezs-gateway-'));
  $scriptAllowed=$scriptReal!==false&&$expected!==false&&
      strcasecmp(str_replace('\\','/',$scriptReal),str_replace('\\','/',$expected))===0;
- if(!$portAllowed||!$exists||!$scriptAllowed){
+ if(!$portAllowed||!$exists||!$scriptAllowed||!$configIsTemp){
   http_response_code(503);
   header('Content-Type: application/json; charset=utf-8');
   header('Cache-Control: no-store');
   echo json_encode(['error'=>'gateway_recipe_refused','server_port'=>$port,
-    'config_exists'=>$exists,'script_matches'=>$scriptAllowed,
+    'config_exists'=>$exists,'script_matches'=>$scriptAllowed,'config_is_temp'=>$configIsTemp,
     'script_filename_present'=>$script!==''],JSON_THROW_ON_ERROR);
   return;
  }

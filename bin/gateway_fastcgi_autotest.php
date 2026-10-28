@@ -32,7 +32,7 @@ try {
  foreach($cmds as [$label,$port,$command]){
   if(!is_file($command[0]))throw new RuntimeException("BINARY_NOT_FOUND_$label");
   $childEnv=$env;
-  if($label==='fastcgi'){$childEnv['PHP_FCGI_MAX_REQUESTS']='0';$childEnv['APP_ENV']='prod';$childEnv['APP_DEBUG']='0';}
+  if($label==='fastcgi'){$childEnv['EZS_GATEWAY_RECIPE_MODE']='isolated-fastcgi-v1';$childEnv['PHP_FCGI_MAX_REQUESTS']='0';$childEnv['APP_ENV']='prod';$childEnv['APP_DEBUG']='0';}
   $desc=[0=>['file',PHP_OS_FAMILY==='Windows'?'NUL':'/dev/null','r'],1=>['file',$dir.'/'.$label.'.out','a'],2=>['file',$dir.'/'.$label.'.err','a']];
   $proc=@proc_open($command,$desc,$pipes,$root,$childEnv,PHP_OS_FAMILY==='Windows'?['bypass_shell'=>true,'create_new_console'=>false]:[]);
   if(!is_resource($proc))throw new RuntimeException("START_FAILED_$label");
