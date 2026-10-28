@@ -31,7 +31,7 @@ final class LabQueueProbe
                 return $body;
             };
 
-            $body = $fetch('http://127.0.0.1:8701/internal/analysis/desktop/jobs/queue', [
+            $body = $fetch('http://127.0.0.1:8702/internal/analysis/desktop/jobs/queue', [
                 'X-EZScore-Analysis-Token: ' . $token,
                 'Accept: application/json',
             ]);

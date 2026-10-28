@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 $root=dirname(__DIR__);
-if(trim((string)file_get_contents($root.'/VERSION'))!=='4.2c11')throw new RuntimeException('VERSION');
+if(trim((string)file_get_contents($root.'/VERSION'))!=='4.2c12')throw new RuntimeException('VERSION');
 require $root.'/src/Module/Coordination/LabQueueProbe.php';
 use Ezs\Web\Module\Coordination\LabQueueProbe;
 $old=getenv('EZS_LAB_ANALYSIS_TOKEN');
@@ -10,7 +10,7 @@ mkdir($dir,0700,true);
 $calls=0;
 $transport=static function(string $url,array $headers)use(&$calls):string{
     $calls++;
-    if($url!=='http://127.0.0.1:8701/internal/analysis/desktop/jobs/queue')throw new RuntimeException('UNEXPECTED_URL');
+    if($url!=='http://127.0.0.1:8702/internal/analysis/desktop/jobs/queue')throw new RuntimeException('UNEXPECTED_URL');
     $expected='X-EZScore-Analysis-Token: '.$GLOBALS['expectedToken'];
     if(!in_array($expected,$headers,true))throw new RuntimeException('TOKEN_NOT_MATCHED');
     return '{"schema_version":"ezstudio.analysis-desktop.v1","jobs":[]}';
