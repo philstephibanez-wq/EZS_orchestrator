@@ -1,0 +1,17 @@
+{
+    auto_https off
+    admin off
+}
+# CANDIDAT UNIQUEMENT. Ne pas activer sur PROD.
+# PHP-FastCGI candidate: 127.0.0.1:18515
+:18514 {
+    bind 127.0.0.1
+    root * H:/EZS_orchestrator/runtime_components/prod_gateway_php
+    @all path /*
+    handle @all {
+        rewrite * /router.php
+        php_fastcgi 127.0.0.1:18515 {
+            capture_stderr
+        }
+    }
+}
