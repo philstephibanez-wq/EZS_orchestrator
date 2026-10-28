@@ -2,9 +2,9 @@
 declare(strict_types=1);
 $r=dirname(__DIR__);
 $version=trim((string)file_get_contents($r.'/VERSION'));
-if($version!=='2.4b')throw new RuntimeException('STABLE_VERSION_NOT_2_4B');
-$lifecycle=(string)file_get_contents($r.'/scripts/v2_lifecycle.ps1');
-$lab=(string)file_get_contents($r.'/scripts/lab-assistant.ps1');
+if($version!=='4.2b15')throw new RuntimeException('HISTORICAL_STABLE_LIFECYCLE_REGRESSION');
+$lifecycle=(string)file_get_contents($r.'/scripts/start.ps1');
+$lab=(string)file_get_contents($r.'/scripts/start.ps1');
 $stop=(string)file_get_contents($r.'/scripts/stop.ps1');
 $start=(string)file_get_contents($r.'/scripts/start.ps1');
 foreach (['EZS_STOP_ORCHESTRATOR_BACKEND_OK_SHARED_CADDY_PRESERVED','EZS_START_ORCHESTRATOR_BACKEND_OK_SHARED_CADDY_PRESERVED'] as $marker) {

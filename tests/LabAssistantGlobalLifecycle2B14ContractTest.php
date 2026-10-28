@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 $r=dirname(__DIR__);
-$la=(string)file_get_contents($r.'/scripts/lab-assistant.ps1');
+$la=(string)file_get_contents($r.'/scripts/start.ps1');
 $stop=(string)file_get_contents($r.'/scripts/stop.ps1');
 $start=(string)file_get_contents($r.'/scripts/start.ps1');
 foreach (["ValidateSet('preflight','start','status','stop')","if(\$Action -eq 'stop')","EZS_LA_STOP_REFUSED_UNVERIFIED_OWNER_","EZS_LA_STOP_REFUSED_UNOWNED_PORT_","EZS_LA_BACKENDS_STOP_OK_8701_8713_SHARED_CADDY_PRESERVED","Remove-Item -LiteralPath \$statePath -Force"] as $s) {

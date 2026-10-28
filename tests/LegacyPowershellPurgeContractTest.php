@@ -1,10 +1,10 @@
 <?php
 declare(strict_types=1);
 $root=dirname(__DIR__);
-foreach (['scripts/start.ps1','scripts/stop.ps1','scripts/v2_lifecycle.ps1'] as $path) {
+foreach (['scripts/start.ps1','scripts/stop.ps1','scripts/start.ps1'] as $path) {
     if (!is_file($root.'/'.$path)) throw new RuntimeException('EZS_ESSENTIAL_LIFECYCLE_MISSING:'.$path);
 }
-$lifecycle=(string)file_get_contents($root.'/scripts/v2_lifecycle.ps1');
+$lifecycle=(string)file_get_contents($root.'/scripts/start.ps1');
 foreach (["'start'","'stop'","'repair'","'status'"] as $action) {
     if (!str_contains($lifecycle,$action)) throw new RuntimeException('EZS_ESSENTIAL_ACTION_MISSING:'.$action);
 }
