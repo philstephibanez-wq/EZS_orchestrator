@@ -20,7 +20,12 @@ final class DevHttpStatus
                 $out[]=$target+['tcp_listening'=>false,'http_status'=>null,'http_reachable'=>false];
                 continue;
             }
-            stream_set_timeout($socket,0,700000);
+            if ($target['kind'] === 'backend') {
+                fclose($socket);
+                $out[]=$target+['tcp_listening'=>true,'http_status'=>null,'http_reachable'=>false];
+                continue;
+            }
+            stream_set_timeout($socket,1,500000);
             $request='GET '.$target['path']." HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\nAccept: */*\r\n\r\n";
             $written=@fwrite($socket,$request);
             $line=$written===false ? false : @fgets($socket,512);

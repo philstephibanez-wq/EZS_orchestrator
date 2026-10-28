@@ -9,7 +9,7 @@
             if (pending) return;
             pending = true;
             $refresh.prop('disabled', true);
-            $.ajax({url:'/api/v2/infrastructure/dev-health', method:'GET', dataType:'json', cache:false, timeout:5000})
+            $.ajax({url:'/api/v2/infrastructure/dev-health', method:'GET', dataType:'json', cache:false, timeout:9000})
               .done(function (data) {
                 if (!data || data.schema !== 'ezs.dev_health.v1' || !Array.isArray(data.items)) throw new Error('bad_payload');
                 const mapping = {ezscore:'dev',lab:'lab',assistant:'assistant'};
@@ -25,7 +25,7 @@
                     $badge.text(label).removeClass('text-bg-secondary text-bg-success text-bg-warning').addClass(item.http_status !== null ? 'text-bg-success' : item.tcp_listening ? 'text-bg-warning' : 'text-bg-secondary');
                 });
                 if (labBackend) {
-                    $('#lab-backend').text(labBackend.http_status === null ? (labBackend.tcp_listening ? 'TCP seul' : 'Arrêt / absent') : 'HTTP ' + labBackend.http_status);
+                    $('#lab-backend').text(labBackend.tcp_listening ? 'FastCGI TCP ouvert' : 'Arrêt / absent');
                     if (labBackend.tcp_listening && $('#state-lab').text() === 'Façade absente') $('#state-lab').text('Backend actif · façade absente').removeClass('text-bg-secondary').addClass('text-bg-warning');
                 }
                 $feedback.text('Mesure DEV : ' + (data.timestamp_utc || 'récente'));
