@@ -96,6 +96,7 @@ try {
         if (-not (Test-Path -LiteralPath $php -PathType Leaf)) { throw 'EZS_DEV_REPAIR_PHP_MISSING' }
         $env:APP_ENV = 'dev'
         $env:APP_DEBUG = '1'
+        $env:PHP_FCGI_MAX_REQUESTS = '1000000'
         $backend = Start-Process -FilePath $php -ArgumentList '-b 127.0.0.1:8791' -WorkingDirectory $root -WindowStyle Hidden -PassThru
         if (-not (Wait-Port 8791 ([int]$backend.Id))) {
             if (Owned ([int]$backend.Id) $php '-b 127.0.0.1:8791') {
@@ -137,6 +138,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'EZS_START_INVALID_CADDY_CONFIG' }
     $env:APP_ENV = 'dev'
     $env:APP_DEBUG = '1'
+    $env:PHP_FCGI_MAX_REQUESTS = '1000000'
     # Diagnostic hors dépôt : capturer l'erreur native de php-cgi avant son éventuelle sortie.
     $diagnosticDir = Join-Path ([IO.Path]::GetTempPath()) 'ezs-orchestrator'
     New-Item -ItemType Directory -Path $diagnosticDir -Force | Out-Null
