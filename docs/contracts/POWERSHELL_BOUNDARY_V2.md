@@ -1,0 +1,5 @@
+# EZS Orchestrator — frontière PowerShell/PHP
+
+Cible : PHP 8.5 / Symfony exécute états, préflight, logique des modes PROD, contrôles, audit et commandes opérateur. Les deux seuls scripts PowerShell autorisés à terme sont scripts/start.ps1 et scripts/stop.ps1, exclusivement responsables des démarrages/arrêts physiques de processus. Aucun dialogue natif alert/confirm/prompt dans les interfaces.
+
+Migration incrémentale sans coupure : v2.a23 remplace l'appel PowerShell dans le contrôleur PROD pour les actions normal/maintenance par ProdModeService, avec verrou, préflight Symfony, modification atomique de la configuration Gateway et vérification de la réponse. Les anciens scripts demeurent temporairement utilisés par les points d'entrée de démarrage/arrêt ; ils ne doivent pas être supprimés avant migration et recette complètes. Reste à migrer : scripts/v2_lifecycle.ps1, scripts/prod_lifecycle.ps1, scripts/infrastructure_restore.ps1 et les wrappers CMD, plus leurs contrats. Aucun script ne doit être supprimé avant validation des reprises sur MAIN.

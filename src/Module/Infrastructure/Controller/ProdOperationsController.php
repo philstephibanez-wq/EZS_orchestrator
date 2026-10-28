@@ -2,6 +2,7 @@
 declare(strict_types=1);
 namespace Ezs\Web\Module\Infrastructure\Controller;
 
+use Ezs\Web\Module\Infrastructure\ProdModeService;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Attribute\Route;
@@ -78,7 +79,7 @@ final class ProdOperationsController
     }
 
     #[Route('/api/v2/infrastructure/prod-control/{action}', name:'ezs_prod_control_action', requirements:['action'=>'maintenance|normal'], methods:['POST'])]
-    public function action(Request $request,string $action): JsonResponse
+    public function action(Request $request,string $action,ProdModeService $prodMode): JsonResponse
     {
         if (!$this->allowed($request)) return new JsonResponse(['error'=>'forbidden'],403);
         $origin=$request->headers->get('Origin','');
@@ -87,21 +88,12 @@ final class ProdOperationsController
         if (!hash_equals($token,(string)$request->headers->get('X-EZS-CSRF',''))) return new JsonResponse(['error'=>'csrf'],403);
         $expected=$action==='normal'?'NORMAL':'MAINTENANCE';
         if ((string)$request->request->get('confirmation','')!==$expected) return new JsonResponse(['error'=>'confirmation_required'],400);
-        if ($action==='normal' && !$this->backendReady()) return new JsonResponse(['error'=>'prod_backend_unavailable'],503);
-        $script=dirname(__DIR__,4).'/scripts/prod_lifecycle.ps1';
-        if (!is_file($script)) return new JsonResponse(['error'=>'prod_lifecycle_missing'],503);
-        if (!function_exists('proc_open')) return new JsonResponse(['error'=>'proc_open_unavailable'],503);
-        $cmd=['powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$script,'-Action',$action];
-        $pipes=[];
-        $process=@proc_open($cmd,[0=>['pipe','r'],1=>['pipe','w'],2=>['pipe','w']],$pipes,dirname(__DIR__,4));
-        if (!is_resource($process)) return new JsonResponse(['error'=>'prod_lifecycle_launch_failed'],503);
-        fclose($pipes[0]);
-        $stdout=stream_get_contents($pipes[1]); fclose($pipes[1]);
-        $stderr=stream_get_contents($pipes[2]); fclose($pipes[2]);
-        $exit=proc_close($process);
-        if ($exit!==0) return new JsonResponse(['error'=>'prod_lifecycle_refused','detail'=>mb_substr(trim((string)$stderr),0,500)],503,['Cache-Control'=>'no-store']);
-        $marker=$action==='normal'?'EZS_PROD_NORMAL_REQUESTED_VERIFY_SSO_MEDIA':'EZS_PROD_MAINTENANCE_OK';
-        if (!str_contains((string)$stdout,$marker)) return new JsonResponse(['error'=>'prod_lifecycle_unconfirmed'],503);
-        return new JsonResponse(['ok'=>true,'action'=>$action,'result'=>$marker],200,['Cache-Control'=>'no-store']);
+        try {
+            $result=$prodMode->apply($action);
+            return new JsonResponse($result,200,['Cache-Control'=>'no-store']);
+        } catch (\RuntimeException $failure) {
+            return new JsonResponse(['error'=>$failure->getMessage()],503,['Cache-Control'=>'no-store']);
+        }
+
     }
 }
