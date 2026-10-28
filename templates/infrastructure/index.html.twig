@@ -20,7 +20,7 @@
         </div>
     </header>
     {% include 'infrastructure/_gpu_monitor.html.twig' %}
-    <nav class="ezs-nav" aria-label="Navigation principale"><a href="/" aria-current="page">Infrastructure</a><span>Files &amp; Jobs · en migration</span><span>Déploiements · en migration</span></nav>
+    <nav class="ezs-nav" aria-label="Navigation principale"><a href="/" aria-current="page">Infrastructure</a><a href="/jobs">Files &amp; Jobs · en migration</a><span>Déploiements · en migration</span></nav>
     <main class="container-fluid py-4 ezs-main">
         <div class="ezs-statusline mb-2"><strong>Infrastructure</strong><span class="text-body-secondary">État des environnements — lecture seule, actions en migration</span><span id="dev-health-feedback" role="status" aria-live="polite">En attente…</span><button type="button" id="refresh-dev-health" class="btn btn-outline-info btn-sm">Actualiser</button></div>
         <div class="ezs-server-grid">
