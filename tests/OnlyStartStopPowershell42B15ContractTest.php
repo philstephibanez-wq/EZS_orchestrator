@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 $r=dirname(__DIR__);
-if(trim((string)file_get_contents($r.'/VERSION'))!=='4.2b15')throw new RuntimeException('VERSION');
+if(trim((string)file_get_contents($r.'/VERSION'))!=='4.2b')throw new RuntimeException('VERSION');
 $ps=[];$it=new RecursiveIteratorIterator(new RecursiveDirectoryIterator($r,FilesystemIterator::SKIP_DOTS));
 foreach($it as $f){if(strtolower($f->getExtension())==='ps1' && !str_contains(str_replace('\\','/',$f->getPathname()),'/vendor/'))$ps[]=str_replace('\\','/',substr($f->getPathname(),strlen($r)+1));}
 sort($ps);
