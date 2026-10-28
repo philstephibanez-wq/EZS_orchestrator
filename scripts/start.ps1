@@ -78,7 +78,7 @@ try{
         return
     }
     foreach($port in @(8602,8862)){if(@(Owners $port).Count -gt 0){throw "EZS_DEV_APP_REFUSED_FOREIGN_LISTENER_$port"}}
-    $env:APP_ENV='dev';$env:APP_DEBUG='1';$env:PHP_FCGI_MAX_REQUESTS='0'
+    $env:APP_ENV='dev';$env:APP_DEBUG='1';$env:EZSCORE_INSTANCE='dev';$env:PHP_FCGI_MAX_REQUESTS='0'
     Remove-Item Env:EZS_GATEWAY_RECIPE_CONFIG -ErrorAction SilentlyContinue
     Remove-Item Env:EZS_GATEWAY_RECIPE_MODE -ErrorAction SilentlyContinue
     $started=@()
