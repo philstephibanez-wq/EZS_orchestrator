@@ -18,3 +18,7 @@ Date : 28 octobre 2026. Décision explicite du mainteneur : **START et STOP glob
 
 Dernier correctif fonctionnel : v2.b14, commit `9cf15c1e313e8130291f9fc4f273c2b379dade9d`.
 Promotion stable demandée : `VERSION=2.4b` ; commit de clôture sans modification runtime. Test de garde : `php tests/LifecycleStable24BContractTest.php`.
+
+## Clôture documentaire du 28 octobre 2026
+
+Le mainteneur a confirmé une deuxième fois START/STOP OK et demandé de **figer 2.4b sans nouvelle révision**. À sa demande, les issues, contrats et handoffs sont alignés à cette référence. Ce complément documentaire ne constitue ni un changement runtime ni une nouvelle version. La migration globale Symfony/PHP de l'issue #18 reste ouverte ; son volet START/STOP est clos.
