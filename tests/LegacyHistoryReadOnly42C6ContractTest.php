@@ -2,7 +2,7 @@
 declare(strict_types=1);
 require dirname(__DIR__).'/src/Module/Coordination/LegacyJobHistoryReader.php';
 use Ezs\Web\Module\Coordination\LegacyJobHistoryReader;
-if(trim((string)file_get_contents(dirname(__DIR__).'/VERSION'))!=='4.2c6')throw new RuntimeException('VERSION');
+if(!preg_match('/^4\\.2c[6-9][0-9]*$/',trim((string)file_get_contents(dirname(__DIR__).'/VERSION'))))throw new RuntimeException('VERSION_SERIES');
 $root=sys_get_temp_dir().'/ezs_jobs_readonly_'.bin2hex(random_bytes(6));
 $dir=$root.'/runtime/jobs/dev/14/run-1';mkdir($dir,0700,true);
 try {

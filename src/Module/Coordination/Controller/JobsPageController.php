@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Ezs\Web\Module\Coordination\Controller;
 
+use Ezs\Web\Module\Coordination\LegacyJobHistoryReader;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
 use Twig\Environment;

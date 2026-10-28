@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 $root=dirname(__DIR__);
-if(trim((string)file_get_contents($root.'/VERSION'))!=='4.2c7')throw new RuntimeException('VERSION');
+if(trim((string)file_get_contents($root.'/VERSION'))!=='4.2c8')throw new RuntimeException('VERSION');
 $path=$root.'/src/Module/Infrastructure/Controller/LegacyReadOnlyController.php';
 $code=(string)file_get_contents($path);
 if(!str_contains($code,'use Ezs\\Web\\Module\\Coordination\\LegacyJobHistoryReader;'))throw new RuntimeException('HISTORY_IMPORT_MISSING');
