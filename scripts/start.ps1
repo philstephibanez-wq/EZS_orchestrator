@@ -15,10 +15,10 @@ function IsOwned([int]$port,[int]$processId,[string]$stamp){
     if(-not ([string]$p.CommandLine).Contains("-b 127.0.0.1:$port")){return $false}
     try {return ([datetime]$p.CreationDate).ToUniversalTime().ToString('o') -eq $stamp} catch{return $false}
 }
-function WaitOwned([int]$port,[int]$pid){
+function WaitOwned([int]$port,[int]$processId){
     for($i=0;$i -lt 40;$i++){
         $listeners=@(Owners $port)
-        if($listeners.Count -eq 1 -and [int]$listeners[0].OwningProcess -eq $pid){return $true}
+        if($listeners.Count -eq 1 -and [int]$listeners[0].OwningProcess -eq $processId){return $true}
         Start-Sleep -Milliseconds 250
     }
     return $false

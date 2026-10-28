@@ -10,11 +10,11 @@ $runtime=Join-Path $root 'runtime\v2-dev'
 $stateFile=Join-Path $runtime 'app-backends.json'
 $lockFile=Join-Path $runtime 'app-backends.lock'
 $binary='H:\PHP\php-8.5-x64\php-cgi.exe'
-function Owned([int]$port,[int]$pid,[string]$stamp){
-    if($pid -le 0 -or [string]::IsNullOrWhiteSpace($stamp)){return $false}
+function Owned([int]$port,[int]$processId,[string]$stamp){
+    if($processId -le 0 -or [string]::IsNullOrWhiteSpace($stamp)){return $false}
     $listeners=@(Get-NetTCPConnection -LocalAddress '127.0.0.1' -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
-    $proc=Get-CimInstance Win32_Process -Filter "ProcessId=$pid" -ErrorAction SilentlyContinue
-    if($null -eq $proc -or $listeners.Count -ne 1 -or [int]$listeners[0].OwningProcess -ne $pid){return $false}
+    $proc=Get-CimInstance Win32_Process -Filter "ProcessId=$processId" -ErrorAction SilentlyContinue
+    if($null -eq $proc -or $listeners.Count -ne 1 -or [int]$listeners[0].OwningProcess -ne $processId){return $false}
     if(-not [string]::Equals([string]$proc.ExecutablePath,$binary,[StringComparison]::OrdinalIgnoreCase) -or
         -not ([string]$proc.CommandLine).Contains("-b 127.0.0.1:$port")){return $false}
     try{return ([datetime]$proc.CreationDate).ToUniversalTime().ToString('o') -eq $stamp}catch{return $false}
