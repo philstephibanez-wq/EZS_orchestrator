@@ -10,7 +10,7 @@ $config='H:/EZScore/var/runtime/online-gateway.json';
 $testConfig=getenv('EZS_GATEWAY_RECIPE_CONFIG');
 if(is_string($testConfig)&&$testConfig!==''){
  if((int)($_SERVER['SERVER_PORT']??0)===8510||!is_file($testConfig)||
-    !in_array((string)($_SERVER['SERVER_NAME']??''),['127.0.0.1','localhost','::1'],true)){
+    !in_array((int)($_SERVER['SERVER_PORT']??0),[18513,18515],true)){
   http_response_code(503);echo 'gateway_recipe_refused';return;
  }
  $config=$testConfig;
