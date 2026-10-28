@@ -640,3 +640,86 @@ try{
 
 Invoke-EzsLabAssistantLifecycle -Action start
 if(-not $?){throw 'EZS_LA_START_FAILED'}
+
+# Assistant IA: independent attested process; existing manually launched server is preserved.
+function Invoke-EzsAssistantAiLifecycle {
+param([ValidateSet('start','stop')][string]$Action)
+$ErrorActionPreference='Stop'
+$root=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$assistant='H:\EZStudioLab_assistant'
+$exe=Join-Path $assistant 'runtime\ai\bin\llama-server.exe'
+$model=Join-Path $assistant 'runtime\models-cache\assistant\bench\qwen2.5-1.5b-instruct-q4_k_m\qwen2.5-1.5b-instruct-q4_k_m.gguf'
+$runtime=Join-Path $root 'runtime\v2-dev'
+$statePath=Join-Path $runtime 'assistant-ai.json'
+$lockPath=Join-Path $runtime 'assistant-ai.lock'
+New-Item -ItemType Directory -Force -Path $runtime | Out-Null
+function Listener {return @(Get-NetTCPConnection -LocalAddress '127.0.0.1' -LocalPort 8720 -State Listen -ErrorAction SilentlyContinue)}
+function Info([int]$processId) {if($processId -le 0){return $null};return Get-CimInstance Win32_Process -Filter "ProcessId=$processId" -ErrorAction SilentlyContinue}
+function Owned($s) {
+    if($null -eq $s -or $s.schema -ne 'ezs.assistant.ai.v1' -or [int]$s.pid -le 0 -or -not $s.created){return $false}
+    $p=Info ([int]$s.pid)
+    $ports=@(Listener)
+    if($null -eq $p -or $ports.Count -ne 1 -or [int]$ports[0].OwningProcess -ne [int]$s.pid){return $false}
+    if(-not [string]::Equals([string]$p.ExecutablePath,$exe,[StringComparison]::OrdinalIgnoreCase)){return $false}
+    $cmd=[string]$p.CommandLine
+    if(-not $cmd.Contains($model) -or $cmd -notmatch '(?i)(?:^|\s)--port\s+8720(?:\s|$)'){return $false}
+    try{return ([datetime]$p.CreationDate).ToUniversalTime().ToString('o') -eq [string]$s.created}catch{return $false}
+}
+function Health {
+    try{$r=Invoke-RestMethod 'http://127.0.0.1:8720/health' -TimeoutSec 2 -ErrorAction Stop;return $r.status -eq 'ok'}catch{return $false}
+}
+$lock=$null
+try{$lock=[IO.File]::Open($lockPath,[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)}
+catch{throw 'EZS_AI_CONCURRENT_OPERATION'}
+try {
+    $s=$null
+    if(Test-Path -LiteralPath $statePath -PathType Leaf){
+        try{$s=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8 | ConvertFrom-Json}catch{throw 'EZS_AI_INVALID_STATE'}
+    }
+    if($Action -eq 'stop'){
+        if($null -eq $s){Write-Host 'EZS_AI_STOP_UNMANAGED_PRESERVED';return}
+        if(-not(Owned $s)){throw 'EZS_AI_STOP_REFUSED_UNVERIFIED_PROCESS'}
+        Stop-Process -Id ([int]$s.pid) -ErrorAction Stop
+        for($i=0;$i -lt 40;$i++){
+            if($null -eq (Info ([int]$s.pid)) -and @(Listener).Count -eq 0){break}
+            Start-Sleep -Milliseconds 250
+        }
+        if($null -ne (Info ([int]$s.pid)) -or @(Listener).Count -gt 0){throw 'EZS_AI_STOP_INCOMPLETE'}
+        Remove-Item -LiteralPath $statePath -Force
+        Write-Host 'EZS_AI_STOP_OWNED_OK'
+        return
+    }
+    if($null -ne $s){
+        if(-not(Owned $s) -or -not(Health)){throw 'EZS_AI_START_REFUSED_STALE_OR_UNHEALTHY_OWNED_STATE'}
+        Write-Host 'EZS_AI_ALREADY_RUNNING_VERIFIED'
+        return
+    }
+    if(@(Listener).Count -gt 0){Write-Host 'EZS_AI_EXISTING_UNMANAGED_LISTENER_PRESERVED';return}
+    foreach($path in @($exe,$model)){if(-not(Test-Path -LiteralPath $path -PathType Leaf)){throw "EZS_AI_DEPENDENCY_MISSING:$path"}}
+    # CPU conservative profile as qualified in 4.2c15. No model download.
+    $args=@('-m',('"'+$model+'"'),'--host','127.0.0.1','--port','8720','--ctx-size','4096','--parallel','1','--gpu-layers','0')
+    $p=Start-Process -FilePath $exe -ArgumentList $args -WorkingDirectory $assistant -WindowStyle Hidden -PassThru
+    $record=$null
+    try {
+        for($i=0;$i -lt 240;$i++){
+            if($p.HasExited){throw 'EZS_AI_PROCESS_EXITED_BEFORE_READY'}
+            $proc=Info ([int]$p.Id)
+            if($null -ne $proc -and @(Listener).Count -eq 1 -and [int](Listener)[0].OwningProcess -eq [int]$p.Id -and (Health)){
+                $record=[pscustomobject]@{schema='ezs.assistant.ai.v1';pid=[int]$p.Id;created=([datetime]$proc.CreationDate).ToUniversalTime().ToString('o')}
+                if(Owned $record){break}
+            }
+            Start-Sleep -Milliseconds 500
+        }
+        if($null -eq $record -or -not(Owned $record)){throw 'EZS_AI_READY_TIMEOUT_OR_IDENTITY_FAILURE'}
+        [IO.File]::WriteAllText($statePath,($record|ConvertTo-Json -Depth 4),[Text.UTF8Encoding]::new($false))
+        Write-Host 'EZS_AI_START_OWNED_READY_8720'
+    }catch{
+        $proc=Info ([int]$p.Id)
+        if($null -ne $proc -and [string]::Equals([string]$proc.ExecutablePath,$exe,[StringComparison]::OrdinalIgnoreCase) -and
+            ([string]$proc.CommandLine).Contains($model)){Stop-Process -Id ([int]$p.Id) -ErrorAction SilentlyContinue}
+        throw
+    }
+}finally{if($null -ne $lock){$lock.Dispose()}}
+}
+
+Invoke-EzsAssistantAiLifecycle -Action start
