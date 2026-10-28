@@ -36,7 +36,7 @@ final class WindowsPortOwnership
         $tasks=[];
         foreach (preg_split('/\r?\n/', $output) as $line) {
             if (trim($line)==='')continue;
-            $row=str_getcsv($line);
+            $row=str_getcsv($line, ',', '"', '');
             if(count($row)<2 || !ctype_digit(trim($row[1])))continue;
             $tasks[(int)$row[1]]=strtolower(trim($row[0]));
         }
