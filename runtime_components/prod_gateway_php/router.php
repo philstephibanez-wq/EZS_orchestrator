@@ -6,13 +6,25 @@ declare(strict_types=1);
  * This router relies on PHP's built-in server; it is not a production process manager.
  */
 $config='H:/EZScore/var/runtime/online-gateway.json';
-// SERVER_PORT under FastCGI denotes the frontend Caddy port (18514), not the PHP listener (18515).
-// Test override is forbidden on PROD 8510 and requires an existing isolated config.
+// Recipe-only diagnostic: no secrets or configuration path disclosed.
 $testConfig=getenv('EZS_GATEWAY_RECIPE_CONFIG');
 if(is_string($testConfig)&&$testConfig!==''){
- if((int)($_SERVER['SERVER_PORT']??0)===8510||!is_file($testConfig)||
-    !in_array((int)($_SERVER['SERVER_PORT']??0),[18513,18514,18515],true)){
-  http_response_code(503);echo 'gateway_recipe_refused';return;
+ $port=(int)($_SERVER['SERVER_PORT']??0);
+ $script=(string)($_SERVER['SCRIPT_FILENAME']??'');
+ $expected=realpath(__FILE__);
+ $scriptReal=realpath($script);
+ $exists=is_file($testConfig);
+ $portAllowed=in_array($port,[18513,18514,18515],true);
+ $scriptAllowed=$scriptReal!==false&&$expected!==false&&
+     strcasecmp(str_replace('\\','/',$scriptReal),str_replace('\\','/',$expected))===0;
+ if(!$portAllowed||!$exists||!$scriptAllowed){
+  http_response_code(503);
+  header('Content-Type: application/json; charset=utf-8');
+  header('Cache-Control: no-store');
+  echo json_encode(['error'=>'gateway_recipe_refused','server_port'=>$port,
+    'config_exists'=>$exists,'script_matches'=>$scriptAllowed,
+    'script_filename_present'=>$script!==''],JSON_THROW_ON_ERROR);
+  return;
  }
  $config=$testConfig;
 }
