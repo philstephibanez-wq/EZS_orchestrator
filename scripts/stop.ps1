@@ -1,5 +1,22 @@
-param([ValidateSet('dev','gateway')][string]$Target='dev')
+param([ValidateSet('all','dev','gateway')][string]$Target='all')
 $ErrorActionPreference='Stop'
+if($Target -eq 'all') {
+    $root=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+    $gatewayState=Join-Path $root 'runtime\v2-prod\gateway-php.json'
+    if(Test-Path -LiteralPath $gatewayState) {
+        & (Join-Path $PSScriptRoot 'stop.ps1') -Target gateway
+        if(-not $?) {throw 'EZS_GLOBAL_STOP_GATEWAY_FAILED'}
+    } elseif(@(Get-NetTCPConnection -LocalPort 8510 -State Listen -ErrorAction SilentlyContinue).Count -gt 0) {
+        throw 'EZS_GLOBAL_STOP_REFUSED_UNOWNED_GATEWAY'
+    }
+    $devState=Join-Path $root 'runtime\v2-dev\processes.json'
+    if(Test-Path -LiteralPath $devState) {
+        & (Join-Path $PSScriptRoot 'v2_lifecycle.ps1') -Action stop
+        if(-not $?) {throw 'EZS_GLOBAL_STOP_DEV_FAILED'}
+    }
+    Write-Host 'EZS_GLOBAL_STOP_OWNED_COMPONENTS_OK'
+    return
+}
 if($Target -eq 'dev') {
     & (Join-Path $PSScriptRoot 'v2_lifecycle.ps1') -Action stop
     exit $LASTEXITCODE

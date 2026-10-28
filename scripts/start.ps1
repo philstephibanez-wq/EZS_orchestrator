@@ -1,5 +1,38 @@
-param([ValidateSet('dev','gateway')][string]$Target='dev')
+param([ValidateSet('all','dev','gateway')][string]$Target='all')
 $ErrorActionPreference='Stop'
+if($Target -eq 'all') {
+    $devState=Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..')).Path 'runtime\v2-dev\processes.json'
+    $devStatus=(& (Join-Path $PSScriptRoot 'v2_lifecycle.ps1') -Action status | Out-String)
+    if($devStatus -match 'php_owned=True caddy_owned=True state_present=True') {
+        Write-Host 'EZS_GLOBAL_START_DEV_ALREADY_READY'
+    } elseif(-not (Test-Path -LiteralPath $devState)) {
+        & (Join-Path $PSScriptRoot 'v2_lifecycle.ps1') -Action start
+        if(-not $?) {throw 'EZS_GLOBAL_START_DEV_FAILED'}
+    } else {
+        throw 'EZS_GLOBAL_START_REFUSED_DEV_STALE_OR_PARTIAL_STATE'
+    }
+    $root=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+    $phpState=Join-Path $root 'runtime\v2-prod\gateway-php.json'
+    if(Test-Path -LiteralPath $phpState) {
+        $s=Get-Content -LiteralPath $phpState -Raw -Encoding UTF8 | ConvertFrom-Json
+        $listeners=@(Get-NetTCPConnection -LocalPort 8510 -State Listen -ErrorAction SilentlyContinue)
+        $backend=@(Get-NetTCPConnection -LocalPort 18515 -State Listen -ErrorAction SilentlyContinue)
+        if($s.schema -ne 'ezs.gateway.php.runtime.v1' -or
+           $listeners.Count -ne 1 -or [int]$listeners[0].OwningProcess -ne [int]$s.caddy_pid -or
+           $backend.Count -ne 1 -or [int]$backend[0].OwningProcess -ne [int]$s.php_pid) {
+            throw 'EZS_GLOBAL_START_REFUSED_GATEWAY_STALE_STATE'
+        }
+        $res=Invoke-WebRequest 'http://127.0.0.1:8510/__ezscore_gateway_status' -UseBasicParsing -TimeoutSec 5
+        $payload=$res.Content | ConvertFrom-Json
+        if($payload.protocol -ne 'ezscore.online-gateway.v3') {throw 'EZS_GLOBAL_START_GATEWAY_PROTOCOL_INVALID'}
+        Write-Host 'EZS_GLOBAL_START_GATEWAY_ALREADY_READY'
+    } else {
+        & (Join-Path $PSScriptRoot 'start.ps1') -Target gateway
+        if(-not $?) {throw 'EZS_GLOBAL_START_GATEWAY_FAILED'}
+    }
+    Write-Host 'EZS_GLOBAL_START_READY'
+    return
+}
 if($Target -eq 'dev') {
     & (Join-Path $PSScriptRoot 'v2_lifecycle.ps1') -Action start
     exit $LASTEXITCODE
