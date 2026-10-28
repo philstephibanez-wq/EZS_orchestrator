@@ -1,0 +1,7 @@
+# v2.b10 — résoudre la configuration Caddy partagée sans intervention applicative
+
+Sur MAIN, LAB 8701 et Assistant 8713 sont démarrés. La bascule Caddy v2.b9 est bloquée car aucune variable d'environnement EZSCORE_MEDIA_ROOT n'existe dans la session opérateur, ni côté User/Machine ni dans les .env contrôlés. La variable relève du Caddy DEV partagé, **pas** de LAB ou Assistant.
+
+Le script de bascule gère désormais cette dépendance d'infrastructure à partir du chemin canonique déterminé dans la source EZScore DEV (`SongStemStorage::storageRoot` : `H:\EZScore_dev\var\storage\stems`). Il ne modifie aucun fichier dans EZScore DEV/PROD, LAB ou Assistant, ne crée pas de répertoire, ne modifie pas les services PROD. La présence du dossier est contrôlée **avant** arrêt du Caddy actuel ; si absent, fail-closed. Le script met la variable uniquement dans son propre processus, héritée par le nouveau Caddy et par un éventuel rollback. La configuration existante Caddy partagée et les chemins médias restent conservés.
+
+Recette MAIN : pull, `php tests/CaddyLabAssistantCutover2B9ContractTest.php`, `php tests/CaddyLabMediaResolution2B10ContractTest.php`, puis `powershell -ExecutionPolicy Bypass -File .\scripts\caddy-dev-lab-assistant-cutover.ps1 -Action apply`. La bascule entraîne une courte interruption du Caddy DEV. Vérifier ensuite 8790, 8502 avec badge/SSO/médias, 8852, 8702 et 8712. Workers/Qwen et fonctionnement métier LAB/Assistant ne sont pas validés par le seul HTTP. Aucun test MAIN ni bascule réelle effectué à publication.

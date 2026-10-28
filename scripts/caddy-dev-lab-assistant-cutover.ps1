@@ -97,11 +97,13 @@ try {
     foreach($port in @(8701,8713)){
         if(@(Listener $port).Count -ne 1){throw "EZS_CADDY_BACKEND_UNAVAILABLE_$port"}
     }
-    # The existing Caddy configuration contains a required media-root environment substitution.
-    if([string]::IsNullOrWhiteSpace($env:EZSCORE_MEDIA_ROOT) -or
-       -not(Test-Path -LiteralPath $env:EZSCORE_MEDIA_ROOT -PathType Container)){
-        throw 'EZS_CADDY_MEDIA_ROOT_ENV_MISSING_REFUSED'
+    # Shared Caddy keeps its existing EZScore DEV route: resolve this infrastructure
+    # value internally, without asking LAB/Assistant operators to configure EZScore.
+    $devMediaRoot='H:\EZScore_dev\var\storage\stems'
+    if(-not(Test-Path -LiteralPath $devMediaRoot -PathType Container)){
+        throw 'EZS_CADDY_EXISTING_DEV_MEDIA_DIRECTORY_MISSING'
     }
+    $env:EZSCORE_MEDIA_ROOT=$devMediaRoot
     if(-not(CheckHttp $requiredPorts)){throw 'EZS_CADDY_BASELINE_HTTP_UNHEALTHY'}
     $oldArgs=@('run','--config',('"' + $oldConfig + '"'),'--adapter','caddyfile')
     $newArgs=@('run','--config',('"' + $newConfig + '"'),'--adapter','caddyfile')
