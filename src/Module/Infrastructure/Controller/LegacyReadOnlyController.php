@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Ezs\Web\Module\Infrastructure\Controller;
 
 use Ezs\Web\Module\Infrastructure\LocalPortStatus;
+use Ezs\Web\Module\Coordination\LegacyJobHistoryReader;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Attribute\Route;
@@ -35,15 +36,17 @@ final class LegacyReadOnlyController
     public function jobs(Request $request): JsonResponse
     {
         if (!$this->loopback($request)) {
-            $history=(new LegacyJobHistoryReader(dirname(__DIR__, 4)))->recent();
-        return new JsonResponse([
-            'ok'=>true,
-            'source'=>'historical_result_json',
-            'live_queue'=>false,
-            'count'=>count($history),
-            'jobs'=>$history,
-        ],200,['Cache-Control'=>'no-store']);
+            return new JsonResponse(['ok' => false, 'error' => 'forbidden'], 403);
+        }
 
+        $history = (new LegacyJobHistoryReader(dirname(__DIR__, 4)))->recent();
+        return new JsonResponse([
+            'ok' => true,
+            'source' => 'historical_result_json',
+            'live_queue' => false,
+            'count' => count($history),
+            'jobs' => $history,
+        ], 200, ['Cache-Control' => 'no-store']);
     }
 
     private function loopback(Request $request): bool
