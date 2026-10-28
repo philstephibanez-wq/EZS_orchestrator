@@ -10,6 +10,8 @@
     root * H:/EZScore/public
     encode gzip
     php_fastcgi 127.0.0.1:8512 {
+        header_up X-Forwarded-Proto https
+        header_up X-Forwarded-Port 443
         capture_stderr
     }
     file_server
