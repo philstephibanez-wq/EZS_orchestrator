@@ -12,7 +12,9 @@ final class JobsPageController
     #[Route('/jobs', name: 'ezs_v2_jobs_page', methods: ['GET'])]
     public function index(Environment $twig): Response
     {
-        return new Response($twig->render('jobs/index.html.twig'), 200, [
+        $versionFile = dirname(__DIR__, 4) . DIRECTORY_SEPARATOR . 'VERSION';
+        $version = is_file($versionFile) ? trim((string) file_get_contents($versionFile)) : 'inconnue';
+        return new Response($twig->render('jobs/index.html.twig', ['orchestrator_version' => $version, 'active_page' => 'jobs']), 200, [
             'Content-Type' => 'text/html; charset=UTF-8',
             'Cache-Control' => 'no-store',
         ]);
