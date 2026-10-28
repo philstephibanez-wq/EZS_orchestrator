@@ -8,6 +8,10 @@ declare(strict_types=1);
 $config='H:/EZScore/var/runtime/online-gateway.json';
 // Recipe-only diagnostic: no secrets or configuration path disclosed.
 $testConfig=getenv('EZS_GATEWAY_RECIPE_CONFIG');
+// Never honour an inherited recipe override on the real production listener.
+if ((int)($_SERVER['SERVER_PORT']??0)===8510) {
+ $testConfig=false;
+}
 if(is_string($testConfig)&&$testConfig!==''){
  $port=(int)($_SERVER['SERVER_PORT']??0);
  $script=(string)($_SERVER['SCRIPT_FILENAME']??'');

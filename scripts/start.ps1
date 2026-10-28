@@ -79,6 +79,10 @@ try {
     }
     & $caddy validate --config $config --adapter caddyfile | Out-Null
     if($LASTEXITCODE -ne 0){throw 'EZS_GATEWAY_PHP_CADDY_INVALID'}
+    # A recipe may have exported test overrides into the parent user environment.
+    # Production gateway MUST inherit no recipe variables.
+    Remove-Item Env:EZS_GATEWAY_RECIPE_CONFIG -ErrorAction SilentlyContinue
+    Remove-Item Env:EZS_GATEWAY_RECIPE_MODE -ErrorAction SilentlyContinue
     $env:APP_ENV='prod';$env:APP_DEBUG='0';$env:PHP_FCGI_MAX_REQUESTS='0'
     $cgi=$null;$edge=$null
     try {
