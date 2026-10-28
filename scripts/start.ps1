@@ -23,20 +23,31 @@ function WaitOwned([int]$port,[int]$processId){
     }
     return $false
 }
-function HttpReady([int]$port,[string]$path){
+function HttpStatus([int]$port,[string]$path){
     try {
         $request=[System.Net.HttpWebRequest]::Create("http://127.0.0.1:$port$path")
         $request.Timeout=5000
         $request.AllowAutoRedirect=$false
+        $request.Headers.Add('Cache-Control','no-cache')
         $response=$request.GetResponse()
         $code=[int]$response.StatusCode
         $response.Close()
-        return ($code -ge 200 -and $code -lt 400)
+        return $code
     } catch [System.Net.WebException] {
         $response=$_.Exception.Response
-        if($null -ne $response){$code=[int]$response.StatusCode;$response.Close();return ($code -eq 401 -or $code -eq 403)}
-        return $false
+        if($null -ne $response){
+            $code=[int]$response.StatusCode
+            $response.Close()
+            return $code
+        }
+        Write-Host "EZS_DEV_HTTP_TRANSPORT_FAILED_$port $($_.Exception.Status)"
+        return 0
     }
+}
+function HttpReady([int]$port,[string]$path){
+    $code=HttpStatus $port $path
+    Write-Host "EZS_DEV_HTTP_CHECK port=$port status=$code path=$path"
+    return ($code -ge 200 -and $code -lt 400) -or $code -eq 401 -or $code -eq 403
 }
 & (Join-Path $PSScriptRoot 'v2_lifecycle.ps1') -Action start
 if(-not $?){throw 'EZS_DEV_ROOT_START_FAILED'}
