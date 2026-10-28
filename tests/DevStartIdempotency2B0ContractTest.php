@@ -14,5 +14,7 @@ foreach (['Port-Owned 8791','Port-Owned 8790','Port-Owned 8502','Port-Owned 8852
 }
 if(!str_contains($start,"v2_lifecycle.ps1') -Action start"))throw new RuntimeException('DEV_START_ENTRY_CHANGED');
 if(!str_contains($stop,'prod_mode.php')||!str_contains($stop,'maintenance'))throw new RuntimeException('PROD_MAINTENANCE_ON_STOP_REGRESSION');
-if(str_contains($start,'gateway-php.json')||str_contains($start,'18515'))throw new RuntimeException('PROD_GATEWAY_START_REGRESSION');
+$executableLines=array_filter(explode("\n",$start),static fn(string $line): bool => !str_starts_with(ltrim($line),'#'));
+$executableStart=implode("\n",$executableLines);
+if(str_contains($executableStart,'gateway-php.json')||str_contains($executableStart,'18515')||str_contains($executableStart,'-Target gateway'))throw new RuntimeException('PROD_GATEWAY_START_REGRESSION');
 echo "EZS_DEV_START_IDEMPOTENCY_2_B0_CONTRACT_OK\n";
