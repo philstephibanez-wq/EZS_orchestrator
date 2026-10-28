@@ -1,24 +1,81 @@
 {% extends 'layout/base.html.twig' %}
-{% block title %}EZS Orchestrator — Files &amp; Jobs{% endblock %}
+
+{% block title %}
+    EZS Orchestrator — Files &amp; Jobs
+{% endblock %}
+
 {% block content %}
-<main class="container-fluid py-4 ezs-main">
-  <div class="ezs-statusline mb-3"><strong>Files &amp; Jobs</strong><span class="text-body-secondary">Historique V1 en lecture seule · Snapshot result.json uniquement</span></div>
-  <div class="alert alert-secondary" role="status">Les lignes ci-dessous sont des archives de runs : elles ne représentent pas l'état actuel de la queue. Aucune action n'est disponible.</div>
-  <section class="card mb-3">
-    <div class="card-header"><strong>Dernières tentatives archivées</strong> <span class="text-body-secondary">({{ history|length }})</span></div>
-    <div class="table-responsive">
-      <table class="table table-dark table-striped table-sm mb-0">
-        <thead><tr><th>Cible</th><th>Job</th><th>Run</th><th>Type</th><th>Chanson</th><th>État archivé</th><th>RC analyse</th><th>Finalisation</th><th>Horodatage fichier</th></tr></thead>
-        <tbody>
-        {% for item in history %}
-          <tr><td>{{ item.target }}</td><td>{{ item.job_id }}</td><td>{{ item.run }}</td><td>{{ item.kind }}</td><td>{{ item.song_title ?: (item.song_id ?? '—') }}</td><td>{{ item.state }}</td><td>{{ item.analysis_returncode ?? '—' }}</td><td>{{ item.finalize_status ?: '—' }}</td><td>{{ item.timestamp }}</td></tr>
-        {% else %}
-          <tr><td colspan="9" class="text-body-secondary">Aucun result.json historique trouvé. Cela ne signifie pas que les queues sont vides.</td></tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </section>
-  <p class="text-body-secondary">Lecture locale sans accès BDD externe, sans lecture execution.log, sans appel claim/complete/fail. Les queues temps réel et les workers Symfony restent en migration.</p>
-</main>
+    <main class="container-fluid py-4 ezs-main">
+        <div class="ezs-statusline mb-3">
+            <strong>Files &amp; Jobs</strong>
+            <span class="text-body-secondary">Historique V1 en lecture seule · Snapshots result.json uniquement</span>
+        </div>
+
+        <div class="alert alert-secondary" role="status">
+            Ces tentatives sont archivées et ne représentent pas l'état actuel des files.
+            Aucun job n'est exécuté ou réclamé depuis cette page.
+        </div>
+
+        <section class="card mb-3">
+            <div class="card-header">
+                <strong>Dernières tentatives archivées</strong>
+                <span class="text-body-secondary">({{ history|length }})</span>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-dark table-striped table-sm align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Cible</th>
+                            <th>Job</th>
+                            <th>Run</th>
+                            <th>Type</th>
+                            <th>Chanson</th>
+                            <th>État archivé</th>
+                            <th>RC analyse</th>
+                            <th>Finalisation</th>
+                            <th>Horodatage fichier</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in history %}
+                            <tr>
+                                <td>{{ item.target }}</td>
+                                <td>{{ item.job_id }}</td>
+                                <td>{{ item.run }}</td>
+                                <td>{{ item.kind }}</td>
+                                <td>{{ item.song_title ?: (item.song_id ?? '—') }}</td>
+                                <td>
+                                    {% if item.state == 'completed' %}
+                                        <span class="badge text-bg-success">Terminé</span>
+                                    {% elseif item.state == 'failed' %}
+                                        <span class="badge text-bg-danger">Échec analyse</span>
+                                    {% elseif item.state == 'finalize_error' %}
+                                        <span class="badge text-bg-warning">Erreur finalisation</span>
+                                    {% elseif item.state == 'running' %}
+                                        <span class="badge text-bg-primary">En cours (archive)</span>
+                                    {% else %}
+                                        <span class="badge text-bg-secondary">En attente (archive)</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ item.analysis_returncode ?? '—' }}</td>
+                                <td>{{ item.finalize_status ?: '—' }}</td>
+                                <td>{{ item.timestamp }}</td>
+                            </tr>
+                        {% else %}
+                            <tr>
+                                <td colspan="9" class="text-body-secondary">
+                                    Aucun result.json historique trouvé. Cela ne signifie pas que les files sont vides.
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <p class="text-body-secondary">
+            Lecture locale sans accès BDD externe ni lecture execution.log.
+            Les files temps réel et les workers Symfony restent en migration.
+        </p>
+    </main>
 {% endblock %}
