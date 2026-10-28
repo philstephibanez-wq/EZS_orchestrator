@@ -26,7 +26,7 @@ function WaitOwned([int]$port,[int]$processId){
 function HttpStatus([int]$port,[string]$path){
     try {
         $request=[System.Net.HttpWebRequest]::Create("http://127.0.0.1:$port$path")
-        $request.Timeout=5000
+        $request.Timeout=10000
         $request.AllowAutoRedirect=$false
         $request.Headers.Add('Cache-Control','no-cache')
         $response=$request.GetResponse()
@@ -45,9 +45,16 @@ function HttpStatus([int]$port,[string]$path){
     }
 }
 function HttpReady([int]$port,[string]$path){
-    $code=HttpStatus $port $path
-    Write-Host "EZS_DEV_HTTP_CHECK port=$port status=$code path=$path"
-    return ($code -ge 200 -and $code -lt 400) -or $code -eq 401 -or $code -eq 403
+    $deadline=[DateTime]::UtcNow.AddSeconds(45)
+    do {
+        $code=HttpStatus $port $path
+        Write-Host "EZS_DEV_HTTP_CHECK port=$port status=$code path=$path"
+        if(($code -ge 200 -and $code -lt 400) -or $code -eq 401 -or $code -eq 403){return $true}
+        if($code -eq 404 -or $code -eq 500){return $false}
+        if([DateTime]::UtcNow -ge $deadline){break}
+        Start-Sleep -Milliseconds 1200
+    }while($true)
+    return $false
 }
 & (Join-Path $PSScriptRoot 'v2_lifecycle.ps1') -Action start
 if(-not $?){throw 'EZS_DEV_ROOT_START_FAILED'}
@@ -64,7 +71,9 @@ try{
            -not(IsOwned 8862 ([int]$s.preview_pid) ([string]$s.preview_created))){
             throw 'EZS_DEV_APP_REFUSED_STALE_STATE'
         }
-        if(-not(HttpReady 8502 '/fr/login') -or -not(HttpReady 8852 '/fr/login')){throw 'EZS_DEV_APP_HTTP_UNHEALTHY'}
+        $devReady=HttpReady 8502 '/fr/login'
+        $previewReady=HttpReady 8852 '/fr/login'
+        if(-not($devReady -and $previewReady)){throw 'EZS_DEV_APP_HTTP_UNHEALTHY'}
         Write-Host 'EZS_DEV_APPS_ALREADY_RUNNING_VERIFIED'
         return
     }
@@ -84,7 +93,9 @@ try{
         if($null -eq $dev -or $null -eq $preview){throw 'EZS_DEV_APP_IDENTITY_UNAVAILABLE'}
         $state=[ordered]@{schema='ezs.dev.apps.v1';dev_pid=$started[0].pid;dev_created=([datetime]$dev.CreationDate).ToUniversalTime().ToString('o');preview_pid=$started[1].pid;preview_created=([datetime]$preview.CreationDate).ToUniversalTime().ToString('o')}
         if(-not(IsOwned 8602 $state.dev_pid $state.dev_created) -or -not(IsOwned 8862 $state.preview_pid $state.preview_created)){throw 'EZS_DEV_APP_OWNERSHIP_NOT_CONFIRMED'}
-        if(-not(HttpReady 8502 '/fr/login') -or -not(HttpReady 8852 '/fr/login')){throw 'EZS_DEV_APP_HTTP_NOT_READY'}
+        $devReady=HttpReady 8502 '/fr/login'
+        $previewReady=HttpReady 8852 '/fr/login'
+        if(-not($devReady -and $previewReady)){throw 'EZS_DEV_APP_HTTP_NOT_READY'}
         [IO.File]::WriteAllText($stateFile,($state|ConvertTo-Json),[Text.UTF8Encoding]::new($false))
         Write-Host 'EZS_DEV_APPS_READY_8502_8852'
     }catch{
