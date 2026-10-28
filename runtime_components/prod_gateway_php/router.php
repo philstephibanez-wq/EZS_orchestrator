@@ -42,7 +42,11 @@ foreach(['/internal/analysis/desktop','/internal/analysis/worker','/internal/med
 }
 $maintenance=(bool)($settings['maintenance']??false);
 function maintenancePage(): void {
- $body='<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="20"><title>EZScore — Maintenance</title></head><body><main><h1>EZScore</h1><p>Maintenance en cours</p><p>Le service sera de nouveau disponible dans quelques instants.</p></main></body></html>';
+ $body='<!doctype html><html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="20"><title>EZScore — Maintenance</title>
+<style>body{margin:0;background:#101820;color:#eef5f7;font:16px Segoe UI,Arial,sans-serif}.wrap{max-width:760px;margin:12vh auto;padding:32px}.card{background:#18242d;border:1px solid #30434f;border-radius:16px;padding:28px;box-shadow:0 20px 60px #0005}h1{margin:0 0 10px;font-size:34px}p{color:#b9c8d1;line-height:1.6}.dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#f0ad4e;margin-right:10px}.small{font-size:13px;color:#81939e}</style>
+</head><body><div class="wrap"><div class="card"><h1>EZScore</h1><p><span class="dot"></span><strong>Maintenance en cours</strong></p><p>Le service sera de nouveau disponible dans quelques instants.</p><p class="small">Cette page se recharge automatiquement.</p></div></div></body></html>';
  header('Retry-After: 20');reply(503,$body,'text/html; charset=utf-8');
 }
 if($maintenance&&!$isInternal){maintenancePage();return;}
@@ -67,7 +71,7 @@ $context=stream_context_create(['http'=>['method'=>$method,'header'=>implode("\r
  'timeout'=>60,'ignore_errors'=>true,'follow_location'=>0,'protocol_version'=>1.1]]);
 $stream=@fopen('http://127.0.0.1:'.$port.$uri,'rb',false,$context);
 if($stream===false){
- if($isInternal)reply(503,'{"error":"online_backend_unavailable"}','application/json');
+ if($isInternal){header('Retry-After: 2');reply(503,'{"error":"online_backend_unavailable"}','application/json');}
  else maintenancePage();
  return;
 }

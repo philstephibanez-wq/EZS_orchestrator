@@ -35,6 +35,13 @@ foreach([18510,18513] as $port){
  }
 }
 if($errors){foreach($errors as $error)fwrite(STDERR,$error."\n");exit(1);}
+// The mock backend must be available before any parity assertions; 503/503 is not parity.
+$probe=requestRecipe(18511,'/probe');
+$probeData=json_decode($probe['body'],true);
+if($probe['code']!==200||!is_array($probeData)||($probeData['path']??null)!=='/probe'){
+ fwrite(STDERR,"EZS_RECIPE_BACKEND_18511_UNAVAILABLE: start the mock backend first.\n");
+ exit(1);
+}
 foreach([false,true] as $maintenance){
  $data=['maintenance'=>$maintenance,'backend_host'=>'127.0.0.1','backend_port'=>18511];
  file_put_contents($config,json_encode($data,JSON_THROW_ON_ERROR));
