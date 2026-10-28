@@ -1,3 +1,4 @@
+param([switch]$RefreshDevApps)
 $ErrorActionPreference='Stop'
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $runtime=Join-Path $root 'runtime\v2-dev'
@@ -71,11 +72,40 @@ try{
            -not(IsOwned 8862 ([int]$s.preview_pid) ([string]$s.preview_created))){
             throw 'EZS_DEV_APP_REFUSED_STALE_STATE'
         }
-        $devReady=HttpReady 8502 '/fr/login'
-        $previewReady=HttpReady 8852 '/fr/login'
-        if(-not($devReady -and $previewReady)){throw 'EZS_DEV_APP_HTTP_UNHEALTHY'}
-        Write-Host 'EZS_DEV_APPS_ALREADY_RUNNING_VERIFIED'
-        return
+        if($RefreshDevApps){
+            # Restart ONLY our two attested DEV FastCGI processes. No global STOP or PROD mode change.
+            $targets=@(
+                @{port=8602; processId=[int]$s.dev_pid; stamp=[string]$s.dev_created},
+                @{port=8862; processId=[int]$s.preview_pid; stamp=[string]$s.preview_created}
+            )
+            foreach($target in $targets){
+                if(-not(IsOwned $target.port $target.processId $target.stamp)){
+                    throw 'EZS_DEV_REFRESH_REFUSED_IDENTITY_CHANGED'
+                }
+            }
+            foreach($target in $targets){
+                Stop-Process -Id $target.processId -ErrorAction Stop
+            }
+            foreach($target in $targets){
+                $exited=$false
+                for($attempt=0;$attempt -lt 40;$attempt++){
+                    $listeners=@(Owners $target.port)
+                    if($listeners.Count -eq 0 -and $null -eq (Get-Process -Id $target.processId -ErrorAction SilentlyContinue)){
+                        $exited=$true; break
+                    }
+                    Start-Sleep -Milliseconds 250
+                }
+                if(-not $exited){throw "EZS_DEV_REFRESH_STOP_UNCONFIRMED_$($target.port)"}
+            }
+            Remove-Item -LiteralPath $stateFile -Force
+            Write-Host 'EZS_DEV_APPS_REFRESH_OWNED_ONLY_OK'
+        }else{
+            $devReady=HttpReady 8502 '/fr/login'
+            $previewReady=HttpReady 8852 '/fr/login'
+            if(-not($devReady -and $previewReady)){throw 'EZS_DEV_APP_HTTP_UNHEALTHY'}
+            Write-Host 'EZS_DEV_APPS_ALREADY_RUNNING_VERIFIED'
+            return
+        }
     }
     foreach($port in @(8602,8862)){if(@(Owners $port).Count -gt 0){throw "EZS_DEV_APP_REFUSED_FOREIGN_LISTENER_$port"}}
     $env:APP_ENV='dev';$env:APP_DEBUG='1';$env:EZSCORE_INSTANCE='dev';$env:PHP_FCGI_MAX_REQUESTS='0'

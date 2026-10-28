@@ -1,0 +1,7 @@
+# v2.b7 — rafraîchissement exclusif des backends DEV
+
+Observation MAIN : les processus 8602/8862 sont actifs et pages HTTP 200, mais le badge rouge DEV ne s'affiche pas. Le template GitHub EZScore exige `EZSCORE_INSTANCE=dev` ; cette variable est exportée seulement lors de la création de processus en v2.b6. Un simple start idempotent ne change pas l'environnement des processus existants.
+
+Implémentation : `start.ps1 -RefreshDevApps` acquiert le verrou DEV, atteste PID, chemin du binaire, signature de ligne de commande, date de création et ownership de chacun des listeners 8602/8862 ; refuse toute identité divergente, arrête uniquement ces deux backends et attend qu'ils disparaissent avant de réutiliser le démarrage canonique avec `EZSCORE_INSTANCE=dev`. N'appelle jamais `stop.ps1`, ni la commande maintenance PROD, et ne redémarre pas Caddy. Les façades DEV connaissent une brève indisponibilité pendant l'opération. Le comportement sans option reste inchangé. Le contrat global STOP → maintenance PROD demeure inchangé.
+
+MAIN : `cd H:\EZS_orchestrator`; `git pull --ff-only origin master`; `php tests/DevRefreshBadge2B7ContractTest.php`; `powershell -ExecutionPolicy Bypass -File .\scripts\start.ps1 -RefreshDevApps`; vérifier `http://127.0.0.1:8502/fr/login` et présence du badge rouge puis SSO Google DEV en navigateur. Ne pas publier cookies ni secret. Aucun test live effectué à la publication. Si l'arrêt échoue partiellement, ne pas supprimer le state à la main ou tuer un PID : diagnostic d'ownership requis.
