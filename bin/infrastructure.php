@@ -4,7 +4,7 @@ declare(strict_types=1);
 // Lecture d'état et préflight natifs PHP. Aucune création/arrêt de processus.
 $root=dirname(__DIR__);
 $action=$argv[1]??'status';
-if(!in_array($action,['status','preflight'],true)){fwrite(STDERR,"EZS_PHP_UNKNOWN_ACTION\n");exit(2);}
+if(!in_array($action,['status','preflight','fastcgi-incident'],true)){fwrite(STDERR,"EZS_PHP_UNKNOWN_ACTION\n");exit(2);}
 function fail(string $reason): never {fwrite(STDERR,$reason."\n");exit(1);}
 function state(string $file): ?array {
     if(!is_file($file))return null;
@@ -41,6 +41,12 @@ if($action==='preflight'){
     echo "EZS_PHP_INFRA_PREFLIGHT_OK\n";exit(0);
 }
 require_once $root.'/src/Module/Infrastructure/WindowsPortOwnership.php';
+if($action==='fastcgi-incident'){
+ require_once $root.'/src/Module/Infrastructure/FastcgiIncidentReport.php';
+ $devState=state($root.'/runtime/v2-dev/processes.json');
+ echo json_encode(\Ezs\Web\Module\Infrastructure\FastcgiIncidentReport::collect($root,$devState),JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR)."\n";
+ exit(0);
+}
 $dev=state($root.'/runtime/v2-dev/processes.json');
 $prod=state($root.'/runtime/v2-prod/processes.json');
 $devListen=port(8790)&&port(8791);
