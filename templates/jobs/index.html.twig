@@ -17,6 +17,14 @@
         </div>
 
         <section class="card mb-3">
+            <div class="card-header"><strong>Assistant MAIN — disponibilité IA</strong></div>
+            <div class="card-body">
+                <p>Interface : {% if assistant_readiness.web %}<span class="badge text-bg-success">Prête</span>{% else %}<span class="badge text-bg-secondary">Indisponible</span>{% endif %}</p>
+                <p>Moteur IA : {% if assistant_readiness.inference %}<span class="badge text-bg-success">Prêt</span>{% else %}<span class="badge text-bg-secondary">Non confirmé</span>{% endif %}</p>
+                <p class="text-body-secondary mb-0">Sondes GET uniquement. Aucun dispatch, claim ou retour LAB validé.</p>
+            </div>
+        </section>
+        <section class="card mb-3">
             <div class="card-header">
                 <strong>File LAB — lecture seule</strong>
                 {% if lab_queue.connected %}
