@@ -40,13 +40,20 @@ if($action==='preflight'){
     }
     echo "EZS_PHP_INFRA_PREFLIGHT_OK\n";exit(0);
 }
+require_once $root.'/src/Module/Infrastructure/WindowsPortOwnership.php';
 $dev=state($root.'/runtime/v2-dev/processes.json');
 $prod=state($root.'/runtime/v2-prod/processes.json');
 $devListen=port(8790)&&port(8791);
 $prodListen=port(8501)&&port(8510)&&port(8511)&&port(8512);
+$spec=[];
+foreach([['dev_php',$dev,'php_pid',8791,'php-cgi.exe'],['dev_caddy',$dev,'caddy_pid',8790,'caddy.exe'],['prod_php',$prod,'php_pid',8512,'php-cgi.exe'],['prod_internal',$prod,'internal_pid',8511,'caddy.exe'],['prod_gateway',$prod,'gateway_pid',8510,'python.exe'],['prod_edge',$prod,'edge_pid',8501,'caddy.exe']] as [$name,$state,$key,$port,$image]) {
+ if(is_array($state)&&isset($state[$key])&&is_numeric($state[$key]))$spec[$name]=[$port,(int)$state[$key],$image];
+}
+$ownership=\Ezs\Web\Module\Infrastructure\WindowsPortOwnership::snapshot($spec);
 echo json_encode([
  'schema'=>'ezs.infrastructure.status.php.v1',
  'dev'=>['state_present'=>$dev!==null,'listeners_ready'=>$devListen,'ports'=>[8790,8791]],
  'prod'=>['state_present'=>$prod!==null,'listeners_ready'=>$prodListen,'ports'=>[8501,8510,8511,8512]],
- 'warning'=>'TCP listeners and stored metadata do not establish process ownership'
+ 'ownership'=>$ownership,
+ 'warning'=>'Port/PID/image diagnostics only: full process identity remains unverified; never use this result to terminate processes'
 ],JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR)."\n";
