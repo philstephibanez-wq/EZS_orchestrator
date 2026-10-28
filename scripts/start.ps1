@@ -2,7 +2,7 @@ param([ValidateSet('all','dev','gateway')][string]$Target='all')
 $ErrorActionPreference='Stop'
 if($Target -eq 'all') {
     $devState=Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..')).Path 'runtime\v2-dev\processes.json'
-    $devStatus=(& (Join-Path $PSScriptRoot 'v2_lifecycle.ps1') -Action status | Out-String)
+    $devStatus=(& (Join-Path $PSScriptRoot 'v2_lifecycle.ps1') -Action status 6>&1 | Out-String)
     if($devStatus -match 'php_owned=True caddy_owned=True state_present=True') {
         Write-Host 'EZS_GLOBAL_START_DEV_ALREADY_READY'
     } elseif(-not (Test-Path -LiteralPath $devState)) {
