@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Ezs\Web\Module\Coordination\Controller;
 
 use Ezs\Web\Module\Coordination\LegacyJobHistoryReader;
+use Ezs\Web\Module\Coordination\LabQueueProbe;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
 use Twig\Environment;
@@ -11,13 +12,13 @@ use Twig\Environment;
 final class JobsPageController
 {
     #[Route('/jobs', name: 'ezs_v2_jobs_page', methods: ['GET'])]
-    public function index(Environment $twig): Response
+    public function index(Environment $twig, LabQueueProbe $labQueue): Response
     {
         $versionFile = dirname(__DIR__, 4) . DIRECTORY_SEPARATOR . 'VERSION';
         $version = is_file($versionFile) ? trim((string) file_get_contents($versionFile)) : 'inconnue';
         $reader = new LegacyJobHistoryReader(dirname(__DIR__, 4));
         $history = $reader->recent();
-        return new Response($twig->render('jobs/index.html.twig', ['orchestrator_version' => $version, 'active_page' => 'jobs', 'history' => $history]), 200, [
+        return new Response($twig->render('jobs/index.html.twig', ['orchestrator_version' => $version, 'active_page' => 'jobs', 'history' => $history, 'lab_queue' => $labQueue->status()]), 200, [
             'Content-Type' => 'text/html; charset=UTF-8',
             'Cache-Control' => 'no-store',
         ]);

@@ -18,6 +18,44 @@
 
         <section class="card mb-3">
             <div class="card-header">
+                <strong>File LAB — lecture seule</strong>
+                {% if lab_queue.connected %}
+                    <span class="badge text-bg-success">Connectée</span>
+                {% else %}
+                    <span class="badge text-bg-secondary">Non connectée</span>
+                {% endif %}
+            </div>
+            <div class="card-body">
+                {% if lab_queue.connected %}
+                    <p>Jobs retournés par le LAB : {{ lab_queue.jobs|length }} (affichage limité à 100).</p>
+                    <div class="table-responsive">
+                        <table class="table table-dark table-sm">
+                            <thead>
+                                <tr><th>Job</th><th>Type</th><th>État déclaré par LAB</th><th>Priorité</th></tr>
+                            </thead>
+                            <tbody>
+                                {% for job in lab_queue.jobs %}
+                                    <tr>
+                                        <td>{{ job.id }}</td>
+                                        <td>{{ job.kind }}</td>
+                                        <td>{{ job.status }}</td>
+                                        <td>{{ job.priority ?? '—' }}</td>
+                                    </tr>
+                                {% else %}
+                                    <tr><td colspan="4">Aucun job dans la réponse de queue LAB.</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <p class="mb-0">Lecture LAB indisponible : {{ lab_queue.reason }}. Les archives ci-dessous restent consultables.</p>
+                {% endif %}
+                <p class="text-body-secondary mb-0">Aucun claim, aucun dispatch Assistant ni exécution depuis cette vue.</p>
+            </div>
+        </section>
+
+        <section class="card mb-3">
+            <div class="card-header">
                 <strong>Dernières tentatives archivées</strong>
                 <span class="text-body-secondary">({{ history|length }})</span>
             </div>
