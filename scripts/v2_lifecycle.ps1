@@ -127,7 +127,16 @@ try {
         Write-Host 'EZS_STOP_OWNED_ORCHESTRATOR_AND_CADDY_OK_PROD_UNTOUCHED'
         return
     }
-    if ($null -ne $s) { throw 'EZS_START_REFUSED_EXISTING_OR_STALE_STATE' }
+    if ($null -ne $s) {
+        $phpId = [int]$s.php_pid
+        $caddyId = [int]$s.caddy_pid
+        $healthy = (Owned $phpId $php '-b 127.0.0.1:8791') -and (Port-Owned 8791 $phpId) -and
+            (Owned $caddyId $caddy 'Caddyfile.dev-root-candidate') -and (Port-Owned 8790 $caddyId) -and
+            (Port-Owned 8502 $caddyId) -and (Port-Owned 8852 $caddyId)
+        if (-not $healthy) { throw 'EZS_START_REFUSED_EXISTING_OR_STALE_STATE' }
+        Write-Host 'EZS_DEV_ALREADY_RUNNING_VERIFIED'
+        return
+    }
     if ((@(Listening 8790)).Count -gt 0 -or (@(Listening 8791)).Count -gt 0) {
         throw 'EZS_START_REFUSED_PORT_8790_OR_8791_IN_USE'
     }
