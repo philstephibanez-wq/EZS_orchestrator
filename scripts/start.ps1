@@ -636,6 +636,38 @@ function HttpReady([int]$port,[string]$path){
     }while($true)
     return $false
 }
+# EZS_R3_DEV_ROOT_PREFLIGHT
+# Objectif : corriger le verrouillage apres un demarrage partiel ou un reboot.
+# Le fichier processes.json est une observation, pas une preuve de possession.
+# Si le Caddy DEV enregistre n'est plus l'unique proprietaire des trois facades,
+# une reprise GLOBALE est obligatoire (DEV + PROD + processus annexes).
+# La reprise conserve les fichiers persistants et le mode PROD ; elle ne tue
+# jamais de processus dont l'appartenance a EZS n'est pas prouvee.
+$rootStatePath = Join-Path $root 'runtime\v2-dev\processes.json'
+if (Test-Path -LiteralPath $rootStatePath -PathType Leaf) {
+    $rootState = $null
+    try { $rootState = Get-Content -LiteralPath $rootStatePath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop }
+    catch { throw 'EZS_R3_ROOT_STATE_INVALID_MANUAL_REVIEW_REQUIRED' }
+    $devCaddyPid = [int]$rootState.caddy_pid
+    $devCaddy = if ($devCaddyPid -gt 0) { Get-CimInstance Win32_Process -Filter "ProcessId=$devCaddyPid" -ErrorAction SilentlyContinue } else { $null }
+    $caddyValid = $null -ne $devCaddy -and
+        [string]::Equals([string]$devCaddy.ExecutablePath,'H:\Caddy\caddy.exe',[StringComparison]::OrdinalIgnoreCase) -and
+        (([string]$devCaddy.CommandLine).Contains('Caddyfile.dev-lab-assistant-candidate') -or
+         ([string]$devCaddy.CommandLine).Contains('Caddyfile.dev-root-candidate'))
+    foreach ($servicePort in @(8790,8502,8852)) {
+        $serviceListeners = @(Get-NetTCPConnection -LocalPort $servicePort -State Listen -ErrorAction SilentlyContinue)
+        if ($serviceListeners.Count -ne 1 -or [int]$serviceListeners[0].OwningProcess -ne $devCaddyPid) { $caddyValid = $false }
+    }
+    if (-not $caddyValid) {
+        Write-Host 'EZS_R3_ROOT_STATE_AMBIGUOUS_GLOBAL_CLEANUP'
+        # Le preflight R1 inventorie TOUS les ports/processus DEV et PROD.
+        # Il refuse en particulier les PID reutilises et les listeners etrangers.
+        & 'H:\PHP\php-8.5-x64\php.exe' -d 'extension=H:\PHP\php-8.5-x64\ext\php_com_dotnet.dll' (Join-Path $root 'bin\ezs_lifecycle_guard.php') cleanup-stale
+        if($LASTEXITCODE -ne 0){throw 'EZS_R13_REFUSED_AMBIGUOUS_GLOBAL_RECOVERY'}
+        if (-not $?) { throw 'EZS_R3_GLOBAL_CLEANUP_FAILED' }
+        Write-Host 'EZS_R3_GLOBAL_CLEANUP_OK_CONTINUING_START'
+    }
+}
 Invoke-EzsRootLifecycle -Action start
 if(-not $?){throw 'EZS_DEV_ROOT_START_FAILED'}
 if(-not(Test-Path -LiteralPath $app\public\index.php -PathType Leaf)){throw 'EZS_DEV_APP_INDEX_MISSING'}
@@ -696,15 +728,65 @@ try{
     $started=@()
     try{
         foreach($port in @(8602,8862)){
-            $p=Start-Process -FilePath $binary -ArgumentList "-b 127.0.0.1:$port" -WorkingDirectory $app -WindowStyle Hidden -PassThru
-            $started+=@{pid=[int]$p.Id;port=$port}
-            if(-not(WaitOwned $port ([int]$p.Id))){throw "EZS_DEV_APP_FASTCGI_START_FAILED_$port"}
+            # EZS_R4_FASTCGI_RETRY : un FastCGI peut mourir pendant le bind Windows.
+            # Deux tentatives maximum ; aucune adoption de processus ou port etranger.
+            # Les sorties natives vont dans TEMP pour permettre un diagnostic reproductible.
+            $fastcgiReady=$false
+            $diagRoot=Join-Path ([IO.Path]::GetTempPath()) 'ezs-fastcgi-r4'
+            New-Item -ItemType Directory -Path $diagRoot -Force | Out-Null
+            for($launchAttempt=1;$launchAttempt -le 2;$launchAttempt++){
+                # Recontrole avant CHAQUE lancement pour ne pas ecraser un service tiers.
+                if(@(Owners $port).Count -ne 0){throw "EZS_DEV_APP_REFUSED_FOREIGN_LISTENER_$port"}
+                $tag="{0}-{1}-{2}" -f $port,[DateTime]::UtcNow.ToString('yyyyMMddHHmmssfff'),$launchAttempt
+                $stderr=Join-Path $diagRoot "$tag.stderr.log"
+                $stdout=Join-Path $diagRoot "$tag.stdout.log"
+                $p=Start-Process -FilePath $binary -ArgumentList "-b 127.0.0.1:$port" -WorkingDirectory $app -WindowStyle Hidden -PassThru -RedirectStandardError $stderr -RedirectStandardOutput $stdout
+                $started+=@{pid=[int]$p.Id;port=$port}
+                if(WaitOwned $port ([int]$p.Id)){$fastcgiReady=$true;break}
+                $proc=Get-CimInstance Win32_Process -Filter "ProcessId=$($p.Id)" -ErrorAction SilentlyContinue
+                $listeners=@(Owners $port)
+                $pids=($listeners | ForEach-Object {[string]$_.OwningProcess}) -join ','
+                Write-Host "EZS_R4_FASTCGI_DIAGNOSTIC port=$port pid=$($p.Id) attempt=$launchAttempt process_alive=$($null -ne $proc) listener_pids=$pids stderr=$stderr"
+                if(Test-Path -LiteralPath $stderr -PathType Leaf){
+                    $native=Get-Content -LiteralPath $stderr -Tail 20 -ErrorAction SilentlyContinue
+                    if($native){Write-Host ('EZS_R4_FASTCGI_STDERR '+($native -join ' | '))}
+                }
+                # Si le processus est encore present, ne jamais le tuer sur une
+                # simple suspicion : le controle d'identite doit primer.
+                if($null -ne $proc -or $listeners.Count -ne 0){throw "EZS_DEV_APP_FASTCGI_START_FAILED_$port"}
+                if($launchAttempt -eq 1){Write-Host "EZS_R4_FASTCGI_EXITED_RETRY_$port"}
+            }
+            if(-not $fastcgiReady){throw "EZS_DEV_APP_FASTCGI_START_FAILED_$port"}
         }
         $dev=Get-CimInstance Win32_Process -Filter "ProcessId=$($started[0].pid)"
         $preview=Get-CimInstance Win32_Process -Filter "ProcessId=$($started[1].pid)"
         if($null -eq $dev -or $null -eq $preview){throw 'EZS_DEV_APP_IDENTITY_UNAVAILABLE'}
         $state=[ordered]@{schema='ezs.dev.apps.v1';dev_pid=$started[0].pid;dev_created=([datetime]$dev.CreationDate).ToUniversalTime().ToString('o');preview_pid=$started[1].pid;preview_created=([datetime]$preview.CreationDate).ToUniversalTime().ToString('o')}
-        if(-not(IsOwned 8602 $state.dev_pid $state.dev_created) -or -not(IsOwned 8862 $state.preview_pid $state.preview_created)){throw 'EZS_DEV_APP_OWNERSHIP_NOT_CONFIRMED'}
+        # R2: TCP readiness can precede stable CIM process metadata on Windows.
+        # Retry identity attestation; never adopt another PID or weaken checks.
+        $identityConfirmed=$false
+        for($identityAttempt=0;$identityAttempt -lt 20;$identityAttempt++){
+            if((IsOwned 8602 $state.dev_pid $state.dev_created) -and
+               (IsOwned 8862 $state.preview_pid $state.preview_created)){
+                $identityConfirmed=$true
+                break
+            }
+            Start-Sleep -Milliseconds 250
+        }
+        if(-not $identityConfirmed){
+            foreach($entry in @(@{port=8602;pid=$state.dev_pid;stamp=$state.dev_created},
+                                 @{port=8862;pid=$state.preview_pid;stamp=$state.preview_created})){
+                $proc=Get-CimInstance Win32_Process -Filter "ProcessId=$($entry.pid)" -ErrorAction SilentlyContinue
+                $listeners=@(Owners $entry.port)
+                $listenerPids=($listeners | ForEach-Object { [string]$_.OwningProcess }) -join ','
+                $actualStamp=if($null -ne $proc){try{([datetime]$proc.CreationDate).ToUniversalTime().ToString('o')}catch{'UNAVAILABLE'}}else{'PROCESS_ABSENT'}
+                $exeOk=($null -ne $proc -and [string]::Equals([string]$proc.ExecutablePath,$binary,[StringComparison]::OrdinalIgnoreCase))
+                $cmdOk=($null -ne $proc -and ([string]$proc.CommandLine).Contains("-b 127.0.0.1:$($entry.port)"))
+                Write-Host ("EZS_DEV_APP_IDENTITY_DIAGNOSTIC port={0} pid={1} listeners={2} exe_ok={3} cmd_ok={4} timestamp_match={5}" -f
+                    $entry.port,$entry.pid,$listenerPids,$exeOk,$cmdOk,($actualStamp -eq $entry.stamp))
+            }
+            throw 'EZS_DEV_APP_OWNERSHIP_NOT_CONFIRMED'
+        }
         $devReady=HttpReady 8502 '/fr/login'
         $previewReady=HttpReady 8852 '/fr/login'
         if(-not($devReady -and $previewReady)){throw 'EZS_DEV_APP_HTTP_NOT_READY'}
