@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 $r=dirname(__DIR__);
-if(trim((string)file_get_contents($r.'/VERSION'))!=='4.2c29')throw new RuntimeException('VERSION');
+if(!preg_match('/^4\\.2c(\\d+)$/',trim((string)file_get_contents($r.'/VERSION')),$version)||(int)$version[1]<29)throw new RuntimeException('VERSION');
 $s=(string)file_get_contents($r.'/public/assets/ezs-prod-control.js');
 foreach(["setStatus('Gateway et Symfony actifs','success')","setStatus('Gateway active, backend indisponible','warning')","setStatus('Gateway absente','danger')","setStatus('État indisponible','secondary')"] as $expect){
  if(!str_contains($s,$expect))throw new RuntimeException('PROD_BADGE_STATE');
