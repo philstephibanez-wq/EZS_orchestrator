@@ -659,6 +659,12 @@ function HttpReady([int]$port,[string]$path){
     }while($true)
     return $false
 }
+# PROD operations must be dispatched before any DEV Caddy or backend startup.
+# In particular, -ProdAction status must be strictly observational.
+if($ProdAction -ne ''){
+    Invoke-EzsProdLifecycle -Action $ProdAction
+    return
+}
 Invoke-EzsRootLifecycle -Action start
 if(-not $?){throw 'EZS_DEV_ROOT_START_FAILED'}
 if(-not(Test-Path -LiteralPath $app\public\index.php -PathType Leaf)){throw 'EZS_DEV_APP_INDEX_MISSING'}

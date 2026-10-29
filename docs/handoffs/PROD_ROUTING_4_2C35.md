@@ -1,0 +1,3 @@
+# v4.2c35 — PROD routing
+
+Incident confirmé : `start.ps1 -ProdAction status` exécutait d'abord `Invoke-EzsRootLifecycle -Action start`, donc le refus DEV `EZS_START_REFUSED_SHARED_CADDY_NOT_VERIFIED` empêchait même le diagnostic PROD. Routage précoce avant tout démarrage DEV vers `Invoke-EzsProdLifecycle -Action $ProdAction`, puis retour. `-ProdAction status` est désormais une lecture d'état sans démarrage DEV. Le fichier `runtime/v2-prod/processes.json` existe chez l'utilisateur et **ne doit pas être supprimé** ; le mécanisme PROD refuse toujours `start` lorsque cet état existe. Le test vérifie l'ordre et préserve le garde. Validation réelle sur Windows requise. Les Caddy DEV et PROD ne sont ni arrêtés ni redémarrés par la commande de statut.
