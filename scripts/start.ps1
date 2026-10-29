@@ -121,9 +121,21 @@ function Save-State($value) {
     [System.IO.File]::WriteAllText($stateFile, ($value | ConvertTo-Json -Depth 4), $bytes)
 }
 function Port-Owned([int]$port, [int]$processId) {
-    # Ignore transient TCP rows: only actual LISTEN sockets can attest ownership.
+    if ($processId -le 0) { return $false }
     $listeners = @(Listening $port)
-    return ($listeners.Count -eq 1 -and [int]$listeners[0].OwningProcess -eq $processId)
+    if ($listeners.Count -gt 0) {
+        return ($listeners.Count -eq 1 -and [int]$listeners[0].OwningProcess -eq $processId)
+    }
+    # Netstat fallback: same local socket and saved PID, LISTENING only.
+    $rows = @(netstat -ano -p tcp 2>$null)
+    if ($LASTEXITCODE -ne 0) { return $false }
+    $owners = @()
+    foreach ($line in $rows) {
+        if ($line -match '^\s*TCP\s+127\.0\.0\.1:(\d+)\s+\S+\s+LISTENING\s+(\d+)\s*$') {
+            if ([int]$Matches[1] -eq $port) { $owners += [int]$Matches[2] }
+        }
+    }
+    return ($owners.Count -eq 1 -and $owners[0] -eq $processId)
 }
 function Wait-SharedCaddyAttestation([int]$processId) {
     # Windows TCP owner enumeration can be transient immediately after startup.
