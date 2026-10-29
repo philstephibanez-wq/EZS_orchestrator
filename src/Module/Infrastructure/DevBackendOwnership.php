@@ -1,59 +1,81 @@
 <?php
 declare(strict_types=1);
+
 namespace Ezs\Web\Module\Infrastructure;
 
-/** Strict identity classification. Does not adopt or terminate a process. */
+/** Lecture d'identité Windows sans lanceur intermédiaire et sans mutation. */
 final class DevBackendOwnership
 {
     private const PORT = 8602;
-    private const ROOT = 'H:\\EZScore_dev\\public';
-    private const PHP_EXE = 'H:\\PHP\\php-8.5-x64\\php.exe';
+    private const EXECUTABLE = 'H:\\PHP\\php-8.5-x64\\php-cgi.exe';
 
     public static function classify(int $listenerPid, array $process): string
     {
-        if ($listenerPid <= 0) return 'unknown';
-        if ((int)($process['ProcessId'] ?? 0) !== $listenerPid) return 'foreign';
-        $exe = str_replace('/', '\\', trim((string)($process['ExecutablePath'] ?? ''), '"'));
-        if (strcasecmp($exe, self::PHP_EXE) !== 0) return 'foreign';
-        $line = str_replace('/', '\\', (string)($process['CommandLine'] ?? ''));
-        // Match exact arguments, avoiding false positives such as port 86020 or suffixes.
-        $port = preg_match('/(?:^|\\s)-S\\s+127\\.0\\.0\\.1:8602(?=\\s|$)/i', $line) === 1;
-        $root = preg_match('~(?:^|\\s)-t\\s+["\\x27]?' . preg_quote(self::ROOT, '~') . '["\\x27]?(?=\\s|$)~i', $line) === 1;
-        return $port && $root ? 'legacy_exact' : 'foreign';
+        if ($listenerPid <= 0 || (int) ($process['ProcessId'] ?? 0) <= 0) {
+            return 'unknown';
+        }
+        if ((int) $process['ProcessId'] !== $listenerPid) {
+            return 'foreign';
+        }
+        $exe = self::normalise((string) ($process['ExecutablePath'] ?? ''));
+        if (strcasecmp($exe, self::EXECUTABLE) !== 0) {
+            return 'foreign';
+        }
+        $command = (string) ($process['CommandLine'] ?? '');
+        if (!preg_match('/(?:^|\s)-b\s+127\.0\.0\.1:8602(?=\s|$)/i', $command)) {
+            return 'foreign';
+        }
+        return 'owned_signature';
     }
 
+    /** @return array{port:int,tcp_listening:bool,ownership:string,pid:?int} */
     public function snapshot(): array
     {
-        $result = ['port'=>self::PORT,'tcp_listening'=>false,'ownership'=>'absent','pid'=>null];
-        $socket = @stream_socket_client('tcp://127.0.0.1:8602', $errno, $error, 0.3, STREAM_CLIENT_CONNECT);
-        if (!is_resource($socket)) return $result;
+        $result = ['port' => self::PORT, 'tcp_listening' => false, 'ownership' => 'absent', 'pid' => null];
+        $socket = @stream_socket_client('tcp://127.0.0.1:' . self::PORT, $errno, $error, 0.3, STREAM_CLIENT_CONNECT);
+        if (!is_resource($socket)) {
+            return $result;
+        }
         fclose($socket);
         $result['tcp_listening'] = true;
         $result['ownership'] = 'unknown';
-        if (PHP_OS_FAMILY !== 'Windows') return $result;
-        $code = <<<'PS'
-$listener = Get-NetTCPConnection -LocalAddress '127.0.0.1' -LocalPort 8602 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
-if (-not $listener) { exit 2 }
-$owner = Get-CimInstance Win32_Process -Filter "ProcessId = $($listener.OwningProcess)" -ErrorAction SilentlyContinue
-if (-not $owner) { exit 3 }
-[pscustomobject]@{ ProcessId=[int]$owner.ProcessId; ExecutablePath=[string]$owner.ExecutablePath; CommandLine=[string]$owner.CommandLine } | ConvertTo-Json -Compress
-PS;
-        $cmd = ['powershell.exe','-NoProfile','-NonInteractive','-Command',$code];
-        try {
-            $proc = @proc_open($cmd,[0=>['pipe','r'],1=>['pipe','w'],2=>['pipe','w']],$pipes,null,null,['bypass_shell'=>true]);
-            if (!is_resource($proc)) return $result;
-            fclose($pipes[0]);
-            $raw = stream_get_contents($pipes[1], 8192);
-            fclose($pipes[1]);
-            fclose($pipes[2]);
-            if (proc_close($proc) !== 0) return $result;
-            $data = json_decode((string)$raw, true);
-            if (!is_array($data)) return $result;
-            $pid = (int)($data['ProcessId'] ?? 0);
-            if ($pid <= 0) return $result;
-            $result['pid'] = $pid;
-            $result['ownership'] = self::classify($pid, $data);
-        } catch (\Throwable) { /* Fail closed: unknown owner. */ }
+        // WMI sait identifier des processus, mais pas prouver seul le PID du socket.
+        // Ne jamais associer un port à un processus par sa seule ligne de commande.
         return $result;
+    }
+
+    /** @return array<string,mixed>|null */
+    public static function processByPid(int $pid): ?array
+    {
+        if ($pid <= 0 || PHP_OS_FAMILY !== 'Windows' || !class_exists('COM')) {
+            return null;
+        }
+        try {
+            $wmi = new \COM('winmgmts:{impersonationLevel=impersonate}!\\\\.\\root\\cimv2');
+            $rows = $wmi->ExecQuery('SELECT ProcessId, ParentProcessId, CreationDate, ExecutablePath, CommandLine FROM Win32_Process WHERE ProcessId = ' . $pid);
+            $found = null;
+            $count = 0;
+            foreach ($rows as $row) {
+                ++$count;
+                if ($count !== 1) {
+                    return null;
+                }
+                $found = [
+                    'ProcessId' => (int) $row->ProcessId,
+                    'ParentProcessId' => (int) $row->ParentProcessId,
+                    'CreationDate' => (string) $row->CreationDate,
+                    'ExecutablePath' => (string) $row->ExecutablePath,
+                    'CommandLine' => (string) $row->CommandLine,
+                ];
+            }
+            return $count === 1 && (int) $found['ProcessId'] === $pid ? $found : null;
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    private static function normalise(string $path): string
+    {
+        return str_replace('/', '\\', trim($path, " \t\r\n\""));
     }
 }
