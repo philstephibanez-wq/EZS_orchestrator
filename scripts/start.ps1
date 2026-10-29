@@ -137,6 +137,14 @@ function Port-Owned([int]$port, [int]$processId) {
     }
     return ($owners.Count -eq 1 -and $owners[0] -eq $processId)
 }
+function Tcp-Reachable([int]$port) {
+    $client = New-Object System.Net.Sockets.TcpClient
+    try {
+        $task = $client.ConnectAsync('127.0.0.1', $port)
+        return ($task.Wait(600) -and $client.Connected)
+    } catch { return $false }
+    finally { $client.Dispose() }
+}
 function Wait-SharedCaddyAttestation([int]$processId) {
     # Windows TCP owner enumeration can be transient immediately after startup.
     # Recheck the SAME saved PID and configured command, never adopt a new PID.
@@ -260,15 +268,24 @@ try {
     if ($null -ne $s) {
         $savedPhpId = [int]$s.php_pid
         $savedCaddyId = [int]$s.caddy_pid
-        $savedCaddyHealthy = Wait-SharedCaddyAttestation $savedCaddyId
-        if (-not $savedCaddyHealthy) {
-            $portsBusy = $false
-            foreach ($port in @(8790, 8791, 8502, 8852, 8702, 8712)) {
-                if (@(Listening $port).Count -gt 0) { $portsBusy = $true; break }
-            }
-            if ($portsBusy -or $null -ne (ProcessInfo $savedCaddyId) -or
-                $null -ne (ProcessInfo $savedPhpId)) {
+        $savedCaddyInfo = ProcessInfo $savedCaddyId
+        if ($null -ne $savedCaddyInfo) {
+            # Non-destructive START may retain the exactly recorded Caddy process.
+            # Socket enumeration failures must not prevent starting independent backends.
+            if (-not (OwnedDevCaddy $savedCaddyId)) {
                 throw 'EZS_START_REFUSED_SHARED_CADDY_NOT_VERIFIED'
+            }
+            Write-Host 'EZS_START_SHARED_CADDY_IDENTITY_VERIFIED_PRESERVED'
+        } else {
+            # Reboot: state may be discarded only if old backend is also absent
+            # and no shared facade or root PHP port is reachable.
+            if ($null -ne (ProcessInfo $savedPhpId)) {
+                throw 'EZS_START_REFUSED_SHARED_CADDY_NOT_VERIFIED'
+            }
+            foreach ($port in @(8790,8791,8502,8852,8702,8712)) {
+                if ((@(Listening $port)).Count -gt 0 -or (Tcp-Reachable $port)) {
+                    throw 'EZS_START_REFUSED_SHARED_CADDY_NOT_VERIFIED'
+                }
             }
             Remove-Item -LiteralPath $stateFile -Force -ErrorAction Stop
             $s = $null
@@ -278,13 +295,17 @@ try {
     if ($null -ne $s) {
         $phpId = [int]$s.php_pid
         $caddyId = [int]$s.caddy_pid
-        $edgeHealthy = Wait-SharedCaddyAttestation $caddyId
-        if (-not $edgeHealthy) { throw 'EZS_START_REFUSED_SHARED_CADDY_NOT_VERIFIED' }
-        if ($phpId -gt 0 -and (Owned $phpId $php '-b 127.0.0.1:8791') -and (Port-Owned 8791 $phpId)) {
-            Write-Host 'EZS_DEV_ALREADY_RUNNING_VERIFIED'
+        # PID + binary + launch signature are sufficient to retain an existing
+        # process during START, but not to authorize STOP or adoption.
+        if (-not (OwnedDevCaddy $caddyId)) { throw 'EZS_START_REFUSED_SHARED_CADDY_NOT_VERIFIED' }
+        if ($phpId -gt 0 -and (Owned $phpId $php '-b 127.0.0.1:8791')) {
+            Write-Host 'EZS_DEV_ALREADY_RUNNING_IDENTITY_VERIFIED'
             return
         }
-        if ($phpId -ne 0 -or @(Listening 8791).Count -gt 0) {
+        if ($phpId -ne 0 -and $null -ne (ProcessInfo $phpId)) {
+            throw 'EZS_START_REFUSED_STALE_OR_FOREIGN_ORCHESTRATOR_BACKEND'
+        }
+        if ((@(Listening 8791)).Count -gt 0 -or (Tcp-Reachable 8791)) {
             throw 'EZS_START_REFUSED_STALE_OR_FOREIGN_ORCHESTRATOR_BACKEND'
         }
         $env:APP_ENV = 'dev'
