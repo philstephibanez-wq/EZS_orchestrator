@@ -1,0 +1,3 @@
+# v4.2c43 — DEV START WaitOwned consistency
+
+v4.2c42 corrected post-start and existing state identity but left WaitOwned() requiring `Get-NetTCPConnection`, known unreliable on MAIN. v4.2c43 changes WaitOwned for fresh START to verify PID, binary and port-specific command plus TCP connect. The two independent checks are mandatory and done before HTTP readiness and state persistence. For any failure only spawned, identity-matched processes are rolled back by existing code. STOP and RefreshDevApps retain strict IsOwned; shared Caddy and PROD untouched. Run on Windows, then HTTP endpoints verify; do not claim readiness from static contract only.

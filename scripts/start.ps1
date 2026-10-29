@@ -697,9 +697,13 @@ function Dev-TcpReachable([int]$port){
     finally{$client.Dispose()}
 }
 function WaitOwned([int]$port,[int]$processId){
+    # Only for fresh, non-destructive START. STOP/Refresh retain IsOwned.
     for($i=0;$i -lt 40;$i++){
-        $listeners=@(Owners $port)
-        if($listeners.Count -eq 1 -and [int]$listeners[0].OwningProcess -eq $processId){return $true}
+        $p=Get-CimInstance Win32_Process -Filter "ProcessId=$processId" -ErrorAction SilentlyContinue
+        if($null -eq $p){return $false}
+        if(-not [string]::Equals([string]$p.ExecutablePath,$binary,[StringComparison]::OrdinalIgnoreCase) -or
+            -not ([string]$p.CommandLine).Contains("-b 127.0.0.1:$port")){return $false}
+        if(Dev-TcpReachable $port){return $true}
         Start-Sleep -Milliseconds 250
     }
     return $false
