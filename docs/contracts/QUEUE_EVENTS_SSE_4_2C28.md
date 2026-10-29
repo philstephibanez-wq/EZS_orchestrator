@@ -1,0 +1,5 @@
+# Contrat 4.2c28 — Notifications SSE, première tranche
+
+GET `/api/v2/queue/events/stream` authentifié par le même Bearer que les autres GET. Le producteur est dérivé du jeton, et les événements sont filtrés côté SQLite. `Last-Event-ID` ou `after=N` sert de curseur. Encodage SSE `id`, `event`, `data`, `retry`. **Réponse instantanée et connexion close** : ce n'est pas encore un flux continu ; le client REST doit reconnecter avec le dernier ID. Une connexion SSE native `EventSource` ne permet pas d'ajouter l'en-tête Authorization ; clients applicatifs doivent utiliser `fetch`/HTTP avec Bearer, ou une solution de session sécurisée ultérieurement. Pas de jeton dans l'URL.
+
+La route ne fait aucune écriture ni nouvelle transaction et n'active aucun worker. Le format d'événements actuellement disponible couvre heartbeat/progress, pas encore les transitions terminales. Les secrets de lease restent exclus du modèle GET. L'authentification réelle avec un jeton de processus doit être recette sur le poste, sans afficher ce jeton.

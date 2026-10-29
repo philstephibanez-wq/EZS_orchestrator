@@ -5,8 +5,10 @@ namespace Ezs\Web\Module\Coordination\Controller;
 use Ezs\Web\Module\Coordination\GlobalQueueLocation;
 use Ezs\Web\Module\Coordination\QueueRestAccess;
 use Ezs\Web\Module\Coordination\QueueRestReadModel;
+use Ezs\Web\Module\Coordination\QueueEventStream;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\JsonResponse;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
 
 final class QueueReadController
@@ -31,6 +33,25 @@ final class QueueReadController
         if($after===false)return $this->json(['error'=>'invalid_cursor'],400);
         return $this->respond($request,static fn(QueueRestReadModel $v,string $p):array=>['events'=>$v->events($p,(int)$after)]);
     }
+    #[Route('/api/v2/queue/events/stream',name:'ezs_queue_events_stream',methods:['GET'])]
+    public function stream(Request $request):Response
+    {
+        $producer=QueueRestAccess::producerFor($request->headers->get('Authorization'));
+        if($producer===null)return $this->json(['error'=>'unauthorized'],401);
+        $cursor=$request->headers->get('Last-Event-ID') ?? $request->query->get('after','0');
+        $after=filter_var($cursor,FILTER_VALIDATE_INT,['options'=>['min_range'=>0]]);
+        if($after===false)return $this->json(['error'=>'invalid_cursor'],400);
+        try{
+            $events=(new QueueRestReadModel(GlobalQueueLocation::path()))->events($producer,(int)$after);
+            return new Response(QueueEventStream::encode($events),200,[
+                'Content-Type'=>'text/event-stream; charset=utf-8',
+                'Cache-Control'=>'private, no-store',
+                'X-Accel-Buffering'=>'no',
+                'X-Content-Type-Options'=>'nosniff',
+            ]);
+        }catch(\Throwable){return $this->json(['error'=>'queue_unavailable'],503);}
+    }
+
     private function respond(Request $request,\Closure $f):JsonResponse
     {
         $producer=QueueRestAccess::producerFor($request->headers->get('Authorization'));
