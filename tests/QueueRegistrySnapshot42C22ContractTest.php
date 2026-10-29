@@ -2,7 +2,7 @@
 declare(strict_types=1);
 require dirname(__DIR__).'/vendor/autoload.php';
 use Ezs\Web\Module\Coordination\GlobalQueueSnapshot;
-if(trim(file_get_contents(dirname(__DIR__).'/VERSION'))!=='4.2c22')throw new RuntimeException('VERSION');
+if(!preg_match('/^4\\.2c(\\d+)$/',trim((string)file_get_contents(dirname(__DIR__).'/VERSION')),$version)|| (int)$version[1]<22)throw new RuntimeException('VERSION');
 $a=GlobalQueueSnapshot::read(dirname(__DIR__).'/tests/does-not-exist-42c22.db');
 if($a['available']!==false)throw new RuntimeException('MISSING_DB_NOT_CLOSED');
 if(!extension_loaded('pdo_sqlite'))throw new RuntimeException('SQLITE_UNAVAILABLE');
