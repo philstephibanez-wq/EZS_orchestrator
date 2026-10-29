@@ -222,7 +222,6 @@ try {
 function Invoke-EzsLabAssistantLifecycle {
 param([ValidateSet('preflight','start','status','stop')][string]$Action='preflight')
 $ErrorActionPreference='Stop'
-if($ProdAction -ne ''){Invoke-EzsProdLifecycle -Action $ProdAction;return}
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $caddy='H:\Caddy\caddy.exe'
 $config=Join-Path $root 'config\caddy\Caddyfile.dev-lab-assistant-candidate'
@@ -535,6 +534,8 @@ try {
  }
 }finally{if($null -ne $lock){$lock.Dispose()}}
 }
+
+if($ProdAction -ne ''){Invoke-EzsProdLifecycle -Action $ProdAction;return}
 
 $ErrorActionPreference='Stop'
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
