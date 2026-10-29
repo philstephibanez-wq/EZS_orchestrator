@@ -46,6 +46,18 @@ final class GlobalQueueStore
             UNIQUE(producer,external_id)
         )");
         $this->db->exec('CREATE INDEX IF NOT EXISTS global_queue_pick ON global_queue_jobs(state,resource_class,priority DESC,created_at,id)');
+        $this->db->exec("CREATE TABLE IF NOT EXISTS global_queue_events (
+            event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id INTEGER NOT NULL,
+            producer TEXT NOT NULL,
+            event_type TEXT NOT NULL CHECK(event_type IN ('progress','heartbeat','warning','error')),
+            progress_percent INTEGER CHECK(progress_percent IS NULL OR progress_percent BETWEEN 0 AND 99),
+            phase TEXT,
+            message TEXT,
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY(job_id) REFERENCES global_queue_jobs(id)
+        )");
+        $this->db->exec('CREATE INDEX IF NOT EXISTS global_queue_event_by_producer ON global_queue_events(producer,event_id)');
     }
 
     /** Enqueue is idempotent for identical immutable technical envelopes. */
@@ -105,6 +117,55 @@ final class GlobalQueueStore
             if ($stmt->rowCount()!==1) throw new \RuntimeException('completion_conflict');
             return $this->byId($id);
         });
+    }
+
+
+    /**
+     * Worker-owned progress or heartbeat. No fabricated percentage or business interpretation.
+     * Heartbeats extend leases; progress remains monotonic (when supplied).
+     */
+    public function heartbeat(int $id, string $token, int $leaseSeconds = 120, ?int $percent = null, ?string $phase = null, ?string $message = null): array
+    {
+        if ($id <= 0 || !preg_match('/^[a-f0-9]{64}$/D', $token) || $leaseSeconds < 5 || $leaseSeconds > 3600) {
+            throw new \InvalidArgumentException('invalid_heartbeat');
+        }
+        if ($percent !== null && ($percent < 0 || $percent > 99)) throw new \InvalidArgumentException('invalid_progress');
+        if (($phase !== null && (strlen($phase) > 96 || preg_match('/[\x00-\x1f\x7f]/', $phase)))
+            || ($message !== null && (strlen($message) > 240 || preg_match('/[\x00-\x1f\x7f]/', $message)))) {
+            throw new \InvalidArgumentException('invalid_progress_text');
+        }
+        return $this->transaction(function () use ($id,$token,$leaseSeconds,$percent,$phase,$message): array {
+            $row=$this->byId($id);
+            $now=time();
+            if ($row===null || $row['state']!=='running' || !hash_equals((string)$row['lease_token'],$token)
+                || (int)$row['lease_until'] < $now) throw new \DomainException('lease_not_current');
+            if ($percent!==null) {
+                $query=$this->db->prepare("SELECT MAX(progress_percent) FROM global_queue_events WHERE job_id=? AND progress_percent IS NOT NULL");
+                $query->execute([$id]);
+                $previous=$query->fetchColumn();
+                if ($previous!==null && $previous!==false && $percent < (int)$previous) throw new \DomainException('progress_regression');
+            }
+            $up=$this->db->prepare("UPDATE global_queue_jobs SET lease_until=?,updated_at=? WHERE id=? AND lease_token=? AND state='running'");
+            $up->execute([$now+$leaseSeconds,$now,$id,$token]);
+            if ($up->rowCount()!==1) throw new \RuntimeException('heartbeat_conflict');
+            $event=$this->db->prepare('INSERT INTO global_queue_events(job_id,producer,event_type,progress_percent,phase,message,created_at) VALUES (?,?,?,?,?,?,?)');
+            $event->execute([$id,$row['producer'],$percent===null?'heartbeat':'progress',$percent,$phase,$message,$now]);
+            return ['job_id'=>$id,'lease_until'=>$now+$leaseSeconds,'event_id'=>(int)$this->db->lastInsertId(),'progress_percent'=>$percent];
+        });
+    }
+
+    /** Cursor-based immutable event read, scoped by producer. Never expose lease secrets. */
+    public function events(string $producer, int $after = 0, int $limit = 100): array
+    {
+        if ($producer==='' || strlen($producer)>128 || $after<0 || $limit<1 || $limit>100) {
+            throw new \InvalidArgumentException('invalid_event_query');
+        }
+        $q=$this->db->prepare('SELECT event_id,job_id,event_type,progress_percent,phase,message,created_at FROM global_queue_events WHERE producer=? AND event_id>? ORDER BY event_id ASC LIMIT ?');
+        $q->bindValue(1,$producer,PDO::PARAM_STR);
+        $q->bindValue(2,$after,PDO::PARAM_INT);
+        $q->bindValue(3,$limit,PDO::PARAM_INT);
+        $q->execute();
+        return $q->fetchAll(PDO::FETCH_ASSOC);
     }
 
     public function byId(int $id): ?array

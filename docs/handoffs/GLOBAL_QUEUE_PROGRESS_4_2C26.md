@@ -1,0 +1,3 @@
+# 4.2c26 — Heartbeat/progression durable
+
+Ajout à `GlobalQueueStore` d'une table `global_queue_events` (même fichier SQLite) et des méthodes heartbeat et events. Le worker pousse le % réel, phase et message ; validation lease, monotonie, transaction atomique ; consultation filtrée par provenance et curseur. Test synthétique indépendant `tests/GlobalQueueProgress42C26ContractTest.php`. Aucune API REST/SSE activée ; aucun vrai job LAB/Assistant pris en charge ; START/STOP inchangés. Prochaine tranche : authentification REST, autorisation par producteur, SSE en lecture et événements des transitions terminales, sous contrat de non-régression.
