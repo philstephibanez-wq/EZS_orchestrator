@@ -40,3 +40,5 @@ main.container-fluid.ezs-main {
   .ezs-nav { margin-left: 0 !important; }
   main.container-fluid.ezs-main { width: 100%; margin-left: 0 !important; }
 }
+
+.ezs-tech-grid{display:grid;grid-template-columns:minmax(8rem,34%) minmax(0,1fr);gap:.35rem .75rem}.ezs-tech-grid dt{color:var(--bs-secondary-color)}.ezs-tech-grid dd{margin:0;overflow-wrap:anywhere}.ezs-server-card details{margin-top:.6rem}@media(max-width:700px){.ezs-tech-grid{grid-template-columns:1fr}}
