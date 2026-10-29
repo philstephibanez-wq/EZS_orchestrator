@@ -20,9 +20,13 @@
                     if (!key) return;
                     $('#tcp-'+key).text(item.tcp_listening ? 'Ouvert' : 'Fermé');
                     $('#http-'+key).text(item.http_status === null ? 'Sans réponse' : String(item.http_status));
-                    const label = item.http_status !== null ? ((item.http_status >= 500) ? 'Erreur HTTP' : 'Répond') : item.tcp_listening ? 'TCP seul' : 'Façade absente';
+                    const code = Number.isInteger(item.http_status) ? item.http_status : null;
+                    const healthy = code !== null && code >= 200 && code < 400;
+                    const httpError = code !== null && code >= 400;
+                    const label = healthy ? 'HTTP opérationnel' : httpError ? 'Erreur HTTP' : item.tcp_listening ? 'TCP seul' : 'Façade absente';
+                    const color = healthy ? 'text-bg-success' : httpError ? 'text-bg-danger' : item.tcp_listening ? 'text-bg-warning' : 'text-bg-secondary';
                     const $badge = $('#state-'+key);
-                    $badge.text(label).removeClass('text-bg-secondary text-bg-success text-bg-warning').addClass(item.http_status !== null ? 'text-bg-success' : item.tcp_listening ? 'text-bg-warning' : 'text-bg-secondary');
+                    $badge.text(label).removeClass('text-bg-secondary text-bg-success text-bg-warning text-bg-danger').addClass(color);
                 });
                 if (labBackend) {
                     $('#lab-backend').text(labBackend.tcp_listening ? 'FastCGI TCP ouvert' : 'Arrêt / absent');
