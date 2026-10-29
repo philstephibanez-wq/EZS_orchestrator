@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Ezs\Web\Module\Coordination\Controller;
 
 use Ezs\Web\Module\Coordination\LegacyJobHistoryReader;
+use Ezs\Web\Module\Coordination\GlobalQueueSnapshot;
 use Ezs\Web\Module\Coordination\LabQueueProbe;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
@@ -18,7 +19,7 @@ final class JobsPageController
         $version = is_file($versionFile) ? trim((string) file_get_contents($versionFile)) : 'inconnue';
         $reader = new LegacyJobHistoryReader(dirname(__DIR__, 4));
         $history = $reader->recent();
-        return new Response($twig->render('jobs/index.html.twig', ['orchestrator_version' => $version, 'active_page' => 'jobs', 'history' => $history, 'lab_queue' => $labQueue->status()]), 200, [
+        return new Response($twig->render('jobs/index.html.twig', ['orchestrator_version' => $version, 'active_page' => 'jobs', 'history' => $history, 'lab_queue' => $labQueue->status(), 'global_queue' => GlobalQueueSnapshot::read()]), 200, [
             'Content-Type' => 'text/html; charset=UTF-8',
             'Cache-Control' => 'no-store',
         ]);

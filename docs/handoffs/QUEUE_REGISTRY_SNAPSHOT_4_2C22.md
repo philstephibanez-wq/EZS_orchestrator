@@ -1,0 +1,3 @@
+# Handoff 4.2c22
+
+Implémentation : GlobalQueueSnapshot, lecture strictement seule des jobs enregistrés, section distincte sur Files & Jobs. Pas de modification du schéma ni des scripts START/STOP. Accès au chemin de registre uniquement si EZS_QUEUE_REGISTRY_PATH est configuré explicitement ; aucun résultat fabriqué si absent. Contrat de queue unique 4.2c20 conservé. Limites : registre historique non connecté aux jobs Assistant, sonde LAB distincte, pas de flux end-to-end. Tests de lecture sur base synthétique isolée à exécuter sur poste ; aucune affirmation de validation réelle. Jobs existants intouchés.

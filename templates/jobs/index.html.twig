@@ -16,7 +16,24 @@
             Aucun job n'est exécuté ou réclamé depuis cette page.
         </div>
 
-<section class="card mb-3">
+<section class="card mb-3" aria-labelledby="registry-title">
+            <div class="card-header"><strong id="registry-title">Registre Orchestrator — lecture seule</strong></div>
+            <div class="card-body">
+                {% if global_queue.available %}
+                    <p class="text-body-secondary">Jobs déjà inscrits au registre Orchestrator ({{ global_queue.jobs|length }} affiché(s), limite 100). Ce registre n'atteste pas encore le dispatch global.</p>
+                    <div class="table-responsive"><table class="table table-dark table-sm">
+                        <thead><tr><th>Cible enregistrée</th><th>Job</th><th>Type</th><th>Priorité</th><th>État</th><th>Mis à jour</th></tr></thead>
+                        <tbody>{% for job in global_queue.jobs %}
+                            <tr><td>{{ job.target }}</td><td>{{ job.job_id }}</td><td>{{ job.kind }}</td><td>{{ job.priority }}</td><td>{{ job.state }}</td><td>{{ job.updated_at }}</td></tr>
+                        {% else %}<tr><td colspan="6">Aucun job inscrit au registre. Les jobs externes peuvent exister.</td></tr>{% endfor %}</tbody>
+                    </table></div>
+                {% else %}
+                    <p class="mb-0 text-body-secondary">Registre non consultable : {{ global_queue.reason }}. Aucune conclusion sur les jobs LAB ou Assistant.</p>
+                {% endif %}
+            </div>
+        </section>
+
+        <section class="card mb-3">
             <div class="card-header">
                 <strong>Queue globale — observation partielle</strong>
                 {% if lab_queue.connected %}
