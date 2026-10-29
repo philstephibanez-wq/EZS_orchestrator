@@ -1,4 +1,4 @@
-param([switch]$RefreshDevApps,[ValidateSet('start','status','normal','repair-fastcgi')][string]$ProdAction='')
+param([switch]$RefreshDevApps,[ValidateSet('start','stop','status','normal','maintenance','repair-fastcgi')][string]$ProdAction='')
 
 # Assistant IA: independent attested process; existing manually launched server is preserved.
 function Invoke-EzsAssistantAiLifecycle {
@@ -399,7 +399,6 @@ try {
 function Invoke-EzsLabAssistantLifecycle {
 param([ValidateSet('preflight','start','status','stop')][string]$Action='preflight')
 $ErrorActionPreference='Stop'
-if($ProdAction -ne ''){Invoke-EzsProdLifecycle -Action $ProdAction;return}
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $caddy='H:\Caddy\caddy.exe'
 $config=Join-Path $root 'config\caddy\Caddyfile.dev-lab-assistant-candidate'
