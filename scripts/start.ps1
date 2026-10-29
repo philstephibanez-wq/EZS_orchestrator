@@ -662,7 +662,7 @@ if (Test-Path -LiteralPath $rootStatePath -PathType Leaf) {
         Write-Host 'EZS_R3_ROOT_STATE_AMBIGUOUS_GLOBAL_CLEANUP'
         # Le preflight R1 inventorie TOUS les ports/processus DEV et PROD.
         # Il refuse en particulier les PID reutilises et les listeners etrangers.
-        & 'H:\PHP\php-8.5-x64\php.exe' -d 'extension=H:\PHP\php-8.5-x64\ext\php_com_dotnet.dll' (Join-Path $root 'bin\ezs_lifecycle_guard.php') cleanup-stale
+        & 'H:\PHP\php-8.5-x64\php.exe' -d 'extension=H:\PHP\php-8.5-x64\ext\php_com_dotnet.dll' (Join-Path $root 'bin\console') ezs:dev:cleanup-stale
         if($LASTEXITCODE -ne 0){throw 'EZS_R13_REFUSED_AMBIGUOUS_GLOBAL_RECOVERY'}
         if (-not $?) { throw 'EZS_R3_GLOBAL_CLEANUP_FAILED' }
         Write-Host 'EZS_R3_GLOBAL_CLEANUP_OK_CONTINUING_START'

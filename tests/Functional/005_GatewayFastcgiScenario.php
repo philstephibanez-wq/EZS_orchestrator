@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 // Local integration harness. Only its own proc_open handles may be terminated.
-$root=dirname(__DIR__);
+$root=dirname(__DIR__, 2);
 $dir=rtrim(sys_get_temp_dir(),'\\/').'/ezs-gateway-fastcgi-v2a41';
 $cfg=$dir.'/online-gateway.json';
 $ports=[18511,18514,18515];

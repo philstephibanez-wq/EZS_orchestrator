@@ -4,7 +4,7 @@ declare(strict_types=1);
  * Single-command isolated gateway recipe. It owns only the three processes it spawns.
  * Never probes or changes PROD ports or settings.
  */
-$root=dirname(__DIR__);
+$root=dirname(__DIR__, 2);
 $base=rtrim(sys_get_temp_dir(),'\\/').'/ezs-gateway-recipe-v2a36';
 $config=$base.'/var/runtime/online-gateway.json';
 $ports=[18511,18510,18513];
