@@ -399,14 +399,30 @@ try{
     if(Test-Path -LiteralPath $statePath){
         $state=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8 | ConvertFrom-Json
         if($state.schema -ne 'ezs.la.backends.v1'){throw 'EZS_LA_STATE_INVALID'}
+        $allAttested=$true
         foreach($t in $targets){
             $entry=if($t.name -eq 'LAB'){$state.lab}else{$state.assistant}
-            if(-not(Attested $t.port ([int]$entry.pid) ([string]$entry.stamp))){
+            if(-not(Attested $t.port ([int]$entry.pid) ([string]$entry.stamp))){$allAttested=$false}
+        }
+        if($allAttested){
+            Write-Host 'EZS_LA_BACKENDS_ALREADY_RUNNING_VERIFIED'
+            return
+        }
+        # Reboot recovery is valid only when BOTH historical PIDs are gone and
+        # BOTH backend listener ports are free. Never kill or adopt unknown work.
+        foreach($t in $targets){
+            $entry=if($t.name -eq 'LAB'){$state.lab}else{$state.assistant}
+            $old=Get-CimInstance Win32_Process -Filter "ProcessId=$([int]$entry.pid)" -ErrorAction SilentlyContinue
+            if($null -ne $old -or @(Listener $t.port).Count -gt 0){
                 throw "EZS_LA_STALE_OR_FOREIGN_STATE:$($t.name)"
             }
         }
-        Write-Host 'EZS_LA_BACKENDS_ALREADY_RUNNING_VERIFIED'
-        return
+        if($Action -eq 'status'){
+            Write-Host 'EZS_LA_STALE_STATE_DETECTED_READ_ONLY'
+            return
+        }
+        Remove-Item -LiteralPath $statePath -Force -ErrorAction Stop
+        Write-Host 'EZS_LA_STALE_STATE_AFTER_REBOOT_CLEARED'
     }
     if($Action -eq 'status'){
         foreach($t in $targets){Write-Host "EZS_LA_UNMANAGED port=$($t.port) listeners=$(@(Listener $t.port).Count)"}
