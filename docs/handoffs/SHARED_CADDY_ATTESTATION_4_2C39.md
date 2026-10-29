@@ -1,0 +1,3 @@
+# 4.2c39 — Shared Caddy attestation diagnostic
+
+Recette 4.2c38: START refuses at line 242 before DEV recovery. Caddy recorded PID 14136 matches process executable/command and HTTP 8790=200, but `Get-NetTCPConnection -State Listen` displayed inconsistent snapshots. The former strict single-shot ownership check now retries up to 5 seconds, checking the SAME recorded PID, executable+command and all five Caddy facade listeners (8790/8502/8852/8702/8712). Does not accept TCP established sockets, PID 0, missing listeners, or foreign process owners. On failure prints per-port listener counts/PIDs, retaining safe refusal. No PROD intervention or STOP. If still refusing, provide diagnostic output; no attempt to take ownership of strangers. Real Windows test required.

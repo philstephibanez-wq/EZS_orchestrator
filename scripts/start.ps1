@@ -121,8 +121,27 @@ function Save-State($value) {
     [System.IO.File]::WriteAllText($stateFile, ($value | ConvertTo-Json -Depth 4), $bytes)
 }
 function Port-Owned([int]$port, [int]$processId) {
+    # Ignore transient TCP rows: only actual LISTEN sockets can attest ownership.
     $listeners = @(Listening $port)
     return ($listeners.Count -eq 1 -and [int]$listeners[0].OwningProcess -eq $processId)
+}
+function Wait-SharedCaddyAttestation([int]$processId) {
+    # Windows TCP owner enumeration can be transient immediately after startup.
+    # Recheck the SAME saved PID and configured command, never adopt a new PID.
+    for ($attempt=0; $attempt -lt 20; $attempt++) {
+        if (-not (OwnedDevCaddy $processId)) { return $false }
+        if ((Port-Owned 8790 $processId) -and (Port-Owned 8502 $processId) -and
+            (Port-Owned 8852 $processId) -and (Port-Owned 8702 $processId) -and
+            (Port-Owned 8712 $processId)) { return $true }
+        Start-Sleep -Milliseconds 250
+    }
+    Write-Host "EZS_SHARED_CADDY_ATTESTATION_FAILED saved_pid=$processId"
+    foreach ($port in @(8790,8502,8852,8702,8712)) {
+        $l=@(Listening $port)
+        $owners=($l|ForEach-Object { [string]$_.OwningProcess }) -join ','
+        Write-Host "EZS_SHARED_CADDY_LISTENER port=$port count=$($l.Count) owners=$owners"
+    }
+    return $false
 }
 function Wait-Port([int]$port, [int]$processId) {
     # Windows may expose a TCP listener before its OwningProcess stabilizes.
@@ -229,9 +248,7 @@ try {
     if ($null -ne $s) {
         $savedPhpId = [int]$s.php_pid
         $savedCaddyId = [int]$s.caddy_pid
-        $savedCaddyHealthy = (OwnedDevCaddy $savedCaddyId) -and
-            (Port-Owned 8790 $savedCaddyId) -and (Port-Owned 8502 $savedCaddyId) -and
-            (Port-Owned 8852 $savedCaddyId)
+        $savedCaddyHealthy = Wait-SharedCaddyAttestation $savedCaddyId
         if (-not $savedCaddyHealthy) {
             $portsBusy = $false
             foreach ($port in @(8790, 8791, 8502, 8852, 8702, 8712)) {
@@ -249,9 +266,7 @@ try {
     if ($null -ne $s) {
         $phpId = [int]$s.php_pid
         $caddyId = [int]$s.caddy_pid
-        $edgeHealthy = (OwnedDevCaddy $caddyId) -and
-            (Port-Owned 8790 $caddyId) -and (Port-Owned 8502 $caddyId) -and
-            (Port-Owned 8852 $caddyId)
+        $edgeHealthy = Wait-SharedCaddyAttestation $caddyId
         if (-not $edgeHealthy) { throw 'EZS_START_REFUSED_SHARED_CADDY_NOT_VERIFIED' }
         if ($phpId -gt 0 -and (Owned $phpId $php '-b 127.0.0.1:8791') -and (Port-Owned 8791 $phpId)) {
             Write-Host 'EZS_DEV_ALREADY_RUNNING_VERIFIED'
