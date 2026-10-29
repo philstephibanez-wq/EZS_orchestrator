@@ -223,6 +223,29 @@ try {
         Write-Host 'EZS_STOP_ORCHESTRATOR_BACKEND_OK_SHARED_CADDY_PRESERVED'
         return
     }
+    # A reboot can leave a state file whose PIDs no longer exist.
+    # Recover only if every shared Caddy listening port and PHP port is free,
+    # and neither recorded process ID exists. Never adopt or kill foreign processes.
+    if ($null -ne $s) {
+        $savedPhpId = [int]$s.php_pid
+        $savedCaddyId = [int]$s.caddy_pid
+        $savedCaddyHealthy = (OwnedDevCaddy $savedCaddyId) -and
+            (Port-Owned 8790 $savedCaddyId) -and (Port-Owned 8502 $savedCaddyId) -and
+            (Port-Owned 8852 $savedCaddyId)
+        if (-not $savedCaddyHealthy) {
+            $portsBusy = $false
+            foreach ($port in @(8790, 8791, 8502, 8852, 8702, 8712)) {
+                if (@(Listening $port).Count -gt 0) { $portsBusy = $true; break }
+            }
+            if ($portsBusy -or $null -ne (ProcessInfo $savedCaddyId) -or
+                $null -ne (ProcessInfo $savedPhpId)) {
+                throw 'EZS_START_REFUSED_SHARED_CADDY_NOT_VERIFIED'
+            }
+            Remove-Item -LiteralPath $stateFile -Force -ErrorAction Stop
+            $s = $null
+            Write-Host 'EZS_START_STALE_STATE_AFTER_REBOOT_CLEARED'
+        }
+    }
     if ($null -ne $s) {
         $phpId = [int]$s.php_pid
         $caddyId = [int]$s.caddy_pid
