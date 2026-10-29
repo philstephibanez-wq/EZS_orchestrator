@@ -1,0 +1,3 @@
+# v4.2c47 — PROD stale PID reuse
+
+User real v4.2c46 START refused `EZS_PROD_REFUSED_EXISTING_STATE`: after reboot an old PID can refer to an unrelated live Windows process. Previously it refused any existing PID. For START only, now compare each saved process to exact executable and command signature. If a saved PID still belongs to the intended PROD component, refuse to avoid duplicate. If PID has been reused for an unrelated process, preserve that process (no kill/adoption), log diagnostic, and continue only if **all** six PROD ports are free under two independent checks. Invalid saved PID refuses. PROD startup stays maintenance-only. DEV, STOP and queues unchanged. Runtime test needed.

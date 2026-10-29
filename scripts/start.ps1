@@ -658,9 +658,24 @@ try {
     if($Action -eq 'start'){
         if($null -ne $s){
           if(Ready $s){Write-Host 'EZS_PROD_ALREADY_RUNNING_VERIFIED';return}
-          foreach($field in @('php_pid','internal_pid','gateway_pid','edge_pid')){
-              $oldPid=[int]$s.$field
-              if($oldPid -le 0 -or $null -ne (Info $oldPid)){throw 'EZS_PROD_REFUSED_EXISTING_STATE'}
+          $expected=@(
+              @{field='php_pid';exe=$php;sig='-b 127.0.0.1:8512'},
+              @{field='internal_pid';exe=$caddy;sig='Caddyfile.prod-internal-candidate'},
+              @{field='gateway_pid';exe=$python;sig='runtime_components\prod_gateway\server.py'},
+              @{field='edge_pid';exe=$caddy;sig='Caddyfile.prod'}
+          )
+          foreach($entry in $expected){
+              $oldPid=[int]$s.($entry.field)
+              if($oldPid -le 0){throw 'EZS_PROD_REFUSED_INVALID_SAVED_PID'}
+              # A reused Windows PID is not proof of a surviving PROD process.
+              # Still refuse if the recorded PID has the expected executable
+              # and launch signature, even if the TCP provider reports no socket.
+              if(Own $oldPid $entry.exe $entry.sig){
+                  throw "EZS_PROD_REFUSED_SURVIVING_COMPONENT_$($entry.field)"
+              }
+              if($null -ne (Info $oldPid)){
+                  Write-Host "EZS_PROD_REUSED_FOREIGN_PID_PRESERVED field=$($entry.field)"
+              }
           }
           foreach($port in @(8501,8510,8511,8512,2020,2022)){
               if(@(Listener $port).Count -gt 0 -or (ProdTcp $port)){throw "EZS_PROD_REFUSED_OCCUPIED_$port"}
