@@ -566,183 +566,164 @@ $statePath=Join-Path $runtime 'processes.json'
 $lockPath=Join-Path $runtime 'lifecycle.lock'
 $php='H:\PHP\php-8.5-x64\php-cgi.exe'
 $caddy='H:\Caddy\caddy.exe'
-$python='H:\Python\pythoncore-3.14-64\python.exe'
 $prod='H:\EZScore'
 $configPath=Join-Path $prod 'var\runtime\online-gateway.json'
 $internal=Join-Path $root 'config\caddy\Caddyfile.prod-internal-candidate'
 $edge=Join-Path $root 'config\caddy\Caddyfile.prod'
-$gateway=Join-Path $root 'runtime_components\prod_gateway\server.py'
+$gatewayConfig=Join-Path $root 'config\caddy\Caddyfile.gateway-php-prod'
+$gatewayRouter=Join-Path $root 'runtime_components\prod_gateway_php\router.php'
 New-Item -ItemType Directory -Force -Path $runtime | Out-Null
-function Listener([int]$port) { return @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) }
-function Info([int]$processId) { if($processId -le 0){return $null};return Get-CimInstance Win32_Process -Filter "ProcessId=$processId" -ErrorAction SilentlyContinue }
-function Own([int]$processId,[string]$binary,[string]$signature) {
-    $p=Info $processId
-    return ($null -ne $p -and [string]::Equals([string]$p.ExecutablePath,$binary,[StringComparison]::OrdinalIgnoreCase) -and ([string]$p.CommandLine).Contains($signature))
+function Info([int]$id){if($id -le 0){return $null};return Get-CimInstance Win32_Process -Filter "ProcessId=$id" -ErrorAction SilentlyContinue}
+function Own([int]$id,[string]$bin,[string]$sig){
+ $p=Info $id
+ return ($null -ne $p -and [string]::Equals([string]$p.ExecutablePath,$bin,[StringComparison]::OrdinalIgnoreCase) -and ([string]$p.CommandLine).Contains($sig))
 }
-function ProdTcp([int]$port){
+function Tcp([int]$port){
  $c=New-Object System.Net.Sockets.TcpClient
- try{$t=$c.ConnectAsync('127.0.0.1',$port);return ($t.Wait(600) -and $c.Connected)}
+ try{$task=$c.ConnectAsync('127.0.0.1',$port);return ($task.Wait(600) -and $c.Connected)}
  catch{return $false}finally{$c.Dispose()}
 }
-function ProdIdentity([int]$port,[int]$pidValue,[string]$binary,[string]$signature){
- return ((Own $pidValue $binary $signature) -and (ProdTcp $port))
-}
-function OwnPort([int]$port,[int]$processId) { $l=@(Listener $port);return ($l.Count -eq 1 -and [int]$l[0].OwningProcess -eq $processId) }
-function AwaitPort([int]$port,[int]$processId){
+function Listening([int]$port){return @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)}
+function Free([int]$port){return (@(Listening $port).Count -eq 0 -and -not(Tcp $port))}
+function WaitOwned([int]$port,[int]$id,[string]$bin,[string]$sig){
  for($i=0;$i -lt 40;$i++){
-   if($null -eq (Info $processId)){return $false}
-   if(ProdTcp $port){return $true}
-   Start-Sleep -Milliseconds 250
+  if(-not(Own $id $bin $sig)){return $false}
+  if(Tcp $port){return $true}
+  Start-Sleep -Milliseconds 250
  }
  return $false
 }
-function State { if(-not (Test-Path -LiteralPath $statePath)){return $null};return (Get-Content -LiteralPath $statePath -Raw -Encoding UTF8 | ConvertFrom-Json) }
+function State {if(-not(Test-Path -LiteralPath $statePath)){return $null};return (Get-Content -LiteralPath $statePath -Raw -Encoding UTF8 | ConvertFrom-Json)}
 function WriteUtf8([string]$path,[string]$value){[IO.File]::WriteAllText($path,$value,[Text.UTF8Encoding]::new($false))}
-function SetMode([bool]$maintenance) {
-    $payload=[ordered]@{schema_version='ezscore.online-gateway.v1';maintenance=$maintenance;backend_host='127.0.0.1';backend_port=8511;public_url='http://127.0.0.1:8501'}
-    $temp=$configPath+'.ezs-tmp'
-    WriteUtf8 $temp ($payload | ConvertTo-Json)
-    Move-Item -LiteralPath $temp -Destination $configPath -Force
+function Mode([bool]$maintenance){
+ $payload=[ordered]@{schema_version='ezscore.online-gateway.v1';maintenance=$maintenance;backend_host='127.0.0.1';backend_port=8511;public_url='http://127.0.0.1:8501'}
+ $tmp=$configPath+'.ezs-tmp'
+ WriteUtf8 $tmp ($payload|ConvertTo-Json)
+ Move-Item -LiteralPath $tmp -Destination $configPath -Force
 }
-function Ready($s) {
-    return ((Own ([int]$s.php_pid) $php '-b 127.0.0.1:8512') -and (OwnPort 8512 ([int]$s.php_pid)) -and
-        (Own ([int]$s.internal_pid) $caddy 'Caddyfile.prod-internal-candidate') -and (OwnPort 8511 ([int]$s.internal_pid)) -and
-        (Own ([int]$s.gateway_pid) $python 'runtime_components\prod_gateway\server.py') -and (OwnPort 8510 ([int]$s.gateway_pid)) -and
-        (Own ([int]$s.edge_pid) $caddy 'Caddyfile.prod') -and (OwnPort 8501 ([int]$s.edge_pid)))
+function Http([string]$url){
+ try{$r=Invoke-WebRequest $url -UseBasicParsing -MaximumRedirection 0 -TimeoutSec 5 -ErrorAction Stop;return [int]$r.StatusCode}
+ catch{if($_.Exception.Response){return [int]$_.Exception.Response.StatusCode};return 0}
 }
-function Http([string]$url) {
-    try { $response=Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop;return [int]$response.StatusCode }
-    catch { if($_.Exception.Response){return [int]$_.Exception.Response.StatusCode};return 0 }
+function Components {
+ return @(
+  @{name='php_pid';port=8512;bin=$php;sig='-b 127.0.0.1:8512'},
+  @{name='internal_pid';port=8511;bin=$caddy;sig='Caddyfile.prod-internal-candidate'},
+  @{name='gateway_php_pid';port=18515;bin=$php;sig='-b 127.0.0.1:18515'},
+  @{name='gateway_pid';port=8510;bin=$caddy;sig='Caddyfile.gateway-php-prod'},
+  @{name='edge_pid';port=8501;bin=$caddy;sig='Caddyfile.prod'}
+ )
 }
-function WaitExit([int]$processId,[int]$port) {
-    for($i=0;$i -lt 40;$i++){if($null -eq (Info $processId) -and @(Listener $port).Count -eq 0){return $true};Start-Sleep -Milliseconds 250}
-    return $false
+function Ready($state){
+ if($null -eq $state -or [string]$state.schema -ne 'ezs.prod.php.v1'){return $false}
+ foreach($e in @(Components)){
+  $id=[int]$state.($e.name)
+  if(-not(Own $id $e.bin $e.sig) -or -not(Tcp $e.port)){return $false}
+ }
+ return ((Http 'http://127.0.0.1:8510/__ezscore_gateway_status') -eq 200)
 }
 $lock=$null
-try {$lock=[IO.File]::Open($lockPath,[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)} catch {throw 'EZS_PROD_CONCURRENT_OPERATION'}
+try{$lock=[IO.File]::Open($lockPath,[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)}catch{throw 'EZS_PROD_CONCURRENT_OPERATION'}
 try {
-    $s=State
-    if($Action -eq 'status'){
-        $ready=$false
-        if($null -ne $s){$ready=Ready $s}
-        Write-Host "EZS_PROD_STATUS ready=$ready state_present=$($null -ne $s)"
-        return
-    }
-    if($Action -eq 'repair-fastcgi'){
-        if($null -eq $s){throw 'EZS_PROD_FASTCGI_REPAIR_REFUSED_NO_STATE'}
-        $oldPid=[int]$s.php_pid
-        if(-not (Own ([int]$s.internal_pid) $caddy 'Caddyfile.prod-internal-candidate') -or -not (OwnPort 8511 ([int]$s.internal_pid)) -or
-           -not (Own ([int]$s.gateway_pid) $python 'runtime_components\prod_gateway\server.py') -or -not (OwnPort 8510 ([int]$s.gateway_pid)) -or
-           -not (Own ([int]$s.edge_pid) $caddy 'Caddyfile.prod') -or -not (OwnPort 8501 ([int]$s.edge_pid))) {
-            throw 'EZS_PROD_FASTCGI_REPAIR_REFUSED_OTHER_COMPONENTS_UNVERIFIED'
-        }
-        if((Own $oldPid $php '-b 127.0.0.1:8512') -and (OwnPort 8512 $oldPid)){
-            Write-Host 'EZS_PROD_FASTCGI_REPAIR_NOT_NEEDED';return
-        }
-        if(@(Listener 8512).Count -gt 0 -or $null -ne (Info $oldPid)){
-            throw 'EZS_PROD_FASTCGI_REPAIR_REFUSED_PROCESS_OR_PORT_PRESENT'
-        }
-        if(-not (Test-Path -LiteralPath $php -PathType Leaf)){throw 'EZS_PROD_FASTCGI_REPAIR_MISSING_BINARY'}
-        $env:APP_ENV='prod';$env:APP_DEBUG='0'
-        $env:PHP_FCGI_MAX_REQUESTS='0'
-        $p=Start-Process -FilePath $php -ArgumentList '-b 127.0.0.1:8512' -WorkingDirectory $prod -WindowStyle Hidden -PassThru
-        if(-not (AwaitPort 8512 ([int]$p.Id)) -or -not (Own ([int]$p.Id) $php '-b 127.0.0.1:8512')){
-            if(Own ([int]$p.Id) $php '-b 127.0.0.1:8512'){Stop-Process -Id $p.Id -ErrorAction SilentlyContinue}
-            throw 'EZS_PROD_FASTCGI_REPAIR_FAILED'
-        }
-        $s.php_pid=[int]$p.Id
-        WriteUtf8 $statePath ($s | ConvertTo-Json)
-        Write-Host 'EZS_PROD_FASTCGI_REPAIR_OK_OTHER_COMPONENTS_PRESERVED'
-        return
-    }
-    if($Action -eq 'start'){
-        if($null -ne $s){
-          if(Ready $s){Write-Host 'EZS_PROD_ALREADY_RUNNING_VERIFIED';return}
-          $expected=@(
-              @{field='php_pid';exe=$php;sig='-b 127.0.0.1:8512'},
-              @{field='internal_pid';exe=$caddy;sig='Caddyfile.prod-internal-candidate'},
-              @{field='gateway_pid';exe=$python;sig='runtime_components\prod_gateway\server.py'},
-              @{field='edge_pid';exe=$caddy;sig='Caddyfile.prod'}
-          )
-          foreach($entry in $expected){
-              $oldPid=[int]$s.($entry.field)
-              if($oldPid -le 0){throw 'EZS_PROD_REFUSED_INVALID_SAVED_PID'}
-              # A reused Windows PID is not proof of a surviving PROD process.
-              # Still refuse if the recorded PID has the expected executable
-              # and launch signature, even if the TCP provider reports no socket.
-              if(Own $oldPid $entry.exe $entry.sig){
-                  throw "EZS_PROD_REFUSED_SURVIVING_COMPONENT_$($entry.field)"
-              }
-              if($null -ne (Info $oldPid)){
-                  Write-Host "EZS_PROD_REUSED_FOREIGN_PID_PRESERVED field=$($entry.field)"
-              }
-          }
-          foreach($port in @(8501,8510,8511,8512,2020,2022)){
-              if(@(Listener $port).Count -gt 0 -or (ProdTcp $port)){throw "EZS_PROD_REFUSED_OCCUPIED_$port"}
-          }
-          Remove-Item -LiteralPath $statePath -Force -ErrorAction Stop
-          $s=$null
-          Write-Host 'EZS_PROD_STALE_STATE_AFTER_REBOOT_CLEARED'
-        }
-        foreach($port in @(8501,8510,8511,8512,2020,2022)){if(@(Listener $port).Count -gt 0 -or (ProdTcp $port)){throw "EZS_PROD_REFUSED_OCCUPIED_$port"}}
-        foreach($path in @($php,$caddy,$python,$internal,$edge,$gateway,(Join-Path $prod 'public\index.php'))){if(-not (Test-Path -LiteralPath $path -PathType Leaf)){throw "EZS_PROD_MISSING:$path"}}
-        if(-not (Test-Path (Split-Path $configPath) -PathType Container)){throw 'EZS_PROD_GATEWAY_RUNTIME_MISSING'}
-        & $caddy validate --config $internal --adapter caddyfile | Out-Null
-        if($LASTEXITCODE -ne 0){throw 'EZS_PROD_INTERNAL_CONFIG_INVALID'}
-        & $caddy validate --config $edge --adapter caddyfile | Out-Null
-        if($LASTEXITCODE -ne 0){throw 'EZS_PROD_EDGE_CONFIG_INVALID'}
-        $env:APP_ENV='prod';$env:APP_DEBUG='0'
-        $env:PHP_FCGI_MAX_REQUESTS='0'
-        $started=@()
-        try {
-            $p=Start-Process -FilePath $php -ArgumentList '-b 127.0.0.1:8512' -WorkingDirectory $prod -WindowStyle Hidden -PassThru
-            $started+=@{id=[int]$p.Id;exe=$php;sig='-b 127.0.0.1:8512'}
-            if(-not (AwaitPort 8512 ([int]$p.Id)) -or -not(ProdIdentity 8512 ([int]$p.Id) $php '-b 127.0.0.1:8512')){throw 'EZS_PROD_FASTCGI_FAILED'}
-            $i=Start-Process -FilePath $caddy -ArgumentList @('run','--config',('"' + $internal + '"'),'--adapter','caddyfile') -WorkingDirectory $root -WindowStyle Hidden -PassThru
-            $started+=@{id=[int]$i.Id;exe=$caddy;sig='Caddyfile.prod-internal-candidate'}
-            if(-not (AwaitPort 8511 ([int]$i.Id)) -or -not(ProdIdentity 8511 ([int]$i.Id) $caddy 'Caddyfile.prod-internal-candidate')){throw 'EZS_PROD_INTERNAL_FAILED'}
-            SetMode $true
-            $g=Start-Process -FilePath $python -ArgumentList @('-u',('"' + $gateway + '"'),'--root',('"' + $prod + '"'),'--host','127.0.0.1','--port','8510') -WorkingDirectory $root -WindowStyle Hidden -PassThru
-            $started+=@{id=[int]$g.Id;exe=$python;sig='runtime_components\prod_gateway\server.py'}
-            if(-not (AwaitPort 8510 ([int]$g.Id)) -or -not(ProdIdentity 8510 ([int]$g.Id) $python 'runtime_components\prod_gateway\server.py')){throw 'EZS_PROD_GATEWAY_FAILED'}
-            if((Http 'http://127.0.0.1:8510/__ezscore_gateway_status') -ne 200){throw 'EZS_PROD_GATEWAY_PROTOCOL_FAILED'}
-            $e=Start-Process -FilePath $caddy -ArgumentList @('run','--config',('"' + $edge + '"'),'--adapter','caddyfile') -WorkingDirectory $root -WindowStyle Hidden -PassThru
-            $started+=@{id=[int]$e.Id;exe=$caddy;sig='Caddyfile.prod'}
-            if(-not (AwaitPort 8501 ([int]$e.Id)) -or -not(ProdIdentity 8501 ([int]$e.Id) $caddy 'Caddyfile.prod')){throw 'EZS_PROD_EDGE_FAILED'}
-            WriteUtf8 $statePath (([ordered]@{php_pid=[int]$p.Id;internal_pid=[int]$i.Id;gateway_pid=[int]$g.Id;edge_pid=[int]$e.Id}) | ConvertTo-Json)
-            Write-Host 'EZS_PROD_START_MAINTENANCE_OK'
-        }catch{
-            $failure=$_
-            [array]::Reverse($started)
-            foreach($proc in $started){if(Own $proc.id $proc.exe $proc.sig){Stop-Process -Id $proc.id -ErrorAction SilentlyContinue}}
-            throw $failure
-        }
-        return
-    }
-    if($null -eq $s -or -not (Ready $s)){throw 'EZS_PROD_REFUSED_UNVERIFIED_PROCESS_OWNERSHIP'}
-    if($Action -eq 'maintenance'){
-        SetMode $true
-        if((Http 'http://127.0.0.1:8501/') -ne 503){throw 'EZS_PROD_MAINTENANCE_UNCONFIRMED'}
-        Write-Host 'EZS_PROD_MAINTENANCE_OK';return
-    }
-    if($Action -eq 'normal'){
-        SetMode $true
-        $code=Http 'http://127.0.0.1:8511/'
-        if($code -lt 200 -or $code -ge 500){throw "EZS_PROD_NORMAL_REFUSED_BACKEND_$code"}
-        SetMode $false
-        Write-Host 'EZS_PROD_NORMAL_REQUESTED_VERIFY_SSO_MEDIA';return
-    }
-    if($Action -eq 'stop'){
-        SetMode $true
-        if((Http 'http://127.0.0.1:8501/') -ne 503){throw 'EZS_PROD_STOP_REFUSED_MAINTENANCE_UNCONFIRMED'}
-        foreach($proc in @(@{id=[int]$s.edge_pid;port=8501},@{id=[int]$s.gateway_pid;port=8510},@{id=[int]$s.internal_pid;port=8511},@{id=[int]$s.php_pid;port=8512})){
-            Stop-Process -Id $proc.id -ErrorAction Stop
-            if(-not (WaitExit $proc.id $proc.port)){throw 'EZS_PROD_STOP_INCOMPLETE_STATE_PRESERVED'}
-        }
-        Remove-Item -LiteralPath $statePath -Force
-        Write-Host 'EZS_PROD_STOP_VERIFIED_DEV_UNTOUCHED'
-    }
-} finally {if($null -ne $lock){$lock.Dispose()}}
+ $s=State
+ if($Action -eq 'status'){
+  $ready=$false
+  if($null -ne $s){$ready=Ready $s}
+  Write-Host "EZS_PROD_STATUS ready=$ready state_present=$($null -ne $s)"
+  return
+ }
+ if($Action -eq 'start'){
+  if($null -ne $s){
+   if(Ready $s){Write-Host 'EZS_PROD_ALREADY_RUNNING_VERIFIED';return}
+   # Historical Python-state is obsolete; never adopt or stop its process.
+   foreach($e in @(Components)){
+    $id=[int]$s.($e.name)
+    if($id -gt 0 -and (Own $id $e.bin $e.sig)){throw "EZS_PROD_REFUSED_SURVIVING_COMPONENT_$($e.name)"}
+   }
+   foreach($port in @(8501,8510,8511,8512,18515,2020,2022)){
+    if(-not(Free $port)){throw "EZS_PROD_REFUSED_OCCUPIED_$port"}
+   }
+   Remove-Item -LiteralPath $statePath -Force -ErrorAction Stop
+   Write-Host 'EZS_PROD_STALE_STATE_AFTER_REBOOT_CLEARED'
+  }
+  foreach($port in @(8501,8510,8511,8512,18515,2020,2022)){
+   if(-not(Free $port)){throw "EZS_PROD_REFUSED_OCCUPIED_$port"}
+  }
+  foreach($path in @($php,$caddy,$internal,$edge,$gatewayConfig,$gatewayRouter,(Join-Path $prod 'public\index.php'))){
+   if(-not(Test-Path -LiteralPath $path -PathType Leaf)){throw "EZS_PROD_MISSING:$path"}
+  }
+  if(-not(Test-Path (Split-Path $configPath) -PathType Container)){throw 'EZS_PROD_GATEWAY_RUNTIME_MISSING'}
+  foreach($config in @($internal,$gatewayConfig,$edge)){
+   & $caddy validate --config $config --adapter caddyfile | Out-Null
+   if($LASTEXITCODE -ne 0){throw "EZS_PROD_INVALID_CADDY_CONFIG:$config"}
+  }
+  $env:APP_ENV='prod';$env:APP_DEBUG='0';$env:PHP_FCGI_MAX_REQUESTS='0'
+  Remove-Item Env:EZS_GATEWAY_RECIPE_CONFIG -ErrorAction SilentlyContinue
+  Remove-Item Env:EZS_GATEWAY_RECIPE_MODE -ErrorAction SilentlyContinue
+  $started=@()
+  try {
+   $sequence=@(
+    @{name='php_pid';port=8512;bin=$php;sig='-b 127.0.0.1:8512';args='-b 127.0.0.1:8512';cwd=$prod},
+    @{name='internal_pid';port=8511;bin=$caddy;sig='Caddyfile.prod-internal-candidate';args=('run --config "'+$internal+'" --adapter caddyfile');cwd=$root},
+    @{name='gateway_php_pid';port=18515;bin=$php;sig='-b 127.0.0.1:18515';args='-b 127.0.0.1:18515';cwd=(Split-Path $gatewayRouter)},
+    @{name='gateway_pid';port=8510;bin=$caddy;sig='Caddyfile.gateway-php-prod';args=('run --config "'+$gatewayConfig+'" --adapter caddyfile');cwd=$root},
+    @{name='edge_pid';port=8501;bin=$caddy;sig='Caddyfile.prod';args=('run --config "'+$edge+'" --adapter caddyfile');cwd=$root}
+   )
+   $record=[ordered]@{schema='ezs.prod.php.v1'}
+   foreach($target in $sequence){
+    # Maintenance before exposing public edge, after local binaries were validated.
+    if($target.name -eq 'gateway_php_pid'){Mode $true}
+    $p=Start-Process -FilePath $target.bin -ArgumentList $target.args -WorkingDirectory $target.cwd -WindowStyle Hidden -PassThru
+    $started+=@{pid=[int]$p.Id;bin=$target.bin;sig=$target.sig}
+    if(-not(WaitOwned $target.port ([int]$p.Id) $target.bin $target.sig)){throw "EZS_PROD_START_FAILED_$($target.name)"}
+    $record[$target.name]=[int]$p.Id
+    if($target.name -eq 'gateway_pid' -and (Http 'http://127.0.0.1:8510/__ezscore_gateway_status') -ne 200){throw 'EZS_PROD_GATEWAY_PROTOCOL_FAILED'}
+   }
+   WriteUtf8 $statePath ($record|ConvertTo-Json -Depth 4)
+   Write-Host 'EZS_PROD_START_MAINTENANCE_OK'
+  }catch{
+   $failure=$_
+   [array]::Reverse($started)
+   foreach($entry in $started){if(Own $entry.pid $entry.bin $entry.sig){Stop-Process -Id $entry.pid -ErrorAction SilentlyContinue}}
+   throw $failure
+  }
+  return
+ }
+ if(-not(Ready $s)){throw 'EZS_PROD_REFUSED_UNVERIFIED_PROCESS_OWNERSHIP'}
+ if($Action -eq 'maintenance'){
+  Mode $true
+  if((Http 'http://127.0.0.1:8501/') -ne 503){throw 'EZS_PROD_MAINTENANCE_UNCONFIRMED'}
+  Write-Host 'EZS_PROD_MAINTENANCE_OK'
+  return
+ }
+ if($Action -eq 'normal'){
+  Mode $true
+  $code=Http 'http://127.0.0.1:8511/'
+  if($code -lt 200 -or $code -ge 500){throw "EZS_PROD_NORMAL_REFUSED_BACKEND_$code"}
+  Mode $false
+  Write-Host 'EZS_PROD_NORMAL_REQUESTED_VERIFY_SSO_MEDIA'
+  return
+ }
+ if($Action -eq 'repair-fastcgi'){throw 'EZS_PROD_REPAIR_REQUIRES_DEDICATED_PHP_GATEWAY_PROCEDURE'}
+ if($Action -eq 'stop'){
+  Mode $true
+  if((Http 'http://127.0.0.1:8501/') -ne 503){throw 'EZS_PROD_STOP_REFUSED_MAINTENANCE_UNCONFIRMED'}
+  foreach($e in @(Components)){
+   $id=[int]$s.($e.name)
+   if(-not(Own $id $e.bin $e.sig)){throw "EZS_PROD_STOP_REFUSED_PROCESS_$($e.name)"}
+  }
+  $reverse=@(Components)
+  [array]::Reverse($reverse)
+  foreach($e in $reverse){
+   $id=[int]$s.($e.name)
+   if(-not(Own $id $e.bin $e.sig)){throw 'EZS_PROD_STOP_REFUSED_CHANGED_OWNER'}
+   Stop-Process -Id $id -ErrorAction Stop
+  }
+  Remove-Item -LiteralPath $statePath -Force
+  Write-Host 'EZS_PROD_STOP_OWNED_OK'
+  return
+ }
+}finally{if($null -ne $lock){$lock.Dispose()}}
 }
 
 $ErrorActionPreference='Stop'
