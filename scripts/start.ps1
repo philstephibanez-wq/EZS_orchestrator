@@ -601,6 +601,14 @@ function Mode([bool]$maintenance){
  WriteUtf8 $tmp ($payload|ConvertTo-Json)
  Move-Item -LiteralPath $tmp -Destination $configPath -Force
 }
+function PersistedProdMode {
+ if(-not(Test-Path -LiteralPath $configPath -PathType Leaf)){throw 'EZS_PROD_PERSISTED_MODE_MISSING'}
+ try{$saved=Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json}catch{throw 'EZS_PROD_PERSISTED_MODE_INVALID_JSON'}
+ if($null -eq $saved -or $saved.schema_version -ne 'ezscore.online-gateway.v1' -or
+    $saved.maintenance -isnot [bool] -or [string]$saved.backend_host -ne '127.0.0.1' -or
+    [int]$saved.backend_port -ne 8511){throw 'EZS_PROD_PERSISTED_MODE_INVALID'}
+ return [bool]$saved.maintenance
+}
 function Http([string]$url){
  try{$r=Invoke-WebRequest $url -UseBasicParsing -MaximumRedirection 0 -TimeoutSec 5 -ErrorAction Stop;return [int]$r.StatusCode}
  catch{if($_.Exception.Response){return [int]$_.Exception.Response.StatusCode};return 0}
@@ -671,6 +679,7 @@ try {
    & $caddy validate --config $config --adapter caddyfile | Out-Null
    if($LASTEXITCODE -ne 0){throw "EZS_PROD_INVALID_CADDY_CONFIG:$config"}
   }
+  $persistedMaintenance=PersistedProdMode
   $env:APP_ENV='prod';$env:APP_DEBUG='0';$env:PHP_FCGI_MAX_REQUESTS='0'
   Remove-Item Env:EZS_GATEWAY_RECIPE_CONFIG -ErrorAction SilentlyContinue
   Remove-Item Env:EZS_GATEWAY_RECIPE_MODE -ErrorAction SilentlyContinue
@@ -683,8 +692,7 @@ try {
    )
    $record=[ordered]@{schema='ezs.prod.php.v2'}
    foreach($target in $sequence){
-    # Maintenance before exposing public edge, after local binaries were validated.
-    if($target.name -eq 'edge_pid'){Mode $true}
+    # Startup must never modify the last persisted PROD mode.
     $launch=@{FilePath=$target.bin;ArgumentList=$target.args;WorkingDirectory=$target.cwd;WindowStyle='Hidden';PassThru=$true}
     if($target.name -eq 'php_pid' -or $target.name -eq 'gateway_php_pid'){
      $diagnosticDir=Join-Path ([IO.Path]::GetTempPath()) 'EZS_PROD_FASTCGI_4_2C50'
@@ -720,7 +728,7 @@ try {
     }
    }
    WriteUtf8 $statePath ($record|ConvertTo-Json -Depth 4)
-   Write-Host 'EZS_PROD_START_MAINTENANCE_OK'
+   if($persistedMaintenance){Write-Host 'EZS_PROD_START_MAINTENANCE_OK'}else{Write-Host 'EZS_PROD_START_NORMAL_RESTORED'}
   }catch{
    $failure=$_
    [array]::Reverse($started)
