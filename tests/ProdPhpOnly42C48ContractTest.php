@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 $root = dirname(__DIR__);
-foreach (['start.ps1', 'stop.ps1'] as $file) {
+foreach (['start.ps1'] as $file) {
     $source = file_get_contents($root . '/scripts/' . $file);
     if (!is_string($source)) {
         throw new RuntimeException('UNREADABLE_SCRIPT ' . $file);
