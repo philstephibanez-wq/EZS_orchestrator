@@ -7,7 +7,7 @@ require $r.'/src/Module/Coordination/QueueRestAccess.php';
 use Ezs\Web\Module\Coordination\GlobalQueueStore;
 use Ezs\Web\Module\Coordination\QueueRestReadModel;
 use Ezs\Web\Module\Coordination\QueueRestAccess;
-if(trim(file_get_contents($r.'/VERSION'))!=='4.2c27')throw new RuntimeException('VERSION');
+if(!preg_match('/^4\\.2c(\\d+)$/',trim((string)file_get_contents($r.'/VERSION')),$version)|| (int)$version[1]<27)throw new RuntimeException('VERSION');
 $a=str_repeat('A',48);$b=str_repeat('B',48);
 if(QueueRestAccess::producerFor('Bearer '.$a,['lab'=>$a,'assistant'=>$b])!=='lab')throw new RuntimeException('AUTH');
 if(QueueRestAccess::producerFor('Bearer '.$a,['lab'=>$a,'assistant'=>$a])!==null)throw new RuntimeException('TOKEN_COLLISION');

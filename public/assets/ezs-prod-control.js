@@ -12,6 +12,10 @@
       $maintenance.prop('disabled',busy||!capabilities.maintenance||!modal);
       $normal.prop('disabled',busy||!capabilities.normal||!modal);
     }
+    function setStatus(label, level){
+      $status.text(label).removeClass('text-bg-secondary text-bg-success text-bg-warning text-bg-danger')
+        .addClass('text-bg-'+level);
+    }
     function refreshProd(){
       $.ajax({url:'/api/v2/infrastructure/prod-control',dataType:'json',cache:false,timeout:5000})
        .done(function(d){
@@ -19,12 +23,18 @@
          token=d.csrf||'';
          $mode.text(d.maintenance===true?'Activée':d.maintenance===false?'Mode normal':'Indéterminée');
          $edge.text(d.caddy_listening?'Écoute 8501':'Arrêté');
-         $status.text(d.gateway_online?(d.backend_ready?'Gateway et Symfony actifs':'Gateway active, backend indisponible'):'Gateway absente');
+         if (d.gateway_online && d.backend_ready) {
+           setStatus('Gateway et Symfony actifs','success');
+         } else if (d.gateway_online) {
+           setStatus('Gateway active, backend indisponible','warning');
+         } else {
+           setStatus('Gateway absente','danger');
+         }
          capabilities={maintenance:!!d.actions.maintenance,normal:!!d.actions.normal};
          $normal.attr('title',d.note||'');
          setButtons();
        }).fail(function(){
-         $status.text('État indisponible');
+         setStatus('État indisponible','secondary');
          capabilities={maintenance:false,normal:false};setButtons();
        });
     }
@@ -50,7 +60,7 @@
         method:'POST',data:{confirmation:action==='normal'?'NORMAL':'MAINTENANCE'},
         headers:{'X-EZS-CSRF':token},timeout:30000
       }).done(function(d){
-        $status.text(d.result||'Commande exécutée');
+        setStatus(d.result||'Commande exécutée','secondary');
         modal.hide();
       }).fail(function(xhr){
         const d=xhr.responseJSON||{};
