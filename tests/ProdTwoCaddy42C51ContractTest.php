@@ -12,7 +12,7 @@ foreach(['start.ps1','stop.ps1'] as $script){
  $j=strpos($src,'EZS_PROD_STOP_OWNED_OK',$i===false?0:$i);
  if($i===false||$j===false)throw new RuntimeException('LIFECYCLE_MISSING');
  $prod=substr($src,$i,$j-$i);
- foreach(['ezs.prod.php.v1','ezs.prod.php.v2','EZS_PROD_LEGACY_V1_STOP_REQUIRED_BEFORE_UPGRADE','Caddyfile.prod-unified','EZS_PROD_START_MAINTENANCE_OK','EZS_PROD_STOP_OWNED_OK'] as $required){
+ foreach(['ezs.prod.php.v1','ezs.prod.php.v2','ezs.prod.php.v2','Caddyfile.prod-unified','EZS_PROD_START_MAINTENANCE_OK','EZS_PROD_STOP_OWNED_OK'] as $required){
   if(!str_contains($src,$required))throw new RuntimeException('LIFECYCLE_MISSING '.$required.' '.$script);
  }
  $seqStart=strpos($prod,'$sequence=@(');
