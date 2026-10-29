@@ -1,0 +1,3 @@
+# Handoff 4.2c32
+
+Suppression du doublon visuel « Registre historique / Sonde LAB » de Files & Jobs. Source unique de la table active : `GlobalQueueDashboard::read()` sur le SQLite canonique en lecture seule. Affiche origine, id, type, priorité, état, % réel et phase ; les archives `result.json` restent séparées. Le service historique `LabQueueProbe` n'est pas supprimé du dépôt, seulement débranché de cette page afin de ne pas casser d'autres contrats. Contrat et test. Aucun flux réel LAB/Assistant raccordé : le job 193 historique n'apparaîtra pas dans la nouvelle table avant admission explicite. Pas de modification START/STOP. Recette PHP, Twig et navigateur à effectuer.
