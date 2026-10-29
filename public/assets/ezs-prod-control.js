@@ -1,7 +1,7 @@
 (function($){
   if (!$) return;
   $(function(){
-    const $status=$('#prod-control-status'),$mode=$('#prod-maintenance'),$edge=$('#prod-caddy');
+    const $status=$('#prod-control-status'),$mode=$('#prod-maintenance'),$modeDetail=$('#prod-maintenance-detail'),$edge=$('#prod-caddy'),$edgeDetail=$('#prod-caddy-detail');
     const $maintenance=$('#prod-maintenance-button'),$normal=$('#prod-normal-button');
     const modalEl=document.getElementById('prod-action-modal');
     const modal=modalEl && window.bootstrap ? new window.bootstrap.Modal(modalEl) : null;
@@ -21,8 +21,11 @@
        .done(function(d){
          if(d.schema!=='ezs.prod_control.v1') return;
          token=d.csrf||'';
-         $mode.text(d.maintenance===true?'Activée':d.maintenance===false?'Mode normal':'Indéterminée');
+         const maintenanceText=d.maintenance===true?'Activée':d.maintenance===false?'Mode normal':'Indéterminée';
+         $mode.text(maintenanceText);
+         $modeDetail.text(maintenanceText);
          $edge.text(d.caddy_listening?'Écoute 8501':'Arrêté');
+         $edgeDetail.text(d.caddy_listening?'Écoute 8501':'Arrêté');
          if (d.gateway_online && d.backend_ready) {
            setStatus('Gateway et Symfony actifs','success');
          } else if (d.gateway_online) {
@@ -35,6 +38,8 @@
          setButtons();
        }).fail(function(){
          setStatus('État indisponible','secondary');
+         $mode.text('Indéterminée');$modeDetail.text('Indéterminée');
+         $edge.text('Indéterminé');$edgeDetail.text('Indéterminé');
          capabilities={maintenance:false,normal:false};setButtons();
        });
     }
