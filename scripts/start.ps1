@@ -24,6 +24,21 @@ function Owned($s) {
     if(-not $cmd.Contains($model) -or $cmd -notmatch '(?i)(?:^|\s)--port\s+8720(?:\s|$)'){return $false}
     try{return ([datetime]$p.CreationDate).ToUniversalTime().ToString('o') -eq [string]$s.created}catch{return $false}
 }
+function Ai-Identity($record) {
+    if($null -eq $record -or $record.schema -ne 'ezs.assistant.ai.v1' -or [int]$record.pid -le 0 -or -not $record.created){return $false}
+    $proc=Info ([int]$record.pid)
+    if($null -eq $proc){return $false}
+    if(-not [string]::Equals([string]$proc.ExecutablePath,$exe,[StringComparison]::OrdinalIgnoreCase)){return $false}
+    $cmd=[string]$proc.CommandLine
+    if(-not $cmd.Contains($model) -or $cmd -notmatch '(?i)(?:^|\s)--port\s+8720(?:\s|$)'){return $false}
+    try{return ([datetime]$proc.CreationDate).ToUniversalTime().ToString('o') -eq [string]$record.created}catch{return $false}
+}
+function Ai-TcpReachable {
+    $client=New-Object System.Net.Sockets.TcpClient
+    try{$task=$client.ConnectAsync('127.0.0.1',8720);return ($task.Wait(600) -and $client.Connected)}
+    catch{return $false}
+    finally{$client.Dispose()}
+}
 function Health {
     try{$r=Invoke-RestMethod 'http://127.0.0.1:8720/health' -TimeoutSec 2 -ErrorAction Stop;return $r.status -eq 'ok'}catch{return $false}
 }
@@ -49,11 +64,20 @@ try {
         return
     }
     if($null -ne $s){
-        if(-not(Owned $s) -or -not(Health)){throw 'EZS_AI_START_REFUSED_STALE_OR_UNHEALTHY_OWNED_STATE'}
-        Write-Host 'EZS_AI_ALREADY_RUNNING_VERIFIED'
-        return
+        if(Ai-Identity $s){
+            if(-not(Health)){throw 'EZS_AI_START_REFUSED_UNHEALTHY_EXISTING_PROCESS'}
+            Write-Host 'EZS_AI_ALREADY_RUNNING_IDENTITY_AND_HEALTH_VERIFIED'
+            return
+        }
+        # Only a wholly extinct saved PID may be reclaimed, never a live foreign PID.
+        if($null -ne (Info ([int]$s.pid)) -or @(Listener).Count -gt 0 -or (Ai-TcpReachable)){
+            throw 'EZS_AI_START_REFUSED_STALE_OR_UNHEALTHY_OWNED_STATE'
+        }
+        Remove-Item -LiteralPath $statePath -Force -ErrorAction Stop
+        Write-Host 'EZS_AI_STALE_STATE_AFTER_REBOOT_CLEARED'
+        $s=$null
     }
-    if(@(Listener).Count -gt 0){Write-Host 'EZS_AI_EXISTING_UNMANAGED_LISTENER_PRESERVED';return}
+    if(@(Listener).Count -gt 0 -or (Ai-TcpReachable)){Write-Host 'EZS_AI_EXISTING_UNMANAGED_LISTENER_PRESERVED';return}
     foreach($path in @($exe,$model)){if(-not(Test-Path -LiteralPath $path -PathType Leaf)){throw "EZS_AI_DEPENDENCY_MISSING:$path"}}
     # CPU conservative profile as qualified in 4.2c15. No model download.
     $args=@('-m',('"'+$model+'"'),'--host','127.0.0.1','--port','8720','--ctx-size','4096','--parallel','1','--gpu-layers','0')
@@ -63,13 +87,13 @@ try {
         for($i=0;$i -lt 240;$i++){
             if($p.HasExited){throw 'EZS_AI_PROCESS_EXITED_BEFORE_READY'}
             $proc=Info ([int]$p.Id)
-            if($null -ne $proc -and @(Listener).Count -eq 1 -and [int](@(Listener)[0].OwningProcess) -eq [int]$p.Id -and (Health)){
+            if($null -ne $proc -and (Ai-TcpReachable) -and (Health)){
                 $record=[pscustomobject]@{schema='ezs.assistant.ai.v1';pid=[int]$p.Id;created=([datetime]$proc.CreationDate).ToUniversalTime().ToString('o')}
-                if(Owned $record){break}
+                if(Ai-Identity $record){break}
             }
             Start-Sleep -Milliseconds 500
         }
-        if($null -eq $record -or -not(Owned $record)){throw 'EZS_AI_READY_TIMEOUT_OR_IDENTITY_FAILURE'}
+        if($null -eq $record -or -not(Ai-Identity $record) -or -not(Health)){throw 'EZS_AI_READY_TIMEOUT_OR_IDENTITY_FAILURE'}
         [IO.File]::WriteAllText($statePath,($record|ConvertTo-Json -Depth 4),[Text.UTF8Encoding]::new($false))
         Write-Host 'EZS_AI_START_OWNED_READY_8720'
     }catch{
