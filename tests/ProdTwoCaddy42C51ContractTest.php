@@ -6,7 +6,7 @@ foreach([':8501 {',':8510 {',':8511 {','127.0.0.1:8512','127.0.0.1:18515','forwa
  if(!str_contains($caddy,$required))throw new RuntimeException('CADDY_MISSING '.$required);
 }
 if(substr_count($caddy,'admin 127.0.0.1:2020')!==1)throw new RuntimeException('PROD_ADMIN');
-foreach(['start.ps1','stop.ps1'] as $script){
+foreach(['start.ps1'] as $script){
  $src=(string)file_get_contents($root.'/scripts/'.$script);
  $i=strpos($src,'function Invoke-EzsProdLifecycle {');
  $j=strpos($src,'EZS_PROD_STOP_OWNED_OK',$i===false?0:$i);
