@@ -648,7 +648,7 @@ try {
  }
  if($Action -eq 'start'){
   if($null -ne $s){
-   if(Ready $s){if([string]$s.schema -eq 'ezs.prod.php.v1'){throw 'EZS_PROD_LEGACY_V1_STOP_REQUIRED_BEFORE_UPGRADE'};Write-Host 'EZS_PROD_ALREADY_RUNNING_VERIFIED';return}
+   if(Ready $s){if([string]$s.schema -eq 'ezs.prod.php.v1'){Write-Host 'EZS_PROD_LEGACY_V1_RUNNING_PRESERVED_MIGRATION_REQUIRED';return};Write-Host 'EZS_PROD_ALREADY_RUNNING_VERIFIED';return}
    # Historical Python-state is obsolete; never adopt or stop its process.
    foreach($e in @(Components $s)){
     $id=[int]$s.($e.name)
