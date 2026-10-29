@@ -2,7 +2,7 @@
 declare(strict_types=1);
 require dirname(__DIR__).'/src/Module/Coordination/GlobalQueueStore.php';
 use Ezs\Web\Module\Coordination\GlobalQueueStore;
-if (trim((string)file_get_contents(dirname(__DIR__).'/VERSION'))!=='4.2c23') throw new RuntimeException('VERSION');
+if (!preg_match('/^4\\.2c(\\d+)$/',trim((string)file_get_contents(dirname(__DIR__).'/VERSION')),$v) || (int)$v[1] < 23) throw new RuntimeException('VERSION');
 if (!extension_loaded('pdo_sqlite')) throw new RuntimeException('SQLITE_REQUIRED');
 $path=sys_get_temp_dir().DIRECTORY_SEPARATOR.'ezs_global_queue_'.bin2hex(random_bytes(10)).'.sqlite';
 function rejected(callable $f):void {try{$f();}catch(\DomainException|\InvalidArgumentException){return;}throw new RuntimeException('EXPECTED_REJECTION');}

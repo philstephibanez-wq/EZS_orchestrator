@@ -23,3 +23,6 @@ logs/*
 /web/.env.local
 /web/.env.*.local
 /web/config/reference.php
+
+# Persistent Orchestrator queue data: never commit SQLite/WAL/SHM
+/data/queue/
