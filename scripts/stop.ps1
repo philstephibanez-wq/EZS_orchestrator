@@ -1,4 +1,4 @@
-param([ValidateSet('stop','status','maintenance')][string]$ProdAction='')
+param()
 
 # Embedded maintained lifecycle helpers; only start.ps1/stop.ps1 are entry points.
 function Invoke-EzsRootLifecycle {
@@ -535,16 +535,9 @@ try {
 }finally{if($null -ne $lock){$lock.Dispose()}}
 }
 
-if($ProdAction -ne ''){Invoke-EzsProdLifecycle -Action $ProdAction;return}
-
 $ErrorActionPreference='Stop'
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$php='H:\PHP\php-8.5-x64\php.exe'
-$entry=Join-Path $root 'bin\prod_mode.php'
-if(-not(Test-Path -LiteralPath $php -PathType Leaf) -or -not(Test-Path -LiteralPath $entry -PathType Leaf)){throw 'EZS_STOP_MAINTENANCE_DEPENDENCY_MISSING'}
-& $php $entry maintenance
-if($LASTEXITCODE -ne 0){throw 'EZS_STOP_REFUSED_PROD_MAINTENANCE_UNCONFIRMED'}
-Write-Host 'EZS_STOP_PROD_MAINTENANCE_CONFIRMED'
+# STOP is DEV-only: do not access or change PROD gateway maintenance.
 $runtime=Join-Path $root 'runtime\v2-dev'
 $stateFile=Join-Path $runtime 'app-backends.json'
 $lockFile=Join-Path $runtime 'app-backends.lock'
