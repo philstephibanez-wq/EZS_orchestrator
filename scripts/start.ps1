@@ -673,9 +673,30 @@ try {
    foreach($target in $sequence){
     # Maintenance before exposing public edge, after local binaries were validated.
     if($target.name -eq 'gateway_php_pid'){Mode $true}
-    $p=Start-Process -FilePath $target.bin -ArgumentList $target.args -WorkingDirectory $target.cwd -WindowStyle Hidden -PassThru
+    $launch=@{FilePath=$target.bin;ArgumentList=$target.args;WorkingDirectory=$target.cwd;WindowStyle='Hidden';PassThru=$true}
+    if($target.name -eq 'php_pid' -or $target.name -eq 'gateway_php_pid'){
+     $diagnosticDir=Join-Path ([IO.Path]::GetTempPath()) 'EZS_PROD_FASTCGI_4_2C50'
+     New-Item -ItemType Directory -Force -Path $diagnosticDir | Out-Null
+     $stamp=[DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfff')
+     $launch.RedirectStandardError=Join-Path $diagnosticDir ("$($target.name)-$stamp-stderr.log")
+     $launch.RedirectStandardOutput=Join-Path $diagnosticDir ("$($target.name)-$stamp-stdout.log")
+     Write-Host "EZS_PROD_FASTCGI_DIAG_OUTPUT name=$($target.name) stderr=$($launch.RedirectStandardError) stdout=$($launch.RedirectStandardOutput)"
+    }
+    $p=Start-Process @launch
     $started+=@{pid=[int]$p.Id;bin=$target.bin;sig=$target.sig}
-    if(-not(WaitOwned $target.port ([int]$p.Id) $target.bin $target.sig)){throw "EZS_PROD_START_FAILED_$($target.name)"}
+    if(-not(WaitOwned $target.port ([int]$p.Id) $target.bin $target.sig)){
+     $alive=$null -ne (Info ([int]$p.Id))
+     $identity=Own ([int]$p.Id) $target.bin $target.sig
+     $listener=@(Listening $target.port)
+     $reachable=Tcp $target.port
+     $ownerIds=($listener | ForEach-Object {[string]$_.OwningProcess}) -join ','
+     Write-Host "EZS_PROD_START_ATTESTATION_FAILED name=$($target.name) pid=$($p.Id) process_alive=$alive identity_verified=$identity listener_count=$($listener.Count) listener_pids=$ownerIds tcp_reachable=$reachable"
+     if($launch.ContainsKey('RedirectStandardError')){
+      $nativeError=Get-Content -LiteralPath $launch.RedirectStandardError -Raw -ErrorAction SilentlyContinue
+      if(-not [string]::IsNullOrWhiteSpace($nativeError)){Write-Host "EZS_PROD_FASTCGI_STDERR_PRESENT name=$($target.name) file=$($launch.RedirectStandardError)"}
+     }
+     throw "EZS_PROD_START_FAILED_$($target.name)"
+    }
     $record[$target.name]=[int]$p.Id
     if($target.name -eq 'gateway_pid' -and (Http 'http://127.0.0.1:8510/__ezscore_gateway_status') -ne 200){throw 'EZS_PROD_GATEWAY_PROTOCOL_FAILED'}
    }
