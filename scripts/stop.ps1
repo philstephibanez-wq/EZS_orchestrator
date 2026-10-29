@@ -346,8 +346,6 @@ try{
     }
 }finally{if($null -ne $lock){$lock.Dispose()}}
 }
-function Invoke-EzsProdLifecycle {
-param([ValidateSet('start','stop','status','normal','maintenance','repair-fastcgi')][string]$Action='status')
 $ErrorActionPreference='Stop'
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $runtime=Join-Path $root 'runtime\v2-prod'
