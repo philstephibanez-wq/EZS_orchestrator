@@ -21,12 +21,13 @@ foreach (['start.ps1', 'stop.ps1'] as $file) {
     $section = substr($source, $start, $end - $start + strlen($endMarker));
     foreach ([
         'prod_gateway_php\\router.php',
-        'Caddyfile.gateway-php-prod',
+        'Caddyfile.prod-unified',
         '18515',
+        'ezs.prod.php.v2',
         'ezs.prod.php.v1',
         'EZS_PROD_START_MAINTENANCE_OK',
         "name='gateway_php_pid'",
-        "name='gateway_pid'",
+        "name='edge_pid'",
     ] as $token) {
         if (!str_contains($section, $token)) {
             throw new RuntimeException('MISSING ' . $token . ' ' . $file);
