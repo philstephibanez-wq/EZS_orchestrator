@@ -390,6 +390,20 @@ $targets=@(
 function Listener([int]$port){
     return @(Get-NetTCPConnection -LocalAddress '127.0.0.1' -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
 }
+function La-Identity([int]$port,[int]$processId,[string]$stamp){
+    if($processId -le 0 -or [string]::IsNullOrWhiteSpace($stamp)){return $false}
+    $p=Get-CimInstance Win32_Process -Filter "ProcessId=$processId" -ErrorAction SilentlyContinue
+    if($null -eq $p){return $false}
+    if(-not [string]::Equals([string]$p.ExecutablePath,$php,[StringComparison]::OrdinalIgnoreCase)){return $false}
+    if(-not ([string]$p.CommandLine).Contains("-b 127.0.0.1:$port")){return $false}
+    try{return ([datetime]$p.CreationDate).ToUniversalTime().ToString('o') -eq $stamp}catch{return $false}
+}
+function La-TcpReachable([int]$port){
+    $client=New-Object System.Net.Sockets.TcpClient
+    try{$task=$client.ConnectAsync('127.0.0.1',$port);return ($task.Wait(600) -and $client.Connected)}
+    catch{return $false}
+    finally{$client.Dispose()}
+}
 function Attested([int]$port,[int]$processId,[string]$stamp){
     if($processId -le 0 -or -not $stamp){return $false}
     $p=Get-CimInstance Win32_Process -Filter "ProcessId=$processId" -ErrorAction SilentlyContinue
@@ -450,7 +464,7 @@ try{
         $allAttested=$true
         foreach($t in $targets){
             $entry=if($t.name -eq 'LAB'){$state.lab}else{$state.assistant}
-            if(-not(Attested $t.port ([int]$entry.pid) ([string]$entry.stamp))){$allAttested=$false}
+            if(-not(La-Identity $t.port ([int]$entry.pid) ([string]$entry.stamp))){$allAttested=$false}
         }
         if($allAttested){
             Write-Host 'EZS_LA_BACKENDS_ALREADY_RUNNING_VERIFIED'
@@ -461,7 +475,7 @@ try{
         foreach($t in $targets){
             $entry=if($t.name -eq 'LAB'){$state.lab}else{$state.assistant}
             $old=Get-CimInstance Win32_Process -Filter "ProcessId=$([int]$entry.pid)" -ErrorAction SilentlyContinue
-            if($null -ne $old -or @(Listener $t.port).Count -gt 0){
+            if($null -ne $old -or @(Listener $t.port).Count -gt 0 -or (La-TcpReachable $t.port)){
                 throw "EZS_LA_STALE_OR_FOREIGN_STATE:$($t.name)"
             }
         }
@@ -477,7 +491,7 @@ try{
         return
     }
     foreach($t in $targets){
-        if(@(Listener $t.port).Count -gt 0){throw "EZS_LA_REFUSED_UNOWNED_PORT_$($t.port)"}
+        if(@(Listener $t.port).Count -gt 0 -or (La-TcpReachable $t.port)){throw "EZS_LA_REFUSED_UNOWNED_PORT_$($t.port)"}
     }
     $started=@()
     try{
@@ -487,8 +501,11 @@ try{
             $started+=@{port=$t.port;pid=[int]$p.Id}
             $ready=$false
             for($i=0;$i -lt 40;$i++){
-                $l=@(Listener $t.port)
-                if($l.Count -eq 1 -and [int]$l[0].OwningProcess -eq [int]$p.Id){$ready=$true;break}
+                $running=Get-CimInstance Win32_Process -Filter "ProcessId=$([int]$p.Id)" -ErrorAction SilentlyContinue
+                if($null -ne $running -and
+                   [string]::Equals([string]$running.ExecutablePath,$php,[StringComparison]::OrdinalIgnoreCase) -and
+                   ([string]$running.CommandLine).Contains("-b 127.0.0.1:$($t.port)") -and
+                   (La-TcpReachable $t.port)){$ready=$true;break}
                 if($p.HasExited){break}
                 Start-Sleep -Milliseconds 250
             }
@@ -499,7 +516,7 @@ try{
             $proc=Get-CimInstance Win32_Process -Filter "ProcessId=$($p.pid)"
             if($null -eq $proc){throw 'EZS_LA_START_PROCESS_GONE'}
             $stamp=([datetime]$proc.CreationDate).ToUniversalTime().ToString('o')
-            if(-not(Attested $p.port $p.pid $stamp)){throw 'EZS_LA_START_NOT_ATTESTED'}
+            if(-not(La-Identity $p.port $p.pid $stamp)){throw 'EZS_LA_START_NOT_ATTESTED'}
             $records+=@{pid=$p.pid;stamp=$stamp}
         }
         $state=[ordered]@{schema='ezs.la.backends.v1';lab=$records[0];assistant=$records[1]}

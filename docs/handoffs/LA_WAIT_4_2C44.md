@@ -1,0 +1,3 @@
+# v4.2c44 — LAB/Assistant START non-destructif
+
+User runtime v4.2c43: DEV login 8502/8852 HTTP 200, then `EZS_LA_START_FAILED_8713`. The LAB/Assistant loop was still gated by Windows Get-NetTCPConnection after starting new PHP. In START only, identify own exact PHP executable/port binding and confirm TCP connection; leave STOP `Attested()` unchanged and fail closed on occupied backend ports. State cleaning checks actual TCP in addition to listener snapshot. LAB/Assistant startup is pair-atomic on failure (only processes spawned in same run rolled back). Caddy shared is never stopped. Frontend root URL after failure may not match login endpoint; verify /fr/login explicitly. PROD untouched. Windows runtime validation required.
