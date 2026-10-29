@@ -1,12 +1,13 @@
 <?php
 declare(strict_types=1);
-$s=(string)file_get_contents(dirname(__DIR__).'/scripts/stop.ps1');
-$dispatch="if(". '$ProdAction' ." -ne ''){Invoke-EzsProdLifecycle -Action ". '$ProdAction' .";return}";
-$pos=strpos($s,$dispatch);
-$helper=strpos($s,'function Invoke-EzsLabAssistantLifecycle {');
-$prod=strpos($s,'function Invoke-EzsProdLifecycle {');
-$main=strpos($s,"\n".'$ErrorActionPreference'."='Stop'\n".'$root'."=(Resolve-Path",$prod);
-$general=strpos($s,'EZS_STOP_MAINTENANCE_DEPENDENCY_MISSING',$main);
-if($pos===false||$helper===false||$prod===false||$main===false||$general===false||!($helper<$prod&&$prod<$pos&&$pos<$main&&$main<$general)){throw new RuntimeException('PROD_STOP_DISPATCH_REGRESSION');}
-if(substr_count($s,$dispatch)!==1){throw new RuntimeException('DISPATCH_DUPLICATED');}
-echo "EZS_PROD_STOP_DISPATCH_4_2C52_OK\n";
+$root=dirname(__DIR__);
+$start=(string)file_get_contents($root.'/scripts/start.ps1');
+$stop=(string)file_get_contents($root.'/scripts/stop.ps1');
+if(!str_starts_with($stop,'param()'))throw new RuntimeException('STOP_MUST_BE_DEV_ONLY');
+if(str_contains($stop,"if(".'$ProdAction'." -ne '')"))throw new RuntimeException('STOP_HAS_PROD_DISPATCH');
+if(str_contains($stop,"& ".'$php'." ".'$entry'." maintenance"))throw new RuntimeException('STOP_CHANGES_PROD_MAINTENANCE');
+if(strpos($start,"Invoke-EzsProdLifecycle -Action start")===false)throw new RuntimeException('STANDARD_START_MUST_RECONCILE_PROD');
+if(strpos($start,"Invoke-EzsLabAssistantLifecycle -Action start")===false)throw new RuntimeException('STANDARD_START_MUST_START_LAB');
+if(strpos($start,"Invoke-EzsRootLifecycle -Action start")===false)throw new RuntimeException('STANDARD_START_MUST_START_DEV');
+if(strpos($start,"Invoke-EzsAssistantAiLifecycle -Action start")===false)throw new RuntimeException('STANDARD_START_MUST_START_ASSISTANT_AI');
+echo "EZS_LIFECYCLE_DEV_STOP_PROD_START_OK\n";
