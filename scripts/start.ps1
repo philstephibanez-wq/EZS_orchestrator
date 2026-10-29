@@ -951,8 +951,9 @@ try{
 Invoke-EzsLabAssistantLifecycle -Action start
 if(-not $?){throw 'EZS_LA_START_FAILED'}
 
-Invoke-EzsAssistantAiLifecycle -Action start
-
-# Standard START reconciles PROD after DEV; existing healthy PROD is preserved.
-# PROD lifecycle refuses unknown/live stale processes rather than adopting them.
+# Reconcile the production PHP/Caddy stack independently of Assistant AI.
+# Extinct reboot PIDs are cleared only after every expected listener is free.
+# Existing healthy legacy PROD v1 is preserved for a separate controlled migration.
 Invoke-EzsProdLifecycle -Action start
+
+Invoke-EzsAssistantAiLifecycle -Action start
