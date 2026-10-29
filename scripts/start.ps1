@@ -670,10 +670,23 @@ catch{throw 'EZS_DEV_APP_CONCURRENT_OPERATION'}
 try{
     if(Test-Path -LiteralPath $stateFile){
         $s=Get-Content -LiteralPath $stateFile -Raw -Encoding UTF8 | ConvertFrom-Json
-        if($s.schema -ne 'ezs.dev.apps.v1' -or -not(IsOwned 8602 ([int]$s.dev_pid) ([string]$s.dev_created)) -or
-           -not(IsOwned 8862 ([int]$s.preview_pid) ([string]$s.preview_created))){
+        if($s.schema -ne 'ezs.dev.apps.v1'){
             throw 'EZS_DEV_APP_REFUSED_STALE_STATE'
         }
+        $devVerified=IsOwned 8602 ([int]$s.dev_pid) ([string]$s.dev_created)
+        $previewVerified=IsOwned 8862 ([int]$s.preview_pid) ([string]$s.preview_created)
+        if(-not($devVerified -and $previewVerified)){
+            # Recover only a fully extinct previous DEV pair (e.g. Windows reboot).
+            # A single surviving PID or occupied listener is ambiguous: refuse.
+            $devOld=Get-CimInstance Win32_Process -Filter "ProcessId=$([int]$s.dev_pid)" -ErrorAction SilentlyContinue
+            $previewOld=Get-CimInstance Win32_Process -Filter "ProcessId=$([int]$s.preview_pid)" -ErrorAction SilentlyContinue
+            if(@(Owners 8602).Count -gt 0 -or @(Owners 8862).Count -gt 0 -or
+               $null -ne $devOld -or $null -ne $previewOld){
+                throw 'EZS_DEV_APP_REFUSED_STALE_STATE'
+            }
+            Remove-Item -LiteralPath $stateFile -Force -ErrorAction Stop
+            Write-Host 'EZS_DEV_APPS_STALE_STATE_AFTER_REBOOT_CLEARED'
+        }else{
         if($RefreshDevApps){
             # Restart ONLY our two attested DEV FastCGI processes. No global STOP or PROD mode change.
             $targets=@(
@@ -710,6 +723,7 @@ try{
             if(-not $?){throw 'EZS_LA_START_FAILED'}
             Invoke-EzsAssistantAiLifecycle -Action start
             return
+        }
         }
     }
     foreach($port in @(8602,8862)){if(@(Owners $port).Count -gt 0){throw "EZS_DEV_APP_REFUSED_FOREIGN_LISTENER_$port"}}
