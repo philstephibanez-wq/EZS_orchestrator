@@ -22,18 +22,39 @@ final class NativeWindowsLifecycle
     private readonly \Closure $listeners;
     private readonly \Closure $spawn;
     private readonly \Closure $terminate;
+    private readonly \Closure $dependencyAvailable;
     private readonly string $runtime;
 
     /** Callbacks de test uniquement ; toutes opérations réelles utilisent les API Windows. */
-    public function __construct(?callable $inventory=null, ?callable $listeners=null, ?callable $spawn=null, ?callable $terminate=null, ?string $runtime=null)
+    public function __construct(?callable $inventory=null, ?callable $listeners=null, ?callable $spawn=null, ?callable $terminate=null, ?string $runtime=null, ?callable $dependencyAvailable=null)
     {
         $this->inventory=$inventory ? \Closure::fromCallable($inventory) : static fn():array=>(new WindowsProcessInventory())->collect();
         $this->listeners=$listeners ? \Closure::fromCallable($listeners) : self::nativeListeners(...);
         $this->spawn=$spawn ? \Closure::fromCallable($spawn) : self::nativeSpawn(...);
         $this->terminate=$terminate ? \Closure::fromCallable($terminate) : self::nativeTerminate(...);
         $this->runtime=$runtime ?? self::ROOT.'/runtime/v2-dev';
+        $this->dependencyAvailable=$dependencyAvailable ? \Closure::fromCallable($dependencyAvailable) : static fn(string $exe,string $cwd):bool=>is_file($exe) && is_dir($cwd);
     }
     public static function specs():array { return self::DEV; }
+    /** Un journal d'intention non résolu bloque toute nouvelle mutation. */
+    private function assertNoPending():void
+    {
+        if (is_file($this->runtime.'/native-spawn-pending.json'))
+            throw new \RuntimeException('EZS_NATIVE_PENDING_REQUIRES_MANUAL_ATTESTATION');
+    }
+    private function pending(string $name):void
+    {
+        $path=$this->runtime.'/native-spawn-pending.json';
+        $bytes=json_encode(['schema'=>'ezs.native.pending.v1','name'=>$name,'time'=>gmdate('c')],JSON_THROW_ON_ERROR);
+        if(file_put_contents($path,$bytes,LOCK_EX)===false)
+            throw new \RuntimeException('EZS_NATIVE_PENDING_WRITE_FAILED');
+    }
+    private function clearPending():void
+    {
+        $path=$this->runtime.'/native-spawn-pending.json';
+        if(!is_file($path) || !unlink($path))
+            throw new \RuntimeException('EZS_NATIVE_PENDING_CLEAR_FAILED');
+    }
     private function records():array
     {
         $file=$this->runtime.'/native-processes.json';
@@ -78,6 +99,7 @@ final class NativeWindowsLifecycle
     private function observations():array {return [self::index(($this->inventory)()),($this->listeners)()];}
     public function status():array
     {
+        $this->assertNoPending();
         [$processes,$ports]=$this->observations();$stored=$this->records();$result=[];
         foreach(self::DEV as $name=>$spec){
             $rec=$stored[$name]??null;
@@ -85,16 +107,6 @@ final class NativeWindowsLifecycle
                 ? 'ATTESTED' : (($ports[$spec['port']]??[])!==[]?'PORT_UNVERIFIED':($rec?'RECORDED_UNVERIFIED':'ABSENT'));
         }
         return $result;
-    }
-    private function archiveNativeState():void
-    {
-        $source=$this->runtime.'/native-processes.json';
-        if(!is_file($source))return;
-        $dir='H:/temp/ezs-orchestrator/native-stale';
-        if(!is_dir('H:/temp'))throw new \RuntimeException('EZS_NATIVE_TEMP_UNAVAILABLE');
-        if(!is_dir($dir) && !mkdir($dir,0700,true) && !is_dir($dir))throw new \RuntimeException('EZS_NATIVE_STALE_ARCHIVE_UNAVAILABLE');
-        $target=$dir.'/native-'.gmdate('YmdHis').'-'.bin2hex(random_bytes(8)).'.json';
-        if(!rename($source,$target))throw new \RuntimeException('EZS_NATIVE_STALE_ARCHIVE_FAILED');
     }
     private function reconcileLegacy():void
     {
@@ -113,16 +125,13 @@ final class NativeWindowsLifecycle
                 if(isset($processes[(int)$v]))throw new \RuntimeException('EZS_NATIVE_LEGACY_PID_ACTIVE_'.$v);
             }
             foreach(self::DEV as $spec){if(($ports[$spec['port']]??[])!==[])throw new \RuntimeException('EZS_NATIVE_LEGACY_LISTENER_ACTIVE_'.$spec['port']);}
-            $archive='H:/temp/ezs-orchestrator/native-legacy';
-            if(!is_dir('H:/temp'))throw new \RuntimeException('EZS_NATIVE_TEMP_UNAVAILABLE');
-            if(!is_dir($archive) && !mkdir($archive,0700,true) && !is_dir($archive))throw new \RuntimeException('EZS_NATIVE_ARCHIVE_UNAVAILABLE');
-            $target=$archive.'/'.str_replace('.json','', $file).'-'.gmdate('YmdHis').'-'.bin2hex(random_bytes(6)).'.json';
-            if(!rename($path,$target))throw new \RuntimeException('EZS_NATIVE_LEGACY_ARCHIVE_FAILED');
+            throw new \RuntimeException('EZS_NATIVE_LEGACY_REQUIRES_MANUAL_RECONCILIATION_'.$file);
         }
     }
     public function start():array
     {
         return $this->withLock(function():array{
+            $this->assertNoPending();
             $this->reconcileLegacy();
             $stored=$this->records();[$processes,$ports]=$this->observations();
             // Une preuve historique devenue morte peut être archivée uniquement si
@@ -151,8 +160,7 @@ final class NativeWindowsLifecycle
                 foreach(self::DEV as $name=>$spec){
                     if(($confirmPorts[$spec['port']]??[])!==[])throw new \RuntimeException('EZS_NATIVE_STALE_REFUSED_RACE_PORT_'.$name);
                 }
-                $this->archiveNativeState();
-                $stored=[];[$processes,$ports]=[$confirmProcesses,$confirmPorts];
+                throw new \RuntimeException('EZS_NATIVE_STALE_REQUIRES_MANUAL_RECONCILIATION');
             }
             // Un état encore vivant mais non attesté ne peut être adopté ou remplacé.
             foreach(self::DEV as $name=>$spec){
@@ -163,10 +171,16 @@ final class NativeWindowsLifecycle
                 if($rec===null && ($ports[$spec['port']]??[])!==[])
                    throw new \RuntimeException('EZS_NATIVE_START_REFUSED_PORT_'.$name);
             }
+            // Préflight global : aucune création si une dépendance manque.
+            foreach(self::DEV as $name=>$spec){
+                if(isset($stored[$name]))continue;
+                if(!(($this->dependencyAvailable)($spec['exe'],$spec['cwd'])))
+                    throw new \RuntimeException('EZS_NATIVE_DEPENDENCY_MISSING_'.$name);
+            }
             $new=[];
             foreach(self::DEV as $name=>$spec){
                 if(isset($stored[$name]))continue;
-                if(!is_file($spec['exe']) || !is_dir($spec['cwd']))throw new \RuntimeException('EZS_NATIVE_DEPENDENCY_MISSING_'.$name);
+                $this->pending($name);
                 $pid=($this->spawn)($spec['exe'],$spec['args'],$spec['cwd']);
                 if(!is_int($pid) || $pid<1)throw new \RuntimeException('EZS_NATIVE_CREATE_FAILED_'.$name);
                 $attested=false;
@@ -176,7 +190,7 @@ final class NativeWindowsLifecycle
                     $p=$processes[$pid]??null;
                     if($p===null)continue;
                     $rec=['pid'=>$pid,'created'=>(string)($p['created']??'')];
-                    if(self::attest($rec,$spec,$p,$ports)){$stored[$name]=$rec;$new[$name]=$pid;$this->persist($stored);$attested=true;break;}
+                    if(self::attest($rec,$spec,$p,$ports)){$stored[$name]=$rec;$new[$name]=$pid;$this->persist($stored);$this->clearPending();$attested=true;break;}
                 }
                 if(!$attested)throw new \RuntimeException('EZS_NATIVE_START_UNATTESTED_'.$name.'_PID_'.$pid);
             }
@@ -186,6 +200,7 @@ final class NativeWindowsLifecycle
     public function stop():array
     {
         return $this->withLock(function():array{
+            $this->assertNoPending();
             $stored=$this->records();[$processes,$ports]=$this->observations();
             foreach($stored as $name=>$rec){
                 if(!isset(self::DEV[$name]) || !is_array($rec) || !isset($processes[$rec['pid']??0]) ||
