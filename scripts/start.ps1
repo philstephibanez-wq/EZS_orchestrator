@@ -754,8 +754,13 @@ try {
  }
  if($Action -eq 'repair-fastcgi'){throw 'EZS_PROD_REPAIR_REQUIRES_DEDICATED_PHP_GATEWAY_PROCEDURE'}
  if($Action -eq 'stop'){
+  # Temporary maintenance protects shutdown, but must not change the saved user mode.
+  $originalMaintenance=PersistedProdMode
   Mode $true
-  if((Http 'http://127.0.0.1:8501/') -ne 503){throw 'EZS_PROD_STOP_REFUSED_MAINTENANCE_UNCONFIRMED'}
+  if((Http 'http://127.0.0.1:8501/') -ne 503){
+   Mode $originalMaintenance
+   throw 'EZS_PROD_STOP_REFUSED_MAINTENANCE_UNCONFIRMED'
+  }
   foreach($e in @(Components $s)){
    $id=[int]$s.($e.name)
    if(-not(Own $id $e.bin $e.sig)){throw "EZS_PROD_STOP_REFUSED_PROCESS_$($e.name)"}
@@ -768,6 +773,8 @@ try {
    Stop-Process -Id $id -ErrorAction Stop
   }
   Remove-Item -LiteralPath $statePath -Force
+  # On the next START, restore the exact mode saved before shutdown.
+  Mode $originalMaintenance
   Write-Host 'EZS_PROD_STOP_OWNED_OK'
   return
  }
