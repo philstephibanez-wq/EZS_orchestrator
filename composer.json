@@ -32,7 +32,10 @@
     "scripts": {
         "test": [
             "@php vendor/bin/phpunit --configuration phpunit.xml.dist --no-progress"
-        ]
+        ],
+        "start": "@php bin/console ezs:ecosystem:start",
+        "stop": "@php bin/console ezs:ecosystem:stop",
+        "ezs-status": "@php -d extension=H:/PHP/php-8.5-x64/ext/php_com_dotnet.dll bin/console ezs:ecosystem:status"
     },
     "description": "Orchestrateur Symfony des environnements EZScore DEV et PROD"
 }
