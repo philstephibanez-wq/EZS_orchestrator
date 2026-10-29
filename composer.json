@@ -1,29 +1,38 @@
 {
-  "name": "ezs/orchestrator",
-  "type": "project",
-  "require": {
-    "php": ">=8.4",
-    "symfony/framework-bundle": "7.4.*",
-    "symfony/runtime": "7.4.*",
-    "symfony/twig-bundle": "7.4.*",
-    "symfony/yaml": "7.4.*",
-    "symfony/monolog-bundle": "^3.0",
-    "symfony/console": "7.4.*",
-    "symfony/process": "7.4.*"
-  },
-  "require-dev": {
-    "symfony/debug-bundle": "7.4.*",
-    "symfony/web-profiler-bundle": "7.4.*"
-  },
-  "autoload": {
-    "psr-4": {
-      "Ezs\\Web\\": "src/"
-    }
-  },
-  "config": {
-    "allow-plugins": {
-      "symfony/runtime": true
-    }
-  },
-  "license": "proprietary"
+    "name": "ezs/orchestrator",
+    "type": "project",
+    "require": {
+        "php": ">=8.4",
+        "symfony/framework-bundle": "7.4.*",
+        "symfony/runtime": "7.4.*",
+        "symfony/twig-bundle": "7.4.*",
+        "symfony/yaml": "7.4.*",
+        "symfony/monolog-bundle": "^3.0",
+        "symfony/console": "7.4.*",
+        "symfony/process": "7.4.*"
+    },
+    "require-dev": {
+        "symfony/debug-bundle": "7.4.*",
+        "symfony/web-profiler-bundle": "7.4.*",
+        "phpunit/phpunit": "13.0",
+        "symfony/browser-kit": "7.4",
+        "symfony/css-selector": "7.4"
+    },
+    "autoload": {
+        "psr-4": {
+            "Ezs\\Web\\": "src/"
+        }
+    },
+    "config": {
+        "allow-plugins": {
+            "symfony/runtime": true
+        }
+    },
+    "license": "proprietary",
+    "scripts": {
+        "test": [
+            "@php vendor/bin/phpunit --configuration phpunit.xml.dist --no-progress"
+        ]
+    },
+    "description": "Orchestrateur Symfony des environnements EZScore DEV et PROD"
 }
