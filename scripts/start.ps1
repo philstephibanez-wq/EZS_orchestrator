@@ -682,6 +682,20 @@ function IsOwned([int]$port,[int]$processId,[string]$stamp){
     if(-not ([string]$p.CommandLine).Contains("-b 127.0.0.1:$port")){return $false}
     try {return ([datetime]$p.CreationDate).ToUniversalTime().ToString('o') -eq $stamp} catch{return $false}
 }
+function Dev-Identity([int]$port,[int]$processId,[string]$stamp){
+    if($processId -le 0 -or [string]::IsNullOrWhiteSpace($stamp)){return $false}
+    $p=Get-CimInstance Win32_Process -Filter "ProcessId=$processId" -ErrorAction SilentlyContinue
+    if($null -eq $p){return $false}
+    if(-not [string]::Equals([string]$p.ExecutablePath,$binary,[StringComparison]::OrdinalIgnoreCase)){return $false}
+    if(-not ([string]$p.CommandLine).Contains("-b 127.0.0.1:$port")){return $false}
+    try{return ([datetime]$p.CreationDate).ToUniversalTime().ToString('o') -eq $stamp}catch{return $false}
+}
+function Dev-TcpReachable([int]$port){
+    $client=New-Object System.Net.Sockets.TcpClient
+    try{$task=$client.ConnectAsync('127.0.0.1',$port);return ($task.Wait(500) -and $client.Connected)}
+    catch{return $false}
+    finally{$client.Dispose()}
+}
 function WaitOwned([int]$port,[int]$processId){
     for($i=0;$i -lt 40;$i++){
         $listeners=@(Owners $port)
@@ -743,14 +757,15 @@ try{
         if($s.schema -ne 'ezs.dev.apps.v1'){
             throw 'EZS_DEV_APP_REFUSED_STALE_STATE'
         }
-        $devVerified=IsOwned 8602 ([int]$s.dev_pid) ([string]$s.dev_created)
-        $previewVerified=IsOwned 8862 ([int]$s.preview_pid) ([string]$s.preview_created)
+        $devVerified=Dev-Identity 8602 ([int]$s.dev_pid) ([string]$s.dev_created)
+        $previewVerified=Dev-Identity 8862 ([int]$s.preview_pid) ([string]$s.preview_created)
         if(-not($devVerified -and $previewVerified)){
             # Recover only a fully extinct previous DEV pair (e.g. Windows reboot).
             # A single surviving PID or occupied listener is ambiguous: refuse.
             $devOld=Get-CimInstance Win32_Process -Filter "ProcessId=$([int]$s.dev_pid)" -ErrorAction SilentlyContinue
             $previewOld=Get-CimInstance Win32_Process -Filter "ProcessId=$([int]$s.preview_pid)" -ErrorAction SilentlyContinue
             if(@(Owners 8602).Count -gt 0 -or @(Owners 8862).Count -gt 0 -or
+               (Dev-TcpReachable 8602) -or (Dev-TcpReachable 8862) -or
                $null -ne $devOld -or $null -ne $previewOld){
                 throw 'EZS_DEV_APP_REFUSED_STALE_STATE'
             }
@@ -796,7 +811,7 @@ try{
         }
         }
     }
-    foreach($port in @(8602,8862)){if(@(Owners $port).Count -gt 0){throw "EZS_DEV_APP_REFUSED_FOREIGN_LISTENER_$port"}}
+    foreach($port in @(8602,8862)){if(@(Owners $port).Count -gt 0 -or (Dev-TcpReachable $port)){throw "EZS_DEV_APP_REFUSED_FOREIGN_LISTENER_$port"}}
     $env:APP_ENV='dev';$env:APP_DEBUG='1';$env:EZSCORE_INSTANCE='dev';$env:PHP_FCGI_MAX_REQUESTS='0'
     Remove-Item Env:EZS_GATEWAY_RECIPE_CONFIG -ErrorAction SilentlyContinue
     Remove-Item Env:EZS_GATEWAY_RECIPE_MODE -ErrorAction SilentlyContinue
@@ -811,7 +826,7 @@ try{
         $preview=Get-CimInstance Win32_Process -Filter "ProcessId=$($started[1].pid)"
         if($null -eq $dev -or $null -eq $preview){throw 'EZS_DEV_APP_IDENTITY_UNAVAILABLE'}
         $state=[ordered]@{schema='ezs.dev.apps.v1';dev_pid=$started[0].pid;dev_created=([datetime]$dev.CreationDate).ToUniversalTime().ToString('o');preview_pid=$started[1].pid;preview_created=([datetime]$preview.CreationDate).ToUniversalTime().ToString('o')}
-        if(-not(IsOwned 8602 $state.dev_pid $state.dev_created) -or -not(IsOwned 8862 $state.preview_pid $state.preview_created)){throw 'EZS_DEV_APP_OWNERSHIP_NOT_CONFIRMED'}
+        if(-not(Dev-Identity 8602 $state.dev_pid $state.dev_created) -or -not(Dev-Identity 8862 $state.preview_pid $state.preview_created)){throw 'EZS_DEV_APP_OWNERSHIP_NOT_CONFIRMED'}
         $devReady=HttpReady 8502 '/fr/login'
         $previewReady=HttpReady 8852 '/fr/login'
         if(-not($devReady -and $previewReady)){throw 'EZS_DEV_APP_HTTP_NOT_READY'}
