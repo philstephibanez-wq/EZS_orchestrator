@@ -255,6 +255,129 @@ final class NativeWindowsLifecycle
             return $stopped;
         });
     }
+    /** Groupes commandables séparément ; aucun groupe ne contient les processus racine de l'interface. */
+    public static function groups(): array
+    {
+        return [
+            'dev' => ['ezscore_dev', 'ezscore_preview'],
+            'lab' => ['lab'],
+            'assistant' => ['assistant'],
+        ];
+    }
+
+    /** @return list<string> */
+    private static function groupNames(string $group): array
+    {
+        $groups = self::groups();
+        if (!isset($groups[$group])) {
+            throw new \InvalidArgumentException('EZS_NATIVE_GROUP_REFUSED');
+        }
+        return $groups[$group];
+    }
+
+    /** Démarre exclusivement le groupe demandé, en conservant les preuves des autres groupes. */
+    public function startGroup(string $group): array
+    {
+        $names = self::groupNames($group);
+        return $this->withLock(function () use ($names): array {
+            $this->assertNoPending();
+            $this->reconcileLegacy();
+            $stored = $this->records();
+            [$processes, $ports] = $this->observations();
+            foreach ($stored as $name => $record) {
+                if (!isset(self::DEV[$name]) || !is_array($record)) {
+                    throw new \RuntimeException('EZS_NATIVE_UNKNOWN_RECORD');
+                }
+                $pid = (int)($record['pid'] ?? 0);
+                if ($pid < 1 || !isset($processes[$pid]) ||
+                    !self::attest($record, self::DEV[$name], $processes[$pid], $ports)) {
+                    throw new \RuntimeException('EZS_NATIVE_GROUP_START_REFUSED_STATE_'.$name);
+                }
+            }
+            // Refus de toute occupation non attribuée, y compris sur un autre groupe.
+            foreach (self::DEV as $name => $spec) {
+                if (!isset($stored[$name]) && ($ports[$spec['port']] ?? []) !== []) {
+                    throw new \RuntimeException('EZS_NATIVE_GROUP_START_REFUSED_PORT_'.$name);
+                }
+            }
+            foreach ($names as $name) {
+                if (!isset($stored[$name]) && !(($this->dependencyAvailable)(self::DEV[$name]['exe'], self::DEV[$name]['cwd']))) {
+                    throw new \RuntimeException('EZS_NATIVE_DEPENDENCY_MISSING_'.$name);
+                }
+            }
+            $started = [];
+            foreach ($names as $name) {
+                if (isset($stored[$name])) continue;
+                $spec = self::DEV[$name];
+                $this->pending($name);
+                $pid = ($this->spawn)($spec['exe'], $spec['args'], $spec['cwd']);
+                if (!is_int($pid) || $pid < 1) throw new \RuntimeException('EZS_NATIVE_CREATE_FAILED_'.$name);
+                $attested = false;
+                for ($i = 0; $i < 60; $i++) {
+                    usleep(250000);
+                    [$processes, $ports] = $this->observations();
+                    $observed = $processes[$pid] ?? null;
+                    if ($observed === null) continue;
+                    $record = ['pid' => $pid, 'created' => (string)($observed['created'] ?? '')];
+                    if (self::attest($record, $spec, $observed, $ports)) {
+                        $stored[$name] = $record;
+                        $started[$name] = $pid;
+                        $this->persist($stored);
+                        $this->clearPending();
+                        $attested = true;
+                        break;
+                    }
+                }
+                if (!$attested) throw new \RuntimeException('EZS_NATIVE_START_UNATTESTED_'.$name.'_PID_'.$pid);
+            }
+            return $started;
+        });
+    }
+
+    /** Arrête exclusivement le groupe demandé, jamais root_php/root_caddy ni l'IA. */
+    public function stopGroup(string $group): array
+    {
+        $names = self::groupNames($group);
+        return $this->withLock(function () use ($names): array {
+            $this->assertNoPending();
+            $stored = $this->records();
+            [$processes, $ports] = $this->observations();
+            foreach ($stored as $name => $record) {
+                $pid = is_array($record) ? (int)($record['pid'] ?? 0) : 0;
+                if (!isset(self::DEV[$name]) || $pid < 1 || !isset($processes[$pid]) ||
+                    !self::attest($record, self::DEV[$name], $processes[$pid], $ports)) {
+                    throw new \RuntimeException('EZS_NATIVE_GROUP_STOP_REFUSED_UNVERIFIED_'.$name);
+                }
+            }
+            $stopped = [];
+            foreach (array_reverse($names) as $name) {
+                if (!isset($stored[$name])) continue;
+                $record = $stored[$name];
+                $pid = (int)$record['pid'];
+                [$processes, $ports] = $this->observations();
+                if (!isset($processes[$pid]) ||
+                    !self::attest($record, self::DEV[$name], $processes[$pid], $ports)) {
+                    throw new \RuntimeException('EZS_NATIVE_GROUP_STOP_IDENTITY_CHANGED_'.$name);
+                }
+                if (!(($this->terminate)($pid))) throw new \RuntimeException('EZS_NATIVE_GROUP_STOP_FAILED_'.$name);
+                $gone = false;
+                for ($i = 0; $i < 40; $i++) {
+                    usleep(250000);
+                    [$processes, $ports] = $this->observations();
+                    if (!isset($processes[$pid]) && ($ports[self::DEV[$name]['port']] ?? []) === []) {
+                        $gone = true;
+                        break;
+                    }
+                }
+                if (!$gone) throw new \RuntimeException('EZS_NATIVE_GROUP_STOP_NOT_EXITED_'.$name);
+                unset($stored[$name]);
+                $this->persist($stored);
+                $stopped[$name] = $pid;
+            }
+            return $stopped;
+        });
+    }
+
     private static function wmi():object
     {
         if(PHP_OS_FAMILY!=='Windows' || !class_exists('COM'))throw new \RuntimeException('EZS_NATIVE_WMI_UNAVAILABLE');
