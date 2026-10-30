@@ -99,6 +99,43 @@ Pour une intervention sans modification de code, ne pas créer de ZIP inutile. F
 
 **Un test unitaire réussi ne constitue pas une validation opérationnelle.**
 
+### 7.1. Tests ordonnés selon la séquence réelle de boot
+
+Pour tout système à démarrage séquentiel (notamment Orchestrator, services DEV/PROD et supervision Windows), la recette doit suivre **l'ordre effectif des dépendances**, de l'initialisation jusqu'à la supervision continue. Les tests isolés restent nécessaires, mais ne remplacent pas les tests de séquence.
+
+Ordre de référence, à ajuster seulement après vérification des dépendances réellement implémentées :
+
+1. **Bootstrap** : chargement de la configuration, contrôle des préconditions, acquisition de l'exclusivité et démarrage du superviseur.
+2. **État désiré** : lecture de l'intention persistée pour chaque service ; un arrêt volontaire reste un arrêt volontaire, sans redémarrage implicite.
+3. **Inventaire et attestation** : identification des processus, PID, ports, propriétaires et états réellement observables ; distinguer état inconnu, état absent et arrêt confirmé.
+4. **Réconciliation** : contrôle et traitement sûr des attestations périmées, sans arrêt ni adoption de processus étrangers.
+5. **Démarrage ordonné** : lancement des seuls services attendus actifs, dans l'ordre de leurs dépendances ; ne jamais démarrer un service dont les préconditions ne sont pas satisfaites.
+6. **Disponibilité** : attestation des processus, ports et interfaces effectivement nécessaires, en contrôlant séparément les chaînes DEV et PROD.
+7. **Supervision continue** : détection des pannes, récupération ciblée, temporisation bornée des nouvelles tentatives et respect permanent de l'état désiré.
+
+Les domaines indépendants restent isolés : une panne LAB ne doit pas déclencher une intervention sur PROD ou Caddy DEV. L'ordre ci-dessus définit une **logique de validation**, pas une autorisation de modifier des processus.
+
+### 7.2. Scénarios obligatoires et niveaux de preuve
+
+- **Boot à froid** : aucun service préexistant ; vérifier chaque transition et l'ordre des dépendances.
+- **Boot à chaud** : services déjà actifs ; vérifier l'idempotence, la non-duplication et l'absence de redémarrages inutiles.
+- **Panne contrôlée** : perte d'un service ou attestation obsolète ; vérifier la reprise du seul composant concerné, après vérification de son identité.
+- **Arrêt intentionnel** : l'état STOPPED persiste pendant les cycles de supervision et après redémarrage du superviseur.
+- **Échec d'une dépendance** : signaler l'échec, ne pas lancer les dépendants incompatibles et préserver les autres domaines.
+- **Conflit d'identité / PID étranger** : refuser toute action dangereuse et produire un diagnostic explicite.
+
+Pour chaque scénario, distinguer **tests unitaires avec doubles de test**, **tests d'intégration**, puis **recette opérationnelle réelle** sur un environnement autorisé. Un scénario simulé ne prouve ni le boot Windows effectif, ni la récupération d'un service réel.
+
+### 7.3. Exécution, durée et critères de validation
+
+- Exécuter en priorité les tests ciblés correspondant à la séquence affectée, puis les tests d'intégration appropriés et la suite complète avant validation finale.
+- Une exécution bloquée ou un **timeout** est un échec non diagnostiqué, jamais une réussite implicite ; identifier le test ou l'attente responsable avant d'augmenter un délai.
+- Tracer le nom de l'étape, son début, sa fin, son résultat et sa durée lorsque nécessaire pour localiser un blocage ; préserver les preuves.
+- Éviter la répétition d'une suite complète inchangée lorsque son blocage est déjà établi ; isoler d'abord la cause et corriger le mécanisme concerné.
+- Ne jamais activer une supervision permanente ou lancer des services PROD uniquement pour faire passer des tests, sans préflight, périmètre autorisé et procédure de restauration.
+- Une validation finale exige des preuves distinctes : **séquence de boot conforme**, **tests automatisés réussis**, puis **fonctionnement réel attesté** quand le changement porte sur le cycle de vie des services.
+
+
 ## 8. Fichiers temporaires et environnement
 
 Tous les éléments temporaires doivent être créés exclusivement sous :
