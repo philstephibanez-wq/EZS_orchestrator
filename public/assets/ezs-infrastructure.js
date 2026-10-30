@@ -2,6 +2,8 @@
 (function ($) {
     if (!$) return;
     $(function () {
+        // Remove the redundant footer from the Infrastructure view.
+        $('.ezs-footerline').remove();
         const $feedback = $('#dev-health-feedback');
         const $refresh = $('#refresh-dev-health');
         let pending = false;
@@ -45,8 +47,74 @@
                   }
               });
         }
-        $refresh.on('click', function(){ refresh(); refreshBackend(); });
-        refresh(); refreshBackend();
-        window.setInterval(function () { if (!document.hidden) {refresh(); refreshBackend();} }, 15000);
+
+        // Group control uses the existing buttons, without altering PROD or the Orchestrator root.
+        const groups = {dev:'#dev-title', lab:'#lab-title', assistant:'#assistant-title'};
+        const controls = {};
+        let csrf = '';
+        let acting = false;
+        Object.keys(groups).forEach(function(group) {
+            const $card = $(groups[group]).closest('.ezs-server-card');
+            const $buttons = $card.find('.ezs-server-actions button');
+            controls[group] = {start:$buttons.eq(0), stop:$buttons.eq(1)};
+            $buttons.removeAttr('title').prop('disabled', true);
+        });
+        function disableAll() {
+            Object.keys(controls).forEach(function(group) {
+                controls[group].start.prop('disabled', true);
+                controls[group].stop.prop('disabled', true);
+            });
+        }
+        function refreshGroups() {
+            if (acting) return;
+            $.ajax({url:'/api/v2/infrastructure/dev-groups',method:'GET',dataType:'json',timeout:10000,cache:false})
+              .done(function(data) {
+                  if (!data || data.schema !== 'ezs.dev_groups.v1' || !data.groups || !data.csrf) {
+                      csrf = ''; disableAll(); return;
+                  }
+                  csrf = data.csrf;
+                  Object.keys(controls).forEach(function(group) {
+                      const state = data.groups[group] || {};
+                      controls[group].start.prop('disabled', !state.start);
+                      controls[group].stop.prop('disabled', !state.stop);
+                      controls[group].start.attr('title', 'État natif : '+(state.state || 'indéterminé'));
+                      controls[group].stop.attr('title', 'État natif : '+(state.state || 'indéterminé'));
+                  });
+              }).fail(function() { csrf = ''; disableAll(); });
+        }
+        function action(group, verb) {
+            if (acting || !csrf || !controls[group] || controls[group][verb].prop('disabled')) return;
+            const label = {dev:'EZScore DEV',lab:'EZStudio LAB',assistant:'Assistant'}[group];
+            const confirmation = verb === 'stop' ?
+                'Arrêter les processus natifs de '+label+' ? Les travaux en cours peuvent être interrompus. Les autres groupes et l’IA restent inchangés.' :
+                'Démarrer uniquement les processus natifs de '+label+' ?';
+            if (!window.confirm(confirmation)) return;
+            acting = true;
+            disableAll();
+            $feedback.text((verb === 'start' ? 'Démarrage' : 'Arrêt')+' '+label+' en cours…');
+            $.ajax({
+                url:'/api/v2/infrastructure/dev-groups/'+group+'/'+verb,
+                method:'POST',
+                headers:{'X-EZS-CSRF':csrf},
+                data:{confirmation:verb.toUpperCase()+'_'+group.toUpperCase()},
+                dataType:'json',
+                timeout:125000
+            }).done(function() {
+                $feedback.text('Commande '+label+' exécutée ; actualisation de l’état.');
+            }).fail(function(xhr) {
+                const message = xhr.responseJSON && xhr.responseJSON.error ? xhr.responseJSON.error : 'commande indisponible';
+                $feedback.text('Commande '+label+' refusée : '+message);
+            }).always(function() {
+                acting = false;
+                refresh(); refreshBackend(); refreshGroups();
+            });
+        }
+        Object.keys(controls).forEach(function(group) {
+            controls[group].start.on('click', function(){ action(group,'start'); });
+            controls[group].stop.on('click', function(){ action(group,'stop'); });
+        });
+        $refresh.on('click', function(){ refresh(); refreshBackend(); refreshGroups(); });
+        refresh(); refreshBackend(); refreshGroups();
+        window.setInterval(function () { if (!document.hidden) {refresh(); refreshBackend(); refreshGroups();} }, 15000);
     });
 })(window.jQuery);
