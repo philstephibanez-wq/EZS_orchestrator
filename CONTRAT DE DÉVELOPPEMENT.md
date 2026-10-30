@@ -195,3 +195,18 @@ Chaque réponse opérationnelle doit présenter, de façon proportionnée :
 La méthode est au service de cet objectif.
 
 Ne pas remplacer le progrès réel par une succession de correctifs, de diagnostics ou de tests qui ne rapprochent pas concrètement le projet de son fonctionnement attendu.
+
+## 14. Panneau de diagnostic DEV — espace d'observation de l'assistant
+
+Le panneau de diagnostic partagé de l'Orchestrator est mis à la disposition de l'assistant comme **espace d'instrumentation et d'observation**. Le mainteneur autorise explicitement l'assistant à en modifier librement la présentation, les vues, les mesures et les rapports afin de recueillir les informations nécessaires à l'analyse des incidents, aux recettes et aux investigations de non-régression, sans devoir demander une autorisation pour chaque nouveau champ de diagnostic.
+
+Cette autonomie concerne **uniquement le diagnostic** et ne constitue pas une autorisation générale de modifier le comportement métier ou d'exécuter des opérations sensibles. Les règles suivantes restent impératives :
+
+- Le panneau peut être enrichi, réorganisé, replié, filtré et doté de commandes de **copie/export** de rapports ; il peut collecter des observations PHP/Twig, JavaScript, DOM, API, processus et services lorsque ces observations sont nécessaires et accessibles de manière légitime.
+- Les collectes sont **en lecture seule par défaut**. Aucun START/STOP, déploiement, suppression, réconciliation d'état ou écriture applicative ne peut être déclenché par un dispositif de diagnostic sans demande et procédure explicites du mainteneur.
+- Aucune collecte ni copie de secrets : exclure notamment les jetons CSRF, clés API, cookies, identifiants d'authentification, en-têtes sensibles, données privées, chemins personnels inutiles et corps de réponse non filtrés. Préférer une liste blanche de champs diagnostiques et des rapports expurgés.
+- Le panneau est réservé à l'environnement **DEV** et ne doit ni exposer d'informations de diagnostic sur PROD ni modifier son fonctionnement. Il doit rester repliable, accessible et sans perturbation de la navigation ou de la supervision existante.
+- Les informations rapportées doivent identifier leur provenance et distinguer **état observé**, **erreur**, **hypothèse** et **conclusion vérifiée**. Un échec de collecte doit être affiché comme tel, jamais converti en état positif.
+- L'assistant peut faire évoluer ce panneau à son initiative pour accélérer le diagnostic, mais **toute modification de code reste soumise** à l'audit GitHub, au préflight, aux tests, à la livraison ZIP, à la traçabilité et à la discipline de publication du présent contrat. Cette autorisation n'accorde pas le droit de committer ou pousser le code applicatif à la place du mainteneur.
+
+**Finalité :** permettre au mainteneur de transmettre en une copie un diagnostic structuré et exploitable, sans dépendance systématique aux outils de développement du navigateur ni aux commandes ponctuelles.
