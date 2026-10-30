@@ -59,3 +59,21 @@
 }
 .ezs-server-card .ezs-server-actions button:disabled { opacity: .48; cursor: not-allowed; }
 .ezs-server-card .ezs-server-actions button:focus-visible { outline: 3px solid #f5d76e; outline-offset: 2px; }
+
+/* R8F21 : roue Bootstrap visible pendant la vérification des permissions des groupes DEV. */
+.ezs-server-card:has(#dev-title) .ezs-command-spinner,
+.ezs-server-card:has(#lab-title) .ezs-command-spinner,
+.ezs-server-card:has(#assistant-title) .ezs-command-spinner {
+    display: inline-block;
+    width: 0.9rem;
+    height: 0.9rem;
+    margin-right: 0.4rem;
+    vertical-align: -0.125em;
+    border: 0.16em solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: ezs-debug-rotate 0.7s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+    .ezs-server-card .ezs-command-spinner { animation-duration: 1.5s; }
+}

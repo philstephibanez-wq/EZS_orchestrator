@@ -391,10 +391,13 @@ final class NativeWindowsLifecycle
         //   run --config "CHEMIN" --adapter caddyfile
         $tokens = self::spawnArguments($args);
         $command = array_merge([$exe], $tokens);
-        $logDir = 'H:/temp/ezs-orchestrator/native-proc-open';
-        if (!is_dir('H:/temp')) throw new \RuntimeException('EZS_PROC_TEMP_UNAVAILABLE');
+        // stdout/stderr de serveurs persistants : journaux durables, jamais dans H:/temp.
+        // Les anciens fichiers déjà ouverts ne sont ni déplacés ni supprimés.
+        $logDir = self::ROOT.'/var/log/native';
         if (!is_dir($logDir) && !mkdir($logDir, 0700, true) && !is_dir($logDir))
             throw new \RuntimeException('EZS_PROC_LOG_DIR_FAILED');
+        if (!is_writable($logDir))
+            throw new \RuntimeException('EZS_PROC_LOG_DIR_NOT_WRITABLE');
         $name = bin2hex(random_bytes(8));
         $descriptors = [
             0 => ['file', 'NUL', 'r'],

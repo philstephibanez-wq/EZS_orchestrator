@@ -72,12 +72,18 @@
             if (group === 'lab' || group === 'assistant') $card.find('dt').filter(function () { return $(this).text().trim() === 'Autorité Orchestrator'; })
                 .next('dd').text('Orchestrator local · processus attestés · protection CSRF');
         });
+        // Indicateur visuel uniquement. Les droits continuent de dépendre exclusivement du serveur.
+        const checkingMarkup = '<span class="spinner-border spinner-border-sm ezs-command-spinner" aria-hidden="true"></span><span>Vérification…</span>';
+        function checking($button) {
+            $button.prop('disabled', true).attr('aria-busy', 'true').html(checkingMarkup);
+        }
         Object.keys(groups).forEach(function(group) {
             const $card = $(groups[group]).closest('.ezs-server-card');
             const $buttons = $card.find('.ezs-server-actions button');
             controls[group] = {start:$buttons.eq(0), stop:$buttons.eq(1)};
             $buttons.removeAttr('title').prop('disabled', true);
-            controls[group].start.text('Vérification…').attr('aria-label', 'Vérification de l’état natif');
+            checking(controls[group].start);
+            controls[group].start.attr('aria-label', 'Vérification de l’état natif');
             controls[group].stop.attr('aria-label', 'Arrêter — vérification en cours');
         });
         function disableAll() {
@@ -86,6 +92,7 @@
                 controls[group].stop.prop('disabled', true);
                 modes[group] = null;
                 controls[group].start.text('Indisponible');
+                controls[group].start.removeAttr('aria-busy');
             });
         }
         function $cardFor(group) { return $(groups[group]).closest('.ezs-server-card'); }
@@ -94,7 +101,7 @@
             const startedAt = window.performance.now();
             Object.keys(controls).forEach(function (group) {
                 groupRequestStart[group] = startedAt;
-                if (!modes[group]) controls[group].start.text('Vérification…');
+                if (!modes[group]) checking(controls[group].start);
             });
             $.ajax({url:'/api/v2/infrastructure/dev-groups',method:'GET',dataType:'json',timeout:10000,cache:false})
               .done(function(data) {
@@ -108,6 +115,7 @@
                           : state.state === 'STOPPED' && state.start === true ? 'start' : null;
                       modes[group] = mode;
                       controls[group].start.text(mode === 'restart' ? 'Redémarrer' : mode === 'start' ? 'Démarrer' : 'Indisponible');
+                      controls[group].start.removeAttr('aria-busy');
                       controls[group].start.attr('aria-label', mode === 'restart' ? 'Redémarrer ' + group : mode === 'start' ? 'Démarrer ' + group : 'Commande indisponible pour ' + group);
                       controls[group].stop.attr('aria-label', 'Arrêter ' + group);
                       $cardFor(group).attr('data-ezs-state', state.state || 'UNVERIFIED');
@@ -125,6 +133,7 @@
                   csrf = ''; disableAll();
                   Object.keys(controls).forEach(function (group) {
                       controls[group].start.text('État indisponible');
+                      controls[group].start.removeAttr('aria-busy');
                       $cardFor(group).attr('data-ezs-state', 'UNVERIFIED');
                   });
               });
