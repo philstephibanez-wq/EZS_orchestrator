@@ -23,10 +23,11 @@ final class NativeWindowsLifecycle
     private readonly \Closure $spawn;
     private readonly \Closure $terminate;
     private readonly \Closure $dependencyAvailable;
+    private readonly \Closure $activeOwner;
     private readonly string $runtime;
 
     /** Callbacks de test uniquement ; toutes opérations réelles utilisent les API Windows. */
-    public function __construct(?callable $inventory=null, ?callable $listeners=null, ?callable $spawn=null, ?callable $terminate=null, ?string $runtime=null, ?callable $dependencyAvailable=null)
+    public function __construct(?callable $inventory=null, ?callable $listeners=null, ?callable $spawn=null, ?callable $terminate=null, ?string $runtime=null, ?callable $dependencyAvailable=null, ?callable $activeOwner=null)
     {
         $this->inventory=$inventory ? \Closure::fromCallable($inventory) : static fn():array=>(new WindowsProcessInventory())->collect();
         $this->listeners=$listeners ? \Closure::fromCallable($listeners) : self::nativeListeners(...);
@@ -34,6 +35,7 @@ final class NativeWindowsLifecycle
         $this->terminate=$terminate ? \Closure::fromCallable($terminate) : self::nativeTerminate(...);
         $this->runtime=$runtime ?? self::ROOT.'/runtime/v2-dev';
         $this->dependencyAvailable=$dependencyAvailable ? \Closure::fromCallable($dependencyAvailable) : static fn(string $exe,string $cwd):bool=>is_file($exe) && is_dir($cwd);
+        $this->activeOwner=$activeOwner ? \Closure::fromCallable($activeOwner) : WindowsActiveTcpProof::owner(...);
     }
     public static function specs():array { return self::DEV; }
     /** Un journal d'intention non résolu bloque toute nouvelle mutation. */
@@ -107,7 +109,22 @@ final class NativeWindowsLifecycle
         if(!preg_match($pattern,$norm((string)($observed['command']??''))))return false;
         return ($ports[$spec['port']]??[])===[$pid];
     }
-    private function observations():array {return [self::index(($this->inventory)()),($this->listeners)()];}
+    private function observations():array
+    {
+        $processes=self::index(($this->inventory)());
+        $ports=($this->listeners)();
+        foreach(self::DEV as $spec){
+            $port=$spec['port'];
+            // Never override a visible listener (including a foreign owner or PID 0).
+            if(($ports[$port]??[])!==[])continue;
+            $owner=($this->activeOwner)($port);
+            if(!is_int($owner) || $owner<1)continue;
+            // A probe proves the owner of OUR established socket, not an arbitrary connection.
+            // attest() still checks PID, creation time, executable and the full command.
+            if(isset($processes[$owner]))$ports[$port]=[$owner];
+        }
+        return [$processes,$ports];
+    }
     public function status():array
     {
         $this->assertNoPending();
