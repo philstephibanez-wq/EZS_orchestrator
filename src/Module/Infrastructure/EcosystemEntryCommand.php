@@ -22,6 +22,14 @@ final class EcosystemEntryCommand extends Command
             return Command::SUCCESS;
         }
         try{
+            // Les callbacks d'essai n'ecrivent aucun etat operationnel.
+            if($devStart===null){
+                $desired=$action==='start' ? DesiredServiceState::RUNNING : DesiredServiceState::STOPPED;
+                (new DesiredServiceState())->setMany([
+                    'root'=>$desired,'dev'=>$desired,'lab'=>$desired,
+                    'assistant'=>$desired,'assistant_ai'=>$desired,
+                ]);
+            }
             $svc=new NativeWindowsLifecycle();
             if($action==='start' && $devStart===null){
                 // Audit lecture seule avant mutation. Refuser les identités ambiguës.

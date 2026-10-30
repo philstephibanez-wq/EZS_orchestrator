@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Ezs\Web\Module\Infrastructure\Controller;
 
 use Ezs\Web\Module\Infrastructure\NativeWindowsLifecycle;
+use Ezs\Web\Module\Infrastructure\DesiredServiceState;
 use Ezs\Web\Module\Infrastructure\SymfonyDevCachePreparation;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -103,6 +104,8 @@ final class DevGroupOperationsController
             if (!$permission[$action]) {
                 return new JsonResponse(['error' => 'action_not_available'], 409, ['Cache-Control' => 'no-store']);
             }
+            // L'intention est durable AVANT toute mutation de processus.
+            (new DesiredServiceState())->set($group, $action === 'stop' ? DesiredServiceState::STOPPED : DesiredServiceState::RUNNING);
             if ($action === 'start') {
                 $specs = array_intersect_key(NativeWindowsLifecycle::specs(), array_flip(NativeWindowsLifecycle::groups()[$group]));
                 $roots = SymfonyDevCachePreparation::rootsToPrepare(array_intersect_key($states, $specs), $specs);

@@ -16,6 +16,14 @@ final class NativeWindowsLifecycle
         'lab' => ['port'=>8701,'exe'=>self::PHP_CGI,'cwd'=>'H:/EZStudio_lab','args'=>'-b 127.0.0.1:8701'],
         'assistant' => ['port'=>8713,'exe'=>self::PHP_CGI,'cwd'=>'H:/EZStudioLab_assistant','args'=>'-b 127.0.0.1:8713'],
     ];
+    /** PROD : un seul Caddy expose les trois facades, deux FastCGI distincts.
+     * Le backend Symfony conserve APP_ENV=prod / APP_DEBUG=0 et son SSO. */
+    private const PROD = [
+        'prod_backend' => ['port'=>8512,'exe'=>self::PHP_CGI,'cwd'=>'H:/EZScore','args'=>'-b 127.0.0.1:8512'],
+        'prod_gateway' => ['port'=>18515,'exe'=>self::PHP_CGI,'cwd'=>self::ROOT.'/runtime_components/prod_gateway_php','args'=>'-b 127.0.0.1:18515'],
+        'prod_caddy' => ['port'=>8501,'additional_ports'=>[8510,8511], 'exe'=>self::CADDY,'cwd'=>self::ROOT,
+            'args'=>'run --config "H:/EZS_orchestrator/config/caddy/Caddyfile.prod" --adapter caddyfile'],
+    ];
     /** @var list<resource> Process handles held until the CLI exits. */
     private static array $spawnHandles = [];
     private readonly \Closure $inventory;
@@ -25,24 +33,73 @@ final class NativeWindowsLifecycle
     private readonly \Closure $dependencyAvailable;
     private readonly \Closure $activeOwner;
     private readonly string $runtime;
+    private readonly string $profile;
+    private readonly array $managedSpecs;
 
     /** Callbacks de test uniquement ; toutes opérations réelles utilisent les API Windows. */
-    public function __construct(?callable $inventory=null, ?callable $listeners=null, ?callable $spawn=null, ?callable $terminate=null, ?string $runtime=null, ?callable $dependencyAvailable=null, ?callable $activeOwner=null)
+    public function __construct(?callable $inventory=null, ?callable $listeners=null, ?callable $spawn=null, ?callable $terminate=null, ?string $runtime=null, ?callable $dependencyAvailable=null, ?callable $activeOwner=null, string $profile='dev')
     {
         $this->inventory=$inventory ? \Closure::fromCallable($inventory) : static fn():array=>(new WindowsProcessInventory())->collect();
         $this->listeners=$listeners ? \Closure::fromCallable($listeners) : self::nativeListeners(...);
         $this->spawn=$spawn ? \Closure::fromCallable($spawn) : self::nativeSpawn(...);
         $this->terminate=$terminate ? \Closure::fromCallable($terminate) : self::nativeTerminate(...);
-        $this->runtime=$runtime ?? self::ROOT.'/runtime/v2-dev';
+        if(!in_array($profile,['dev','prod'],true))throw new \InvalidArgumentException('EZS_NATIVE_PROFILE_REFUSED');
+        $this->profile=$profile;
+        $this->managedSpecs=$profile==='prod' ? self::PROD : self::DEV;
+        $this->runtime=$runtime ?? self::ROOT.'/runtime/v2-'.$profile;
         $this->dependencyAvailable=$dependencyAvailable ? \Closure::fromCallable($dependencyAvailable) : static fn(string $exe,string $cwd):bool=>is_file($exe) && is_dir($cwd);
         $this->activeOwner=$activeOwner ? \Closure::fromCallable($activeOwner) : WindowsActiveTcpProof::owner(...);
     }
     public static function specs():array { return self::DEV; }
+    public static function prodSpecs():array { return self::PROD; }
+    private function schema():string { return 'ezs.native.'.$this->profile.'.v1'; }
+    private static function portsOf(array $spec):array
+    { return [$spec['port'],...($spec['additional_ports']??[])]; }
     /** Un journal d'intention non résolu bloque toute nouvelle mutation. */
     private function assertNoPending():void
     {
         if (is_file($this->runtime.'/native-spawn-pending.json'))
             throw new \RuntimeException('EZS_NATIVE_PENDING_REQUIRES_MANUAL_ATTESTATION');
+    }
+    /** Après une interruption, ne lever un pending que si aucun processus candidat ne subsiste. */
+    private function reconcilePending():void
+    {
+        $path=$this->runtime.'/native-spawn-pending.json';
+        if(!is_file($path))return;
+        $raw=file_get_contents($path);
+        $data=is_string($raw)?json_decode($raw,true):null;
+        $name=is_array($data)?($data['name']??null):null;
+        if(($data['schema']??null)!=='ezs.native.pending.v1' || !is_string($name) || !isset($this->managedSpecs[$name]))
+            throw new \RuntimeException('EZS_NATIVE_PENDING_INVALID');
+        $spec=$this->managedSpecs[$name];
+        for($i=0;$i<2;$i++){
+            [$processes,$ports]=$this->observations();
+            if(self::occupied($spec,$ports))throw new \RuntimeException('EZS_NATIVE_PENDING_PORT_ACTIVE_'.$name);
+            foreach($processes as $pid=>$observed){
+                $record=['pid'=>$pid,'created'=>(string)($observed['created']??'')];
+                $candidatePorts=$ports;
+                foreach(self::portsOf($spec) as $port)$candidatePorts[$port]=[$pid];
+                if(self::attest($record,$spec,$observed,$candidatePorts))
+                    throw new \RuntimeException('EZS_NATIVE_PENDING_PROCESS_ACTIVE_'.$name);
+            }
+            if($i===0)usleep(200000);
+        }
+        $line=gmdate('c').' ABANDONED_PENDING '.$name."\n";
+        if(file_put_contents($this->runtime.'/native-reconciled.log',$line,FILE_APPEND|LOCK_EX)===false)
+            throw new \RuntimeException('EZS_NATIVE_RECONCILIATION_LOG_FAILED');
+        if(!unlink($path))throw new \RuntimeException('EZS_NATIVE_PENDING_CLEAR_FAILED');
+    }
+
+    /** Maintenance explicite des états orphelins, sous verrou exclusif. */
+    public function reconcile():void
+    {
+        $this->withLock(function():void {
+            $this->reconcilePending();
+            $this->reconcileLegacy();
+            $stored=$this->records();
+            [$processes,$ports]=$this->observations();
+            $this->reconcileDeadRecords($stored,$processes,$ports);
+        });
     }
     private function pending(string $name):void
     {
@@ -62,7 +119,7 @@ final class NativeWindowsLifecycle
         $file=$this->runtime.'/native-processes.json';
         if(!is_file($file)) return [];
         $data=json_decode((string)file_get_contents($file),true,512,JSON_THROW_ON_ERROR);
-        if(!is_array($data) || ($data['schema']??'')!=='ezs.native.dev.v1' || !is_array($data['records']??null))
+        if(!is_array($data) || ($data['schema']??'')!==$this->schema() || !is_array($data['records']??null))
             throw new \RuntimeException('EZS_NATIVE_STATE_INVALID');
         return $data['records'];
     }
@@ -70,7 +127,7 @@ final class NativeWindowsLifecycle
     {
         if(!is_dir($this->runtime)) throw new \RuntimeException('EZS_NATIVE_RUNTIME_MISSING');
         $temp=$this->runtime.'/native-processes.json.'.bin2hex(random_bytes(8)).'.tmp';
-        $bytes=json_encode(['schema'=>'ezs.native.dev.v1','records'=>$records],JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR);
+        $bytes=json_encode(['schema'=>$this->schema(),'records'=>$records],JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR);
         if(file_put_contents($temp,$bytes,LOCK_EX)===false || !rename($temp,$this->runtime.'/native-processes.json'))
             throw new \RuntimeException('EZS_NATIVE_STATE_SAVE_FAILED');
     }
@@ -107,21 +164,21 @@ final class NativeWindowsLifecycle
         foreach($tokens as $token)$pieces[]=$tokenPattern($token);
         $pattern='~^\s*'.implode('\s+',$pieces).'\s*$~iD';
         if(!preg_match($pattern,$norm((string)($observed['command']??''))))return false;
-        return ($ports[$spec['port']]??[])===[$pid];
+        foreach(self::portsOf($spec) as $port){
+            if(($ports[$port]??[])!==[$pid])return false;
+        }
+        return true;
     }
     private function observations():array
     {
         $processes=self::index(($this->inventory)());
         $ports=($this->listeners)();
-        foreach(self::DEV as $spec){
-            $port=$spec['port'];
-            // Never override a visible listener (including a foreign owner or PID 0).
-            if(($ports[$port]??[])!==[])continue;
-            $owner=($this->activeOwner)($port);
-            if(!is_int($owner) || $owner<1)continue;
-            // A probe proves the owner of OUR established socket, not an arbitrary connection.
-            // attest() still checks PID, creation time, executable and the full command.
-            if(isset($processes[$owner]))$ports[$port]=[$owner];
+        foreach($this->managedSpecs as $spec){
+            foreach(self::portsOf($spec) as $port){
+                if(($ports[$port]??[])!==[])continue;
+                $owner=($this->activeOwner)($port);
+                if(is_int($owner) && $owner>0 && isset($processes[$owner]))$ports[$port]=[$owner];
+            }
         }
         return [$processes,$ports];
     }
@@ -129,15 +186,71 @@ final class NativeWindowsLifecycle
     {
         $this->assertNoPending();
         [$processes,$ports]=$this->observations();$stored=$this->records();$result=[];
-        foreach(self::DEV as $name=>$spec){
+        foreach($this->managedSpecs as $name=>$spec){
             $rec=$stored[$name]??null;
-            $result[$name]=is_array($rec) && isset($processes[$rec['pid']??0]) && self::attest($rec,$spec,$processes[$rec['pid']],$ports)
-                ? 'ATTESTED' : (($ports[$spec['port']]??[])!==[]?'PORT_UNVERIFIED':($rec?'RECORDED_UNVERIFIED':'ABSENT'));
+            if (is_array($rec) && isset($processes[$rec['pid']??0]) && self::attest($rec,$spec,$processes[$rec['pid']],$ports)) {
+                $result[$name]='ATTESTED';
+            } elseif (self::occupied($spec,$ports)) {
+                $result[$name]='PORT_UNVERIFIED';
+            } elseif (is_array($rec) && isset($processes[$rec['pid']??0])) {
+                $result[$name]='RECORDED_UNVERIFIED';
+            } else {
+                // Une attestation historique sans PID ni port ne signifie pas processus actif.
+                // La mutation de cette preuve ne se fera que sous verrou et double constat.
+                $result[$name]='ABSENT';
+            }
         }
         return $result;
     }
+
+    /**
+     * Réconcilie uniquement les preuves dont le PID est absent et le port libre.
+     * Une réutilisation de PID, une identité incertaine ou un port occupé bloque.
+     * Appeler exclusivement sous native-lifecycle.lock.
+     */
+    private static function occupied(array $spec,array $ports):bool
+    {
+        foreach(self::portsOf($spec) as $port)if(($ports[$port]??[])!==[])return true;
+        return false;
+    }
+    private function reconcileDeadRecords(array &$stored, array $processes, array $ports, ?array $only=null):void
+    {
+        $dead=[];
+        foreach($stored as $name=>$record){
+            if(!isset($this->managedSpecs[$name]) || !is_array($record))
+                throw new \RuntimeException('EZS_NATIVE_UNKNOWN_RECORD');
+            if($only!==null && !in_array($name,$only,true))continue;
+            $pid=(int)($record['pid']??0);
+            if($pid<1)throw new \RuntimeException('EZS_NATIVE_INVALID_RECORDED_PID');
+            if(isset($processes[$pid])){
+                if(!self::attest($record,$this->managedSpecs[$name],$processes[$pid],$ports))
+                    throw new \RuntimeException('EZS_NATIVE_IDENTITY_UNVERIFIED_'.$name);
+                continue;
+            }
+            if(self::occupied($this->managedSpecs[$name],$ports))
+                throw new \RuntimeException('EZS_NATIVE_STALE_PORT_OCCUPIED_'.$name);
+            $dead[$name]=$pid;
+        }
+        if($dead===[])return;
+        usleep(200000);
+        [$again,$portsAgain]=$this->observations();
+        foreach($dead as $name=>$pid){
+            if(isset($again[$pid]) || self::occupied($this->managedSpecs[$name],$portsAgain))
+                throw new \RuntimeException('EZS_NATIVE_STALE_RACE_'.$name);
+        }
+        // Ne jamais supprimer les preuves : conserver un journal durable.
+        $journal=$this->runtime.'/native-reconciled.log';
+        foreach($dead as $name=>$pid){
+            $line=gmdate('c').' DEAD_RECORD '.$name.' PID='.$pid."\n";
+            if(file_put_contents($journal,$line,FILE_APPEND|LOCK_EX)===false)
+                throw new \RuntimeException('EZS_NATIVE_RECONCILIATION_LOG_FAILED');
+        }
+        foreach($dead as $name=>$_pid)unset($stored[$name]);
+        $this->persist($stored);
+    }
     private function reconcileLegacy():void
     {
+        if($this->profile==='prod')return; // runtime PROD historique = autre format, jamais muté ici.
         [$processes,$ports]=$this->observations();
         foreach (['processes.json'=>['php_pid','caddy_pid'],
                   'app-backends.json'=>['dev_pid','preview_pid'],
@@ -152,61 +265,35 @@ final class NativeWindowsLifecycle
                 if(!is_numeric($v) || (int)$v<1)throw new \RuntimeException('EZS_NATIVE_LEGACY_PID_INVALID_'.$file);
                 if(isset($processes[(int)$v]))throw new \RuntimeException('EZS_NATIVE_LEGACY_PID_ACTIVE_'.$v);
             }
-            foreach(self::DEV as $spec){if(($ports[$spec['port']]??[])!==[])throw new \RuntimeException('EZS_NATIVE_LEGACY_LISTENER_ACTIVE_'.$spec['port']);}
+            foreach($this->managedSpecs as $spec){if(self::occupied($spec,$ports))throw new \RuntimeException('EZS_NATIVE_LEGACY_LISTENER_ACTIVE_'.$spec['port']);}
             throw new \RuntimeException('EZS_NATIVE_LEGACY_REQUIRES_MANUAL_RECONCILIATION_'.$file);
         }
     }
     public function start():array
     {
         return $this->withLock(function():array{
-            $this->assertNoPending();
+            $this->reconcilePending();
             $this->reconcileLegacy();
             $stored=$this->records();[$processes,$ports]=$this->observations();
-            // Une preuve historique devenue morte peut être archivée uniquement si
-            // tous les PID sont absents et tous les ports surveillés sont libres.
-            $stale=[];
-            foreach($stored as $name=>$rec){
-                if(!isset(self::DEV[$name]) || !is_array($rec))throw new \RuntimeException('EZS_NATIVE_UNKNOWN_RECORD');
-                $pid=(int)($rec['pid']??0);
-                if($pid<1)throw new \RuntimeException('EZS_NATIVE_INVALID_RECORDED_PID');
-                if(!isset($processes[$pid]) && ($ports[self::DEV[$name]['port']]??[])===[])$stale[]=$name;
-            }
-            if($stale!==[]){
-                // Pas de reprise partielle tant que le moindre autre composant
-                // enregistré demeure actif ou non attribuable.
-                foreach($stored as $name=>$rec){
-                    if(isset($processes[(int)$rec['pid']]))throw new \RuntimeException('EZS_NATIVE_STALE_REFUSED_LIVE_'.$name);
-                }
-                foreach(self::DEV as $name=>$spec){
-                    if(($ports[$spec['port']]??[])!==[])throw new \RuntimeException('EZS_NATIVE_STALE_REFUSED_PORT_'.$name);
-                }
-                usleep(500000);
-                [$confirmProcesses,$confirmPorts]=$this->observations();
-                foreach($stored as $name=>$rec){
-                    if(isset($confirmProcesses[(int)$rec['pid']]))throw new \RuntimeException('EZS_NATIVE_STALE_REFUSED_RACE_'.$name);
-                }
-                foreach(self::DEV as $name=>$spec){
-                    if(($confirmPorts[$spec['port']]??[])!==[])throw new \RuntimeException('EZS_NATIVE_STALE_REFUSED_RACE_PORT_'.$name);
-                }
-                throw new \RuntimeException('EZS_NATIVE_STALE_REQUIRES_MANUAL_RECONCILIATION');
-            }
+            $this->reconcileDeadRecords($stored,$processes,$ports);
+            [$processes,$ports]=$this->observations();
             // Un état encore vivant mais non attesté ne peut être adopté ou remplacé.
-            foreach(self::DEV as $name=>$spec){
+            foreach($this->managedSpecs as $name=>$spec){
                 $rec=$stored[$name]??null;
                 if($rec!==null && (!is_array($rec) || !isset($processes[$rec['pid']??0]) ||
                    !self::attest($rec,$spec,$processes[$rec['pid']],$ports)))
                    throw new \RuntimeException('EZS_NATIVE_START_REFUSED_STATE_'.$name);
-                if($rec===null && ($ports[$spec['port']]??[])!==[])
+                if($rec===null && self::occupied($spec,$ports))
                    throw new \RuntimeException('EZS_NATIVE_START_REFUSED_PORT_'.$name);
             }
             // Préflight global : aucune création si une dépendance manque.
-            foreach(self::DEV as $name=>$spec){
+            foreach($this->managedSpecs as $name=>$spec){
                 if(isset($stored[$name]))continue;
                 if(!(($this->dependencyAvailable)($spec['exe'],$spec['cwd'])))
                     throw new \RuntimeException('EZS_NATIVE_DEPENDENCY_MISSING_'.$name);
             }
             $new=[];
-            foreach(self::DEV as $name=>$spec){
+            foreach($this->managedSpecs as $name=>$spec){
                 if(isset($stored[$name]))continue;
                 $this->pending($name);
                 $pid=($this->spawn)($spec['exe'],$spec['args'],$spec['cwd']);
@@ -231,23 +318,23 @@ final class NativeWindowsLifecycle
             $this->assertNoPending();
             $stored=$this->records();[$processes,$ports]=$this->observations();
             foreach($stored as $name=>$rec){
-                if(!isset(self::DEV[$name]) || !is_array($rec) || !isset($processes[$rec['pid']??0]) ||
-                   !self::attest($rec,self::DEV[$name],$processes[$rec['pid']],$ports))
+                if(!isset($this->managedSpecs[$name]) || !is_array($rec) || !isset($processes[$rec['pid']??0]) ||
+                   !self::attest($rec,$this->managedSpecs[$name],$processes[$rec['pid']],$ports))
                     throw new \RuntimeException('EZS_NATIVE_STOP_REFUSED_UNVERIFIED_'.$name);
             }
             $stopped=[];
-            foreach(array_reverse(array_keys(self::DEV)) as $name){
+            foreach(array_reverse(array_keys($this->managedSpecs)) as $name){
                 if(!isset($stored[$name]))continue;
                 $rec=$stored[$name];$pid=(int)$rec['pid'];
                 // Attestation renouvelée immédiatement avant toute terminaison.
                 [$processes,$ports]=$this->observations();
-                if(!isset($processes[$pid]) || !self::attest($rec,self::DEV[$name],$processes[$pid],$ports))
+                if(!isset($processes[$pid]) || !self::attest($rec,$this->managedSpecs[$name],$processes[$pid],$ports))
                     throw new \RuntimeException('EZS_NATIVE_STOP_IDENTITY_CHANGED_'.$name);
                 if(!($this->terminate)($pid))throw new \RuntimeException('EZS_NATIVE_STOP_FAILED_'.$name);
                 $gone=false;
                 for($i=0;$i<40;$i++){
                     usleep(250000);[$processes,$ports]=$this->observations();
-                    if(!isset($processes[$pid]) && ($ports[self::DEV[$name]['port']]??[])===[]){$gone=true;break;}
+                    if(!isset($processes[$pid]) && !self::occupied($this->managedSpecs[$name],$ports)){$gone=true;break;}
                 }
                 if(!$gone)throw new \RuntimeException('EZS_NATIVE_STOP_NOT_EXITED_'.$name);
                 unset($stored[$name]);$this->persist($stored);$stopped[$name]=$pid;
@@ -266,9 +353,10 @@ final class NativeWindowsLifecycle
     }
 
     /** @return list<string> */
-    private static function groupNames(string $group): array
+    private function groupNames(string $group): array
     {
-        $groups = self::groups();
+        $groups = $this->profile==='prod' ? ['prod'=>array_keys(self::PROD)] :
+            ['root'=>['root_php','root_caddy'],...self::groups()];
         if (!isset($groups[$group])) {
             throw new \InvalidArgumentException('EZS_NATIVE_GROUP_REFUSED');
         }
@@ -278,37 +366,41 @@ final class NativeWindowsLifecycle
     /** Démarre exclusivement le groupe demandé, en conservant les preuves des autres groupes. */
     public function startGroup(string $group): array
     {
-        $names = self::groupNames($group);
+        $names = $this->groupNames($group);
         return $this->withLock(function () use ($names): array {
-            $this->assertNoPending();
+            $this->reconcilePending();
             $this->reconcileLegacy();
             $stored = $this->records();
             [$processes, $ports] = $this->observations();
+            $this->reconcileDeadRecords($stored,$processes,$ports);
+            [$processes, $ports] = $this->observations();
             foreach ($stored as $name => $record) {
-                if (!isset(self::DEV[$name]) || !is_array($record)) {
+                if (!isset($this->managedSpecs[$name]) || !is_array($record)) {
                     throw new \RuntimeException('EZS_NATIVE_UNKNOWN_RECORD');
                 }
+                if(!in_array($name,$names,true))continue;
                 $pid = (int)($record['pid'] ?? 0);
                 if ($pid < 1 || !isset($processes[$pid]) ||
-                    !self::attest($record, self::DEV[$name], $processes[$pid], $ports)) {
+                    !self::attest($record, $this->managedSpecs[$name], $processes[$pid], $ports)) {
                     throw new \RuntimeException('EZS_NATIVE_GROUP_START_REFUSED_STATE_'.$name);
                 }
             }
             // Refus de toute occupation non attribuée, y compris sur un autre groupe.
-            foreach (self::DEV as $name => $spec) {
-                if (!isset($stored[$name]) && ($ports[$spec['port']] ?? []) !== []) {
+            foreach ($names as $name) {
+                $spec=$this->managedSpecs[$name];
+                if (!isset($stored[$name]) && self::occupied($spec,$ports)) {
                     throw new \RuntimeException('EZS_NATIVE_GROUP_START_REFUSED_PORT_'.$name);
                 }
             }
             foreach ($names as $name) {
-                if (!isset($stored[$name]) && !(($this->dependencyAvailable)(self::DEV[$name]['exe'], self::DEV[$name]['cwd']))) {
+                if (!isset($stored[$name]) && !(($this->dependencyAvailable)($this->managedSpecs[$name]['exe'], $this->managedSpecs[$name]['cwd']))) {
                     throw new \RuntimeException('EZS_NATIVE_DEPENDENCY_MISSING_'.$name);
                 }
             }
             $started = [];
             foreach ($names as $name) {
                 if (isset($stored[$name])) continue;
-                $spec = self::DEV[$name];
+                $spec = $this->managedSpecs[$name];
                 $this->pending($name);
                 $pid = ($this->spawn)($spec['exe'], $spec['args'], $spec['cwd']);
                 if (!is_int($pid) || $pid < 1) throw new \RuntimeException('EZS_NATIVE_CREATE_FAILED_'.$name);
@@ -337,15 +429,16 @@ final class NativeWindowsLifecycle
     /** Arrête exclusivement le groupe demandé, jamais root_php/root_caddy ni l'IA. */
     public function stopGroup(string $group): array
     {
-        $names = self::groupNames($group);
+        $names = $this->groupNames($group);
         return $this->withLock(function () use ($names): array {
             $this->assertNoPending();
             $stored = $this->records();
             [$processes, $ports] = $this->observations();
             foreach ($stored as $name => $record) {
+                if(!in_array($name,$names,true))continue;
                 $pid = is_array($record) ? (int)($record['pid'] ?? 0) : 0;
-                if (!isset(self::DEV[$name]) || $pid < 1 || !isset($processes[$pid]) ||
-                    !self::attest($record, self::DEV[$name], $processes[$pid], $ports)) {
+                if (!isset($this->managedSpecs[$name]) || $pid < 1 || !isset($processes[$pid]) ||
+                    !self::attest($record, $this->managedSpecs[$name], $processes[$pid], $ports)) {
                     throw new \RuntimeException('EZS_NATIVE_GROUP_STOP_REFUSED_UNVERIFIED_'.$name);
                 }
             }
@@ -356,7 +449,7 @@ final class NativeWindowsLifecycle
                 $pid = (int)$record['pid'];
                 [$processes, $ports] = $this->observations();
                 if (!isset($processes[$pid]) ||
-                    !self::attest($record, self::DEV[$name], $processes[$pid], $ports)) {
+                    !self::attest($record, $this->managedSpecs[$name], $processes[$pid], $ports)) {
                     throw new \RuntimeException('EZS_NATIVE_GROUP_STOP_IDENTITY_CHANGED_'.$name);
                 }
                 if (!(($this->terminate)($pid))) throw new \RuntimeException('EZS_NATIVE_GROUP_STOP_FAILED_'.$name);
@@ -364,7 +457,7 @@ final class NativeWindowsLifecycle
                 for ($i = 0; $i < 40; $i++) {
                     usleep(250000);
                     [$processes, $ports] = $this->observations();
-                    if (!isset($processes[$pid]) && ($ports[self::DEV[$name]['port']] ?? []) === []) {
+                    if (!isset($processes[$pid]) && !self::occupied($this->managedSpecs[$name],$ports)) {
                         $gone = true;
                         break;
                     }
@@ -404,7 +497,20 @@ final class NativeWindowsLifecycle
             1 => ['file', $logDir.'/'. $name .'.out.log', 'a'],
             2 => ['file', $logDir.'/'. $name .'.err.log', 'a'],
         ];
-        $resource = proc_open($command, $descriptors, $pipes, $cwd, null, [
+        $env=null;
+        if(strcasecmp(str_replace('\\','/',$cwd),'H:/EZScore')===0){
+            $env=getenv();
+            if(!is_array($env))$env=[];
+            $env['APP_ENV']='prod';
+            $env['APP_DEBUG']='0';
+            $env['EZSCORE_INSTANCE']='prod';
+        } elseif(strcasecmp(str_replace('\\','/',$cwd),self::ROOT.'/runtime_components/prod_gateway_php')===0){
+            $env=getenv();
+            if(!is_array($env))$env=[];
+            $env['EZS_GATEWAY_RECIPE_CONFIG']='';
+            $env['EZS_GATEWAY_RECIPE_MODE']='';
+        }
+        $resource = proc_open($command, $descriptors, $pipes, $cwd, $env, [
             'bypass_shell' => true,
             'create_new_console' => false,
             'suppress_errors' => true,
