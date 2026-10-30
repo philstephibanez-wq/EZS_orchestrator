@@ -13,7 +13,9 @@ final class LocalAiLifecycle035Test extends TestCase
     }
     private static function service(callable $inventory,callable $listeners,callable $health,callable $spawn):LocalAiLifecycle
     {
-        return new LocalAiLifecycle($inventory,$listeners,$health,$spawn,static fn(string $p):bool=>true);
+        // All external observations are mocked: never probe the real Windows TCP table.
+        return new LocalAiLifecycle($inventory,$listeners,$health,$spawn,static fn(string $p):bool=>true,
+            static fn(int $port):?int=>null);
     }
     public function testExistingServerIsAdoptedWithoutSpawning():void
     {
