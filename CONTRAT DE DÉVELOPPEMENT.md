@@ -61,6 +61,21 @@ Avant toute modification :
 - Vérifier l'absence de caractères corrompus et respecter les conventions de fins de ligne.
 - Prévoir une restauration contrôlée pour les modifications sensibles.
 
+### 5.1. Étude d'impacts obligatoire
+
+**Avant toute modification ou activation**, analyser les conséquences directes et indirectes du changement, avec un niveau de détail proportionné au risque. Cette étude précède le code, les tests et l'installation ; elle ne doit pas se limiter au seul fichier modifié.
+
+- **Technique et dépendances** : services, processus et enfants, ports, fichiers, configurations, données, journaux, tâches Windows, versions, contrats et appels entre composants.
+- **Exploitation et ergonomie** : ordre de boot, démarrage et arrêt, compte et droits d'exécution, consoles et fenêtres visibles, prise de focus, rafraîchissements, fréquence de lancement, consommation CPU/GPU/mémoire et perturbations potentielles sur MAIN.
+- **Isolation et sécurité** : séparation DEV/LAB/Assistant/PROD, instances Caddy distinctes, maintenance PROD, SSO et secrets, identité des processus et persistance des arrêts intentionnels.
+- **Non-régression et déploiement** : comportements déjà validés, préconditions, compatibilité Windows/PowerShell/PHP/Symfony, sauvegarde, activation, restauration et retour arrière.
+
+Pour chaque impact significatif, préciser **avant/après, risque, prévention, test ou preuve attendu et retour arrière**. Distinguer faits démontrés, hypothèses et points restant à vérifier. Une absence d'impact doit être argumentée, pas présumée.
+
+**Critère bloquant :** ne pas activer un changement sensible si un impact majeur est non maîtrisé ou si sa restauration n'est pas définie. Une tâche planifiée qui ouvre une console noire toutes les minutes constitue un impact utilisateur qui doit être anticipé, même si son code retourne 0.
+
+Cette étude doit rester concise pour un changement simple : elle sert à éviter les régressions et les allers-retours sur MAIN, non à ajouter une procédure bureaucratique.
+
 ## 6. Livraison obligatoire par ZIP
 
 Pour toute modification de code :
