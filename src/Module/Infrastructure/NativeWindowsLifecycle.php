@@ -93,7 +93,18 @@ final class NativeWindowsLifecycle
         if($created==='' || $created!==(string)($observed['created']??''))return false;
         $norm=static fn(string $s):string=>strtolower(str_replace('/','\\',$s));
         if($norm((string)($observed['executable']??''))!==$norm($spec['exe']))return false;
-        if(!preg_match('~(?:^|\s)'.preg_quote($norm($spec['args']),'~').'(?=\s|$)~', $norm((string)($observed['command']??''))))return false;
+        // Windows may quote each proc_open(array) argument independently in WMI.
+        // Compare the COMPLETE command, not a substring; extra arguments are refused.
+        $tokenPattern=static function(string $token) use ($norm):string {
+            $quoted=preg_quote($norm($token),'~');
+            return '(?:"'.$quoted.'"|'.$quoted.')';
+        };
+        try {$tokens=self::spawnArguments($spec['args']);}
+        catch (\InvalidArgumentException) {return false;}
+        $pieces=[$tokenPattern($spec['exe'])];
+        foreach($tokens as $token)$pieces[]=$tokenPattern($token);
+        $pattern='~^\s*'.implode('\s+',$pieces).'\s*$~iD';
+        if(!preg_match($pattern,$norm((string)($observed['command']??''))))return false;
         return ($ports[$spec['port']]??[])===[$pid];
     }
     private function observations():array {return [self::index(($this->inventory)()),($this->listeners)()];}
