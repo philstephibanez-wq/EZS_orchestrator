@@ -11,7 +11,7 @@ final class EcosystemEntryCommand extends Command
 {
     protected function configure():void {$this->addOption('plan',null,InputOption::VALUE_NONE);}
     protected function execute(InputInterface $input,OutputInterface $output):int {return self::invoke('start',(bool)$input->getOption('plan'),$output);}
-    /** Callbacks optionnels pour vérifier la coordination sans démarrer de processus réels. */
+    /** Callbacks optionnels pour tests isolés ; aucune préparation de cache lors des simulations. */
     public static function invoke(string $action,bool $plan,OutputInterface $output,?callable $devStart=null,?callable $aiStart=null):int
     {
         if(!in_array($action,['start','stop'],true)){ $output->writeln('EZS_ECOSYSTEM_ACTION_REFUSED');return Command::INVALID; }
@@ -23,6 +23,12 @@ final class EcosystemEntryCommand extends Command
         }
         try{
             $svc=new NativeWindowsLifecycle();
+            if($action==='start' && $devStart===null){
+                // Audit lecture seule avant mutation. Refuser les identités ambiguës.
+                $roots=SymfonyDevCachePreparation::rootsToPrepare($svc->status(),NativeWindowsLifecycle::specs());
+                SymfonyDevCachePreparation::prepare($roots);
+                foreach($roots as $root)$output->writeln('EZS_SYMFONY_CACHE_PREPARED_DEV='.$root);
+            }
             $result=$action==='start' ? ($devStart ?? static fn():array=>$svc->start())() : $svc->stop();
             foreach($result as $name=>$pid)$output->writeln('EZS_NATIVE_'.strtoupper($action).'='.$name.' PID='.$pid);
             $output->writeln('EZS_NATIVE_DEV_'.strtoupper($action).'_OK');
@@ -34,7 +40,6 @@ final class EcosystemEntryCommand extends Command
                         throw new \RuntimeException('EZS_AI_RESULT_INVALID');
                     $output->writeln('EZS_AI_START_OWNED_READY_8720 PID='.$ai['pid'].' ACTION='.$ai['action']);
                 }catch(\Throwable $e){
-                    // DEV n'est jamais arrêté en compensation : état partiel explicite.
                     $output->writeln('<error>EZS_ECOSYSTEM_PARTIAL_DEV_READY_AI_REFUSED:'.$e->getMessage().'</error>');
                     return Command::FAILURE;
                 }
