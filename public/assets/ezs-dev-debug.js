@@ -11,6 +11,10 @@
     const rows = document.getElementById('ezs-debug-groups-body');
     const native = document.getElementById('ezs-debug-native');
     const browser = document.getElementById('ezs-debug-browser');
+    if (!output || !status || !copy || !refresh || !spinner || !rows || !native || !browser) return;
+    panel.dataset.ezsDebugReady = '1';
+    status.textContent = 'Diagnostic prêt';
+    output.textContent = 'En attente de collecte automatique.';
     const groups = {dev: 'dev-title', lab: 'lab-title', assistant: 'assistant-title'};
     const nativeNames = {dev:['ezscore_dev','ezscore_preview'], lab:['lab'], assistant:['assistant']};
     const errors = [];

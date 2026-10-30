@@ -12,7 +12,7 @@
     {% block page_scripts %}{% endblock %}
     {% if app.request.host in ['127.0.0.1', 'localhost'] and app.request.port == 8790 %}
         <link rel="stylesheet" href="/assets/ezs-debug-layout.css">
-        <script src="/assets/ezs-dev-debug.js" defer></script>
+        <script src="/assets/ezs-dev-debug.js?v={{ orchestrator_version|url_encode }}" defer></script>
     {% endif %}
 </head>
 <body>
@@ -37,7 +37,7 @@
                     <button type="button" class="btn btn-outline-info btn-sm" id="ezs-debug-refresh">Actualiser</button>
                     <button type="button" class="btn btn-outline-light btn-sm" id="ezs-debug-copy">Copier le diagnostic complet</button>
                     <span id="ezs-debug-spinner" class="spinner-border spinner-border-sm text-info d-none" role="status" aria-label="Collecte du diagnostic en cours"></span>
-                    <span role="status" aria-live="polite" id="ezs-debug-status" class="small text-body-secondary">Diagnostic en attente</span>
+                    <span role="status" aria-live="polite" id="ezs-debug-status" class="small text-body-secondary">Diagnostic non initialisé</span>
                 </div>
                 <section aria-label="États natifs PHP" class="mt-2">
                     <h2 class="h6">États natifs du serveur PHP</h2>
@@ -63,7 +63,7 @@
                     </div>
                     <p id="ezs-debug-browser" class="small text-body-secondary"></p>
                 </section>
-                <pre id="ezs-debug-output" tabindex="0" class="p-3 border rounded bg-dark text-light small ezs-debug-report">Diagnostic en attente d’ouverture.</pre>
+                <pre id="ezs-debug-output" tabindex="0" class="p-3 border rounded bg-dark text-light small ezs-debug-report">Diagnostic non initialisé : script de diagnostic indisponible ou non exécuté.</pre>
                 <p class="small text-body-secondary mb-0">Aucun jeton, cookie, PID ni corps de réponse n'est copié. Aucun START/STOP n'est déclenché.</p>
             </details>
         </aside>
