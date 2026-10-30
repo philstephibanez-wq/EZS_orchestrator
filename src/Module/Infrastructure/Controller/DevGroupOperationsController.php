@@ -26,7 +26,7 @@ final class DevGroupOperationsController
         $names = $groups[$group];
         foreach (NativeWindowsLifecycle::specs() as $name => $_spec) {
             if (!array_key_exists($name, $states) || !in_array($states[$name], ['ATTESTED', 'ABSENT'], true)) {
-                return ['start' => false, 'stop' => false, 'state' => 'UNVERIFIED'];
+                return ['start' => false, 'restart' => false, 'stop' => false, 'state' => 'UNVERIFIED'];
             }
         }
         $values = array_map(static fn(string $name): string => $states[$name], $names);
@@ -34,7 +34,8 @@ final class DevGroupOperationsController
         $allDown = count(array_filter($values, static fn(string $s): bool => $s === 'ABSENT')) === count($values);
         return [
             // DEV and Preview share one Symfony cache: refuse partial cold start while sibling runs.
-            'start' => !$allUp && !($group === 'dev' && !$allDown),
+            'start' => $allDown,
+            'restart' => $allUp,
             'stop' => !$allDown,
             'state' => $allUp ? 'RUNNING' : ($allDown ? 'STOPPED' : 'PARTIAL'),
         ];
@@ -82,7 +83,7 @@ final class DevGroupOperationsController
         }
     }
 
-    #[Route('/api/v2/infrastructure/dev-groups/{group}/{action}', name: 'ezs_dev_groups_action', requirements: ['group' => 'dev|lab|assistant', 'action' => 'start|stop'], methods: ['POST'])]
+    #[Route('/api/v2/infrastructure/dev-groups/{group}/{action}', name: 'ezs_dev_groups_action', requirements: ['group' => 'dev|lab|assistant', 'action' => 'start|stop|restart'], methods: ['POST'])]
     public function action(Request $request, string $group, string $action): JsonResponse
     {
         if (!$this->allowedRequest($request)) return new JsonResponse(['error' => 'forbidden'], 403);
@@ -107,6 +108,33 @@ final class DevGroupOperationsController
                 $roots = SymfonyDevCachePreparation::rootsToPrepare(array_intersect_key($states, $specs), $specs);
                 SymfonyDevCachePreparation::prepare($roots);
                 $result = $lifecycle->startGroup($group);
+            } elseif ($action === 'restart') {
+                // Le cycle natif refuse tout PID non attesté et contrôle son identité à chaque arrêt.
+                // Vérifier les dépendances de relance AVANT toute interruption.
+                $specs = array_intersect_key(NativeWindowsLifecycle::specs(), array_flip(NativeWindowsLifecycle::groups()[$group]));
+                foreach ($specs as $name => $spec) {
+                    if (!is_file($spec['exe']) || !is_dir($spec['cwd'])) {
+                        return new JsonResponse(['error' => 'restart_dependency_unavailable_'.$name], 409, ['Cache-Control' => 'no-store']);
+                    }
+                }
+                $stopped = $lifecycle->stopGroup($group);
+                try {
+                    $afterStop = $lifecycle->status();
+                    if (self::permission($afterStop, $group)['state'] !== 'STOPPED') {
+                        throw new \RuntimeException('EZS_RESTART_STOP_NOT_VERIFIED');
+                    }
+                    $roots = SymfonyDevCachePreparation::rootsToPrepare(array_intersect_key($afterStop, $specs), $specs);
+                    SymfonyDevCachePreparation::prepare($roots);
+                    $started = $lifecycle->startGroup($group);
+                    $afterStart = $lifecycle->status();
+                    if (self::permission($afterStart, $group)['state'] !== 'RUNNING') {
+                        throw new \RuntimeException('EZS_RESTART_START_NOT_VERIFIED');
+                    }
+                    $result = ['stopped' => $stopped, 'started' => $started];
+                } catch (\Throwable $restartFailure) {
+                    // Ne jamais tenter de récupération implicite sur une identité incertaine.
+                    return new JsonResponse(['error' => 'restart_incomplete', 'phase' => 'after_stop'], 503, ['Cache-Control' => 'no-store']);
+                }
             } else {
                 $result = $lifecycle->stopGroup($group);
             }

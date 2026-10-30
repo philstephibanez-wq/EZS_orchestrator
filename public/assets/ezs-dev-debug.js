@@ -56,7 +56,7 @@
         const doc = document;
         const card = doc.getElementById(groups[group])?.closest('.ezs-server-card');
         const buttons = card ? [...card.querySelectorAll('.ezs-server-actions button')] : [];
-        return {count:card ? buttons.length : 'hors page', start:buttons[0] ? String(buttons[0].disabled) : 'ABSENT', stop:buttons[1] ? String(buttons[1].disabled) : 'ABSENT'};
+        return {count:card ? buttons.length : 'hors page', start:buttons[0] ? String(buttons[0].disabled) : 'ABSENT', stop:buttons[1] ? String(buttons[1].disabled) : 'ABSENT', label:buttons[0] ? buttons[0].textContent.trim() : 'ABSENT', age:card?.dataset.ezsStateProbeMs || 'inconnu'};
     }
     async function get(url) {
         const response = await fetch(url,{method:'GET',credentials:'same-origin',cache:'no-store',signal:AbortSignal.timeout(10000)});
@@ -107,6 +107,8 @@
         lines.push('', 'API ET BOUTONS OBSERVÉS');
         const divergences = [];
         const newRows = document.createDocumentFragment();
+        const headers = document.querySelectorAll('#ezs-debug-groups thead th');
+        if (headers.length === 7) { headers[2].textContent = 'Action contextuelle'; headers[5].textContent = 'DOM action'; }
         try {
             const data = await get('/api/v2/infrastructure/dev-groups');
             if (data.schema !== 'ezs.dev_groups.v1') throw new Error('SCHEMA');
@@ -120,14 +122,19 @@
                 } else if (d.count !== 2) {
                     divergences.push(group + ' : nombre de boutons inattendu (' + d.count + ')');
                 } else {
-                    if (d.start !== String(item?.start !== true)) divergences.push(group + ' / démarrer : API=' + (item?.start === true) + ', DOM disabled=' + d.start);
+                    const expectedMode = state === 'RUNNING' && item?.restart === true ? 'Redémarrer' : state === 'STOPPED' && item?.start === true ? 'Démarrer' : 'Indisponible';
+                    const expectedDisabled = expectedMode === 'Indisponible';
+                    // Une lecture API et l'application DOM sont asynchrones : ne pas qualifier une transition en anomalie.
+                    if (d.label !== 'Vérification…' && d.label !== 'État en cours…' && d.label !== 'État indisponible'
+                        && d.label !== expectedMode) divergences.push(group + ' / action : API=' + expectedMode + ', DOM=' + d.label);
+                    if (d.label === expectedMode && d.start !== String(expectedDisabled)) divergences.push(group + ' / action : disabled incohérent');
                     if (d.stop !== String(item?.stop !== true)) divergences.push(group + ' / arrêter : API=' + (item?.stop === true) + ', DOM disabled=' + d.stop);
                 }
                 const row = document.createElement('tr');
-                [group,state,item?.start === true,item?.stop === true,d.count,d.start,d.stop].forEach(v => cell(row,v));
+                [group,state,state === 'RUNNING' && item?.restart === true ? 'Redémarrer' : state === 'STOPPED' && item?.start === true ? 'Démarrer' : 'Indisponible',item?.stop === true,d.count,d.label + ' / disabled=' + d.start,d.stop].forEach(v => cell(row,v));
                 newRows.appendChild(row);
-                lines.push(group + ' : état=' + state + ' ; start=' + (item?.start === true) + ' ; stop=' + (item?.stop === true)
-                    + ' ; DOM boutons=' + d.count + ', demarrer.disabled=' + d.start + ', arreter.disabled=' + d.stop);
+                lines.push(group + ' : état=' + state + ' ; start=' + (item?.start === true) + ' ; restart=' + (item?.restart === true) + ' ; stop=' + (item?.stop === true)
+                    + ' ; DOM boutons=' + d.count + ', action=' + d.label + ', action.disabled=' + d.start + ', arreter.disabled=' + d.stop + ', attente permissions ms=' + d.age);
             }
         } catch (_) {
             incomplete = true;

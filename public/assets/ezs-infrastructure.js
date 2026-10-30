@@ -53,20 +53,49 @@
         const controls = {};
         let csrf = '';
         let acting = false;
+        const modes = {dev:null,lab:null,assistant:null};
+        // La vérification native peut prendre plusieurs secondes ; ne jamais simuler un état prêt.
+        const groupRequestStart = {dev:0, lab:0, assistant:0};
+        const $statusline = $('.ezs-statusline .text-body-secondary').first();
+        $statusline.text('État des environnements — commandes DEV / LAB / Assistant vérifiées par le serveur');
+        const actionDescriptions = {
+            dev:'Commandes natives disponibles après vérification des processus',
+            lab:'Démarrer / Redémarrer / Arrêter sous contrôle de l’Orchestrator',
+            assistant:'Commandes natives supervisées ; aucune action sur les jobs ou l’IA'
+        };
+        Object.keys(groups).forEach(function (group) {
+            const $card = $(groups[group]).closest('.ezs-server-card');
+            $card.find('dt').filter(function () { return $(this).text().trim() === 'Action'; })
+                .next('dd').text(actionDescriptions[group]);
+            if (group === 'dev') $card.find('dt').filter(function () { return $(this).text().trim() === 'État complémentaire'; })
+                .next('dd').text('État confirmé par l’inventaire natif avant toute commande');
+            if (group === 'lab' || group === 'assistant') $card.find('dt').filter(function () { return $(this).text().trim() === 'Autorité Orchestrator'; })
+                .next('dd').text('Orchestrator local · processus attestés · protection CSRF');
+        });
         Object.keys(groups).forEach(function(group) {
             const $card = $(groups[group]).closest('.ezs-server-card');
             const $buttons = $card.find('.ezs-server-actions button');
             controls[group] = {start:$buttons.eq(0), stop:$buttons.eq(1)};
             $buttons.removeAttr('title').prop('disabled', true);
+            controls[group].start.text('Vérification…').attr('aria-label', 'Vérification de l’état natif');
+            controls[group].stop.attr('aria-label', 'Arrêter — vérification en cours');
         });
         function disableAll() {
             Object.keys(controls).forEach(function(group) {
                 controls[group].start.prop('disabled', true);
                 controls[group].stop.prop('disabled', true);
+                modes[group] = null;
+                controls[group].start.text('Indisponible');
             });
         }
+        function $cardFor(group) { return $(groups[group]).closest('.ezs-server-card'); }
         function refreshGroups() {
             if (acting) return;
+            const startedAt = window.performance.now();
+            Object.keys(controls).forEach(function (group) {
+                groupRequestStart[group] = startedAt;
+                if (!modes[group]) controls[group].start.text('Vérification…');
+            });
             $.ajax({url:'/api/v2/infrastructure/dev-groups',method:'GET',dataType:'json',timeout:10000,cache:false})
               .done(function(data) {
                   if (!data || data.schema !== 'ezs.dev_groups.v1' || !data.groups || !data.csrf) {
@@ -75,23 +104,44 @@
                   csrf = data.csrf;
                   Object.keys(controls).forEach(function(group) {
                       const state = data.groups[group] || {};
-                      controls[group].start.prop('disabled', !state.start);
-                      controls[group].stop.prop('disabled', !state.stop);
+                      const mode = state.state === 'RUNNING' && state.restart === true ? 'restart'
+                          : state.state === 'STOPPED' && state.start === true ? 'start' : null;
+                      modes[group] = mode;
+                      controls[group].start.text(mode === 'restart' ? 'Redémarrer' : mode === 'start' ? 'Démarrer' : 'Indisponible');
+                      controls[group].start.attr('aria-label', mode === 'restart' ? 'Redémarrer ' + group : mode === 'start' ? 'Démarrer ' + group : 'Commande indisponible pour ' + group);
+                      controls[group].stop.attr('aria-label', 'Arrêter ' + group);
+                      $cardFor(group).attr('data-ezs-state', state.state || 'UNVERIFIED');
+                      controls[group].start.prop('disabled', mode === null)
+                          .toggleClass('btn-outline-primary', mode !== null)
+                          .toggleClass('btn-outline-secondary', mode === null);
+                      controls[group].stop.prop('disabled', state.stop !== true)
+                          .toggleClass('btn-outline-danger', state.stop === true)
+                          .toggleClass('btn-outline-secondary', state.stop !== true);
                       controls[group].start.attr('title', 'État natif : '+(state.state || 'indéterminé'));
+                      $cardFor(group).attr('data-ezs-state-probe-ms', String(Math.round(window.performance.now() - groupRequestStart[group])));
                       controls[group].stop.attr('title', 'État natif : '+(state.state || 'indéterminé'));
                   });
-              }).fail(function() { csrf = ''; disableAll(); });
+              }).fail(function() {
+                  csrf = ''; disableAll();
+                  Object.keys(controls).forEach(function (group) {
+                      controls[group].start.text('État indisponible');
+                      $cardFor(group).attr('data-ezs-state', 'UNVERIFIED');
+                  });
+              });
         }
         function action(group, verb) {
-            if (acting || !csrf || !controls[group] || controls[group][verb].prop('disabled')) return;
+            if (!controls[group]) return;
+            const button = verb === 'stop' ? controls[group].stop : controls[group].start;
+            if (acting || !csrf || !button || button.prop('disabled')) return;
             const label = {dev:'EZScore DEV',lab:'EZStudio LAB',assistant:'Assistant'}[group];
             const confirmation = verb === 'stop' ?
                 'Arrêter les processus natifs de '+label+' ? Les travaux en cours peuvent être interrompus. Les autres groupes et l’IA restent inchangés.' :
+                verb === 'restart' ? 'Redémarrer les processus natifs de '+label+' ? Les travaux en cours peuvent être interrompus. Si la relance échoue, le groupe peut rester arrêté. PROD et les autres groupes restent inchangés.' :
                 'Démarrer uniquement les processus natifs de '+label+' ?';
             if (!window.confirm(confirmation)) return;
             acting = true;
             disableAll();
-            $feedback.text((verb === 'start' ? 'Démarrage' : 'Arrêt')+' '+label+' en cours…');
+            $feedback.text((verb === 'start' ? 'Démarrage' : verb === 'restart' ? 'Redémarrage' : 'Arrêt')+' '+label+' en cours…');
             $.ajax({
                 url:'/api/v2/infrastructure/dev-groups/'+group+'/'+verb,
                 method:'POST',
@@ -110,7 +160,7 @@
             });
         }
         Object.keys(controls).forEach(function(group) {
-            controls[group].start.on('click', function(){ action(group,'start'); });
+            controls[group].start.on('click', function(){ if (modes[group]) action(group,modes[group]); });
             controls[group].stop.on('click', function(){ action(group,'stop'); });
         });
         $refresh.on('click', function(){ refresh(); refreshBackend(); refreshGroups(); });

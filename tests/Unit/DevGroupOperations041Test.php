@@ -31,10 +31,10 @@ final class DevGroupOperations041Test extends TestCase
     {
         $all = $this->states();
         foreach (['dev', 'lab', 'assistant'] as $group) {
-            self::assertSame(['start'=>false,'stop'=>true,'state'=>'RUNNING'], DevGroupOperationsController::permission($all, $group));
+            self::assertSame(['start'=>false,'restart'=>true,'stop'=>true,'state'=>'RUNNING'], DevGroupOperationsController::permission($all, $group));
         }
         $all['lab'] = 'ABSENT';
-        self::assertSame(['start'=>true,'stop'=>false,'state'=>'STOPPED'], DevGroupOperationsController::permission($all, 'lab'));
+        self::assertSame(['start'=>true,'restart'=>false,'stop'=>false,'state'=>'STOPPED'], DevGroupOperationsController::permission($all, 'lab'));
         self::assertSame('RUNNING', DevGroupOperationsController::permission($all, 'dev')['state']);
         self::assertSame('RUNNING', DevGroupOperationsController::permission($all, 'assistant')['state']);
     }
@@ -43,14 +43,14 @@ final class DevGroupOperations041Test extends TestCase
     {
         $states = $this->states();
         $states['ezscore_preview'] = 'ABSENT';
-        self::assertSame(['start'=>false,'stop'=>true,'state'=>'PARTIAL'], DevGroupOperationsController::permission($states, 'dev'));
+        self::assertSame(['start'=>false,'restart'=>false,'stop'=>true,'state'=>'PARTIAL'], DevGroupOperationsController::permission($states, 'dev'));
     }
 
     public function testAmbiguousUnrelatedOwnerBlocksEveryAction(): void
     {
         $states = $this->states();
         $states['root_caddy'] = 'PORT_UNVERIFIED';
-        self::assertSame(['start'=>false,'stop'=>false,'state'=>'UNVERIFIED'], DevGroupOperationsController::permission($states, 'lab'));
+        self::assertSame(['start'=>false,'restart'=>false,'stop'=>false,'state'=>'UNVERIFIED'], DevGroupOperationsController::permission($states, 'lab'));
     }
 
     public function testUnknownGroupRefused(): void

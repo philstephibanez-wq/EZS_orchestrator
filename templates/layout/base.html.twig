@@ -11,7 +11,7 @@
     <script src="/assets/ezs-gpu-monitor.js" defer></script>
     {% block page_scripts %}{% endblock %}
     {% if app.request.host in ['127.0.0.1', 'localhost'] and app.request.port == 8790 %}
-        <link rel="stylesheet" href="/assets/ezs-debug-layout.css">
+        <link rel="stylesheet" href="/assets/ezs-debug-layout.css?v={{ orchestrator_version|url_encode }}">
         <script src="/assets/ezs-dev-debug.js?v={{ orchestrator_version|url_encode }}" defer></script>
     {% endif %}
 </head>

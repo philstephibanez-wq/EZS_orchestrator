@@ -12,7 +12,8 @@ final class SharedDebugAsync046Test extends TestCase
         $layout = (string) file_get_contents($root.'/templates/layout/base.html.twig');
         $script = (string) file_get_contents($root.'/public/assets/ezs-dev-debug.js');
         self::assertStringNotContainsString('Ouvrir le volet pour recueillir', $layout);
-        self::assertStringContainsString('Diagnostic en attente d’ouverture.', $layout);
+        self::assertStringContainsString('Diagnostic non initialisé', $layout);
+        self::assertStringNotContainsString('Diagnostic en attente d’ouverture.', $layout);
         self::assertStringContainsString('Actualisation du diagnostic…', $script);
         self::assertStringContainsString('dernières valeurs conservées', $script);
         self::assertStringContainsString('DocumentFragment', $script);
