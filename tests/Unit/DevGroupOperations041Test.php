@@ -46,10 +46,19 @@ final class DevGroupOperations041Test extends TestCase
         self::assertSame(['start'=>false,'restart'=>false,'stop'=>true,'state'=>'PARTIAL'], DevGroupOperationsController::permission($states, 'dev'));
     }
 
-    public function testAmbiguousUnrelatedOwnerBlocksEveryAction(): void
+    public function testUnrelatedAmbiguityDoesNotDisableIndependentGroup(): void
     {
         $states = $this->states();
         $states['root_caddy'] = 'PORT_UNVERIFIED';
+        self::assertSame(['start'=>false,'restart'=>true,'stop'=>true,'state'=>'RUNNING'], DevGroupOperationsController::permission($states, 'lab'));
+        $states['lab'] = 'ABSENT';
+        self::assertSame(['start'=>true,'restart'=>false,'stop'=>false,'state'=>'STOPPED'], DevGroupOperationsController::permission($states, 'lab'));
+    }
+
+    public function testAmbiguousTargetGroupRemainsBlocked(): void
+    {
+        $states = $this->states();
+        $states['lab'] = 'PORT_UNVERIFIED';
         self::assertSame(['start'=>false,'restart'=>false,'stop'=>false,'state'=>'UNVERIFIED'], DevGroupOperationsController::permission($states, 'lab'));
     }
 

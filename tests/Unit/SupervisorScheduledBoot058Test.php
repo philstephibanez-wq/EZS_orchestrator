@@ -50,6 +50,11 @@ final class SupervisorScheduledBoot058Test extends TestCase
         self::assertStringNotContainsString('extension=$extension', $runner);
         self::assertStringContainsString('wscript.exe', $installer);
         self::assertStringContainsString('Set-ScheduledTask', $installer);
+        // Both initial installation and an update must launch through the hidden host.
+        self::assertSame(2, substr_count($installer, 'New-ScheduledTaskAction -Execute'));
+        self::assertStringNotContainsString('powershell.exe', $installer);
+        self::assertSame(2, substr_count($installer, 'wscript.exe'));
+        self::assertSame(2, substr_count($installer, '//B //Nologo'));
         self::assertStringContainsString('EZS_SUPERVISOR_TASK_UPDATED_HIDDEN', $installer);
         $hidden = file_get_contents($root.'/scripts/ezs_supervisor_hidden.vbs');
         self::assertIsString($hidden);

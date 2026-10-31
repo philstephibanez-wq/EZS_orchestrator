@@ -22,9 +22,9 @@ final class NativeFailureGate033Test extends TestCase
         if (is_dir($this->runtime)) rmdir($this->runtime);
     }
 
-    public function testThirdSpawnFailurePreservesEvidenceAndRefusesFurtherMutation(): void
+    public function testThirdSpawnFailurePreservesEvidenceAndSafelyRecoversWhenCandidateAbsent(): void
     {
-        $specs = array_values(NativeWindowsLifecycle::specs());
+        $specs = NativeWindowsLifecycle::specs();
         $spawned = [];
         $spawnCount = 0;
         $terminated = 0;
@@ -48,15 +48,22 @@ final class NativeFailureGate033Test extends TestCase
         $spawn = static function (string $exe, string $args, string $cwd) use (&$spawnCount, &$spawned, $specs): int {
             ++$spawnCount;
             if ($spawnCount === 3) throw new \RuntimeException('EZS_INJECTED_THIRD_SPAWN_FAILURE');
-            $pid = 7000 + $spawnCount;
-            $spawned[$pid] = $specs[$spawnCount - 1];
-            return $pid;
+            foreach ($specs as $spec) {
+                if ($spec['exe'] === $exe && $spec['args'] === $args && $spec['cwd'] === $cwd) {
+                    $pid = 7000 + $spawnCount;
+                    $spawned[$pid] = $spec;
+                    return $pid;
+                }
+            }
+            throw new \RuntimeException('EZS_UNKNOWN_SIMULATED_SPAWN');
         };
         $service = new NativeWindowsLifecycle(
             $inventory, $listeners, $spawn,
             static function (int $pid) use (&$terminated): bool { ++$terminated; return true; },
             $this->runtime,
-            static fn(string $exe, string $cwd): bool => true
+            static fn(string $exe, string $cwd): bool => true,
+            // Aucun appel TCP réel : les propriétaires sont produits par $listeners.
+            static fn(int $port): ?int => null
         );
 
         try {
@@ -72,7 +79,9 @@ final class NativeFailureGate033Test extends TestCase
         self::assertSame('ezscore_dev', $pending['name']);
         $stored = json_decode((string)file_get_contents($this->runtime.'/native-processes.json'), true, 512, JSON_THROW_ON_ERROR);
         self::assertCount(2, $stored['records']);
-        foreach (['start', 'stop', 'status'] as $action) {
+
+        // stop/status sont interdits tant qu'un journal pending subsiste.
+        foreach (['stop', 'status'] as $action) {
             try {
                 $service->$action();
                 self::fail('Pending evidence must block '.$action);
@@ -82,6 +91,18 @@ final class NativeFailureGate033Test extends TestCase
         }
         self::assertSame(3, $spawnCount);
         self::assertSame(0, $terminated);
+
+        // start() réconcilie le pending uniquement si le candidat est absent.
+        $restarted = $service->start();
+        self::assertSame(7, $spawnCount);
+        self::assertSame(0, $terminated);
+        self::assertCount(4, $restarted);
+        self::assertSame(7004, $restarted['ezscore_dev']);
+        self::assertFileDoesNotExist($this->runtime.'/native-spawn-pending.json');
+        $after = json_decode((string)file_get_contents($this->runtime.'/native-processes.json'), true, 512, JSON_THROW_ON_ERROR);
+        self::assertCount(count($specs), $after['records']);
+        self::assertSame('ATTESTED', $service->status()['ezscore_dev']);
+        self::assertStringContainsString('ABANDONED_PENDING ezscore_dev', (string)file_get_contents($this->runtime.'/native-reconciled.log'));
     }
 
     public function testForeignListenerRefusesWithoutSpawningOrChangingEvidence(): void
@@ -93,7 +114,8 @@ final class NativeFailureGate033Test extends TestCase
             static function () use (&$spawnCount): int { ++$spawnCount; return 999; },
             static fn(int $pid): bool => true,
             $this->runtime,
-            static fn(string $exe, string $cwd): bool => true
+            static fn(string $exe, string $cwd): bool => true,
+            static fn(int $port): ?int => null
         );
         try {
             $service->start();

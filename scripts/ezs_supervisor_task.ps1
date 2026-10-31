@@ -24,7 +24,7 @@ if ($Action -eq 'Update') {
         throw 'EZS_SUPERVISOR_TASK_FOREIGN_REFUSED'
     }
     if (!(Test-Path -LiteralPath $hidden -PathType Leaf)) { throw 'EZS_SUPERVISOR_HIDDEN_MISSING' }
-    if ((Get-Content -LiteralPath (Join-Path $root 'VERSION') -Raw).Trim() -ne '4.2c63') { throw 'EZS_SUPERVISOR_VERSION_MISMATCH' }
+    if ((Get-Content -LiteralPath (Join-Path $root 'VERSION') -Raw).Trim() -ne '4.2c64') { throw 'EZS_SUPERVISOR_VERSION_MISMATCH' }
     $newAction = New-ScheduledTaskAction -Execute "$env:WINDIR\System32\wscript.exe" -Argument ('//B //Nologo "' + $hidden + '"') -WorkingDirectory $root
     Set-ScheduledTask -TaskName $taskName -Action $newAction | Out-Null
     Write-Host 'EZS_SUPERVISOR_TASK_UPDATED_HIDDEN'
@@ -43,13 +43,13 @@ if ($null -ne $task) { throw 'EZS_SUPERVISOR_TASK_ALREADY_EXISTS' }
 if (!(Test-Path -LiteralPath $runner -PathType Leaf)) { throw 'EZS_SUPERVISOR_RUNNER_MISSING' }
 if (!(Test-Path -LiteralPath $hidden -PathType Leaf)) { throw 'EZS_SUPERVISOR_HIDDEN_MISSING' }
 if (!(Test-Path -LiteralPath (Join-Path $root 'bin\console') -PathType Leaf)) { throw 'EZS_SUPERVISOR_CONSOLE_MISSING' }
-if ((Get-Content -LiteralPath (Join-Path $root 'VERSION') -Raw).Trim() -ne '4.2c63') { throw 'EZS_SUPERVISOR_VERSION_MISMATCH' }
+if ((Get-Content -LiteralPath (Join-Path $root 'VERSION') -Raw).Trim() -ne '4.2c64') { throw 'EZS_SUPERVISOR_VERSION_MISMATCH' }
 # InteractiveToken is intentional: do not change the Windows identity running PHP/WMI or SSO.
 # Runs once per minute while the owning user is logged on; after reboot it resumes at logon.
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 $principal = New-ScheduledTaskPrincipal -UserId $identity -LogonType Interactive -RunLevel Limited
-$execute = 'powershell.exe'
-$arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $runner + '"'
+$execute = Join-Path $env:WINDIR 'System32\wscript.exe'
+$arguments = '//B //Nologo "' + $hidden + '"'
 $taskAction = New-ScheduledTaskAction -Execute $execute -Argument $arguments -WorkingDirectory $root
 $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 1) -RepetitionDuration (New-TimeSpan -Days 3650)
 $atLogon = New-ScheduledTaskTrigger -AtLogOn -User $identity

@@ -26,7 +26,7 @@ final class NativeProcOpen031Test extends TestCase
     public function testNativeLaunchUsesProcOpenAndDoesNotReintroducePowerShell():void
     {
         $text=(string)file_get_contents(dirname(__DIR__,2).'/src/Module/Infrastructure/NativeWindowsLifecycle.php');
-        self::assertStringContainsString('proc_open($command, $descriptors, $pipes, $cwd, null, [',$text);
+        self::assertStringContainsString('proc_open($command, $descriptors, $pipes, $cwd, $env, [',$text);
         self::assertStringContainsString("'bypass_shell' => true",$text);
         self::assertStringContainsString("'create_new_console' => false",$text);
         self::assertStringNotContainsString('ExecMethod(', $text);

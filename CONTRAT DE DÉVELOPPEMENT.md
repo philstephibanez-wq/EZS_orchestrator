@@ -262,3 +262,35 @@ Cette autonomie concerne **uniquement le diagnostic** et ne constitue pas une au
 - L'assistant peut faire évoluer ce panneau à son initiative pour accélérer le diagnostic, mais **toute modification de code reste soumise** à l'audit GitHub, au préflight, aux tests, à la livraison ZIP, à la traçabilité et à la discipline de publication du présent contrat. Cette autorisation n'accorde pas le droit de committer ou pousser le code applicatif à la place du mainteneur.
 
 **Finalité :** permettre au mainteneur de transmettre en une copie un diagnostic structuré et exploitable, sans dépendance systématique aux outils de développement du navigateur ni aux commandes ponctuelles.
+
+## 16. Contrat normatif — Disponibilité autonome et recette stateless
+
+### 16.1 Watchdog indépendant
+
+La surveillance de disponibilité ROOT est exécutée hors de Caddy et de FastCGI ROOT, notamment par une tâche Windows. Chaque cycle doit effectuer une sonde HTTP bornée sur un chemin de santé explicite qui valide le fonctionnement applicatif, et pas seulement l'ouverture d'un port.
+
+- Réponse saine : le watchdog ne modifie pas ROOT.
+- Réponse absente ou incorrecte : diagnostiquer puis tenter une récupération autonome si et seulement si les contrôles de sécurité l'autorisent.
+- PID étranger, PID réutilisé, identité incomplète, port occupé sans attribution, intention de spawn non résolue : refuser toute terminaison ou adoption et journaliser l'incident.
+- Ne pas créer de boucle agressive : verrou, délais bornés, journalisation et résultat exploitable par le Planificateur Windows.
+- L'exécution du watchdog ne dépend pas de l'interface web de ROOT.
+
+### 16.2 Tests indépendants et contrôle de démarrage
+
+Les tests unitaires doivent réussir dans n'importe quel état des services réels. Leurs dépendances système sont simulées ou injectées ; les dossiers d'état sont uniques à chaque scénario. Ils ne lisent ni n'effacent les états de production ou de MAIN.
+
+La suite de tests complète est obligatoire avant livraison et publication, mais ne doit pas être exécutée automatiquement à chaque reprise ROOT. Le démarrage utilise un ensemble réduit de préconditions rapides, bornées et sans effet de bord.
+
+### 16.3 Supervision selon les intentions persistantes
+
+Une fois ROOT disponible, l'Orchestrator reprend la supervision des groupes selon leurs intentions explicitement enregistrées : RUNNING et STOPPED, séparation DEV/LAB/Assistant/PROD, modes maintenance et environnement, arrêts volontaires et paramètres requis. Les états absents ou invalides ne doivent jamais être inventés. Un STOPPED volontaire ne doit pas être converti en RUNNING par une sonde.
+
+### 16.4 Recette obligatoire, stateless et réelle
+
+Chaque scénario produit un état initial contrôlé, une panne injectée, une attente explicite, les observations finales et les preuves de nettoyage. Couvrir au minimum : démarrage à froid et à chaud, Caddy mort, FastCGI mort, processus vivant mais HTTP indisponible, port étranger, PID réutilisé, intention pending, collision de verrou, arrêt volontaire, absence de doublon, protection PROD et reprise des intentions. Répéter les scénarios dans un ordre arbitraire.
+
+Les tests isolés sont exécutés dans des environnements indépendants. Les essais sur MAIN ne doivent intervenir qu'après contrôle des ressources, sans suppression des données ou états persistants et avec procédure de restauration. Un nombre de tests PHPUnit réussi ne constitue jamais une preuve d'accessibilité HTTP ni de reprise opérationnelle.
+
+### 16.5 Critère de validation
+
+Il faut démontrer cumulativement : disponibilité HTTP de ROOT, reprise automatique effective après défaillance, conservation des intentions et sécurité des processus étrangers, validation stateless, tests non-régressifs et absence d'impact PROD. Une exigence non démontrée reste NON VALIDÉE.

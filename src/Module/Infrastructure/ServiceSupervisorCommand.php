@@ -105,25 +105,15 @@ final class ServiceSupervisorCommand extends Command
         try{
             $desired=(new DesiredServiceState())->all();
             $retry=self::retryRead();
-            $now=time();$failed=[];
-            foreach(self::planned($desired) as $group){
-                $next=(int)($retry[$group]['next']??0);
-                if($next>$now){$output->writeln('EZS_SUPERVISOR_BACKOFF_'.$group.' until='.$next);continue;}
-                try{
-                    $started=self::runOne($group);
-                    if($started!==[])self::log('INFO',$group,'RECOVERED '.implode(',',array_keys($started)));
-                    unset($retry[$group]);
-                    $output->writeln('EZS_SUPERVISOR_OK_'.$group.' started='.count($started));
-                }catch(\Throwable $failure){
-                    $count=(int)($retry[$group]['count']??0)+1;
-                    $retry[$group]=['count'=>$count,'next'=>self::nextAttempt($count,$now)];
-                    self::log('ERROR',$group,'START_FAILED '.$failure->getMessage());
-                    $output->writeln('EZS_SUPERVISOR_RETRY_'.$group.' after='.$retry[$group]['next']);
-                    $failed[]=$group;
-                }
-                self::retrySave($retry);
-            }
-            return $failed===[]?Command::SUCCESS:Command::FAILURE;
+            return ServiceSupervisorCycle::run(
+                $desired,
+                $retry,
+                time(),
+                self::runOne(...),
+                self::log(...),
+                self::retrySave(...),
+                static fn(string $line): mixed => $output->writeln($line)
+            );
         }finally{flock($lock,LOCK_UN);fclose($lock);}
     }
 

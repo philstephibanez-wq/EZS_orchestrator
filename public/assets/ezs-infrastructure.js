@@ -129,7 +129,11 @@
                       $cardFor(group).attr('data-ezs-state-probe-ms', String(Math.round(window.performance.now() - groupRequestStart[group])));
                       controls[group].stop.attr('title', 'État natif : '+(state.state || 'indéterminé'));
                   });
-              }).fail(function() {
+              }).fail(function(xhr, textStatus) {
+                  // Ne jamais réactiver des boutons sans preuve API ; afficher la cause utile.
+                  const status = xhr && xhr.status ? String(xhr.status) : (textStatus || 'réseau');
+                  const reason = xhr && xhr.responseJSON && xhr.responseJSON.error ? String(xhr.responseJSON.error) : 'réponse indisponible';
+                  $feedback.text('Pilotage DEV indisponible : HTTP ' + status + ' / ' + reason);
                   csrf = ''; disableAll();
                   Object.keys(controls).forEach(function (group) {
                       controls[group].start.text('État indisponible');

@@ -25,7 +25,8 @@ final class DevGroupOperationsController
         $groups = NativeWindowsLifecycle::groups();
         if (!isset($groups[$group])) throw new \InvalidArgumentException('EZS_DEV_GROUP_UNKNOWN');
         $names = $groups[$group];
-        foreach (NativeWindowsLifecycle::specs() as $name => $_spec) {
+        // Chaque groupe est indépendant : une preuve ambiguë ailleurs ne bloque pas son démarrage.
+        foreach ($names as $name) {
             if (!array_key_exists($name, $states) || !in_array($states[$name], ['ATTESTED', 'ABSENT'], true)) {
                 return ['start' => false, 'restart' => false, 'stop' => false, 'state' => 'UNVERIFIED'];
             }

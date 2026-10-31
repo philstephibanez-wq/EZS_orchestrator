@@ -34,7 +34,8 @@ final class NativePendingGate032Test extends TestCase
         foreach (['start','stop','status'] as $action) {
             try {$service->$action();self::fail('Operation accepted with pending intent');}
             catch (\RuntimeException $e) {
-                self::assertSame('EZS_NATIVE_PENDING_REQUIRES_MANUAL_ATTESTATION',$e->getMessage());
+                $expected=$action === 'start' ? 'EZS_NATIVE_PENDING_INVALID' : 'EZS_NATIVE_PENDING_REQUIRES_MANUAL_ATTESTATION';
+                self::assertSame($expected,$e->getMessage());
             }
         }
         self::assertSame(0,$calls);
@@ -48,7 +49,8 @@ final class NativePendingGate032Test extends TestCase
             static fn():array=>[],static fn():array=>[],
             static function() use (&$calls):int {$calls++;return 999;},
             static fn(int $pid):bool=>true,$this->directory,
-            static fn(string $exe,string $cwd):bool=>$cwd !== 'H:/EZScore_dev'
+            static fn(string $exe,string $cwd):bool=>$cwd !== 'H:/EZScore_dev',
+            static fn(int $port): ?int => null
         );
         try {$service->start();self::fail('Expected preflight to refuse missing dependency');}
         catch (\RuntimeException $e) {

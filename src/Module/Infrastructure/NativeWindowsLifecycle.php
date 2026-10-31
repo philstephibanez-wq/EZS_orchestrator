@@ -372,7 +372,7 @@ final class NativeWindowsLifecycle
             $this->reconcileLegacy();
             $stored = $this->records();
             [$processes, $ports] = $this->observations();
-            $this->reconcileDeadRecords($stored,$processes,$ports);
+            $this->reconcileDeadRecords($stored,$processes,$ports,$names);
             [$processes, $ports] = $this->observations();
             foreach ($stored as $name => $record) {
                 if (!isset($this->managedSpecs[$name]) || !is_array($record)) {
