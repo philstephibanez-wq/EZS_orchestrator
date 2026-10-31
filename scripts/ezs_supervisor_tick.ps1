@@ -55,11 +55,40 @@ function Test-HttpAnswer([string]$url) {
     } catch { return $false }
 }
 function Start-RootFastCgi {
-    $listeners = Get-Listeners 8791
+    # A single empty TCP snapshot is not proof that ROOT is absent: the PHP
+    # cleaner may be terminating a residual while an active ROOT is stable.
+    # Keep the fast path short when a listener is already present.
+    $listeners = @(Get-Listeners 8791)
     if ($listeners.Count -gt 0) { return }
-    $owned = Get-Owned $phpCgi 'php' ''
+    $owned = @(Get-Owned $phpCgi 'php' '')
     if ($owned.Count -gt 0) {
         Write-Event ('ROOT_FASTCGI_NOT_LISTENING_EXISTING_PID=' + ($owned.ProcessId -join ','))
+        return
+    }
+
+    # Cold boot only: two independent snapshots one second apart, and a
+    # second TCP enumeration via netstat. A probe error refuses the spawn.
+    Start-Sleep -Seconds 1
+    $listeners = @(Get-Listeners 8791)
+    $owned = @(Get-Owned $phpCgi 'php' '')
+    if ($listeners.Count -gt 0 -or $owned.Count -gt 0) {
+        Write-Event 'ROOT_FASTCGI_BOOT_ABORTED_CHANGED_OBSERVATION'
+        return
+    }
+    $netstat = & "$env:SystemRoot\System32\netstat.exe" -ano -p tcp
+    if ($LASTEXITCODE -ne 0) { throw 'EZS_ROOT_NETSTAT_UNAVAILABLE' }
+    $occupied = @($netstat | Where-Object {
+        $_ -match '^\s*TCP\s+127\.0\.0\.1:8791\s+\S+\s+LISTENING\s+\d+\s*$' -or
+        $_ -match '^\s*TCP\s+0\.0\.0\.0:8791\s+\S+\s+LISTENING\s+\d+\s*$' -or
+        $_ -match '^\s*TCP\s+\[::\]:8791\s+\S+\s+LISTENING\s+\d+\s*$'
+    })
+    if ($occupied.Count -gt 0) {
+        Write-Event 'ROOT_FASTCGI_BOOT_ABORTED_NETSTAT_LISTENER'
+        return
+    }
+    # Recheck after netstat as the final time-of-check before process start.
+    if ((@(Get-Listeners 8791)).Count -gt 0 -or (@(Get-Owned $phpCgi 'php' '')).Count -gt 0) {
+        Write-Event 'ROOT_FASTCGI_BOOT_ABORTED_FINAL_CHECK'
         return
     }
     $p = Start-Process -FilePath $phpCgi -ArgumentList @('-b','127.0.0.1:8791') -WorkingDirectory $root -PassThru -WindowStyle Hidden
