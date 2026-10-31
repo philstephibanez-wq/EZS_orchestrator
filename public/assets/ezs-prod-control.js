@@ -8,6 +8,9 @@
     const $title=$('#prod-action-modal-title'),$description=$('#prod-action-modal-description');
     const $error=$('#prod-action-modal-error'),$confirm=$('#prod-action-confirm');
     let token='',busy=false,pending=null,capabilities={maintenance:false,normal:false};
+    let lastGood=null;
+    const $diagnostic=$('#prod-refresh-diagnostic');
+    function observation(text){if($diagnostic.length)$diagnostic.text(text);}
     function setButtons(){
       $maintenance.prop('disabled',busy||!capabilities.maintenance||!modal);
       $normal.prop('disabled',busy||!capabilities.normal||!modal);
@@ -17,10 +20,14 @@
         .addClass('text-bg-'+level);
     }
     function refreshProd(){
+      const start=performance.now();
       $.ajax({url:'/api/v2/infrastructure/prod-control',dataType:'json',cache:false,timeout:5000})
        .done(function(d){
          if(d.schema!=='ezs.prod_control.v1') return;
          token=d.csrf||'';
+         lastGood=new Date();
+         const x=d.timing_ms||{};
+         observation('API '+Math.round(performance.now()-start)+' ms · serveur '+(x.total??'?')+' ms · gateway '+(x.gateway??'?')+' ms · backend '+(x.backend??'?')+' ms · validé '+lastGood.toLocaleTimeString('fr-FR'));
          $mode.text(d.maintenance===true?'Activée':d.maintenance===false?'Mode normal':'Indéterminée');
          $edge.text(d.caddy_listening?'Écoute 8501':'Arrêté');
          if (d.gateway_online && d.backend_ready) {
@@ -33,9 +40,15 @@
          capabilities={maintenance:!!d.actions.maintenance,normal:!!d.actions.normal};
          $normal.attr('title',d.note||'');
          setButtons();
-       }).fail(function(){
-         setStatus('État indisponible','secondary');
+       }).fail(function(xhr,status,error){
+         const elapsed=Math.round(performance.now()-start);
+         const code=xhr.status||0;
+         const info='PROD AJAX '+(status||'erreur')+' · HTTP '+code+' · '+elapsed+' ms'+(error?' · '+String(error).slice(0,70):'');
+         observation(info+(lastGood?' · dernier état valide '+lastGood.toLocaleTimeString('fr-FR'):''));
+         // Never authorize an action from stale information.
          capabilities={maintenance:false,normal:false};setButtons();
+         if (lastGood) setStatus('Statut non actualisé','warning');
+         else setStatus('État indisponible','secondary');
        });
     }
     function ask(action){

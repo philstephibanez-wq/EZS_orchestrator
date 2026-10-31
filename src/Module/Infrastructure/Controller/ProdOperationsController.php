@@ -44,13 +44,16 @@ final class ProdOperationsController
     public function read(Request $request): JsonResponse
     {
         if (!$this->allowed($request)) return new JsonResponse(['error'=>'forbidden'],403);
+        $t0=hrtime(true);
         $token=$this->sessionToken();
+        $t1=hrtime(true);
         $config='H:/EZScore/var/runtime/online-gateway.json';
         $desired=null;
         if (is_file($config)) {
             $data=json_decode((string)file_get_contents($config),true);
             if (is_array($data) && is_bool($data['maintenance'] ?? null)) $desired=$data['maintenance'];
         }
+        $t2=hrtime(true);
         $gateway=null;
         $context=stream_context_create(['http'=>['timeout'=>1,'ignore_errors'=>true]]);
         $raw=@file_get_contents('http://127.0.0.1:8510/__ezscore_gateway_status',false,$context);
@@ -58,12 +61,23 @@ final class ProdOperationsController
             $data=json_decode($raw,true);
             if (is_array($data) && ($data['protocol'] ?? '')==='ezscore.online-gateway.v3' && ($data['ok'] ?? false)===true) $gateway=$data;
         }
+        $t3=hrtime(true);
         $socket=@stream_socket_client('tcp://127.0.0.1:8501',$errno,$errstr,0.5);
         $caddy=is_resource($socket);
         if ($caddy) fclose($socket);
+        $t4=hrtime(true);
         $backend=$gateway!==null && $caddy && $this->backendReady();
+        $t5=hrtime(true);
         return new JsonResponse([
             'schema'=>'ezs.prod_control.v1',
+            'timing_ms'=>[
+                'session'=>round(($t1-$t0)/1000000,2),
+                'config'=>round(($t2-$t1)/1000000,2),
+                'gateway'=>round(($t3-$t2)/1000000,2),
+                'caddy'=>round(($t4-$t3)/1000000,2),
+                'backend'=>round(($t5-$t4)/1000000,2),
+                'total'=>round(($t5-$t0)/1000000,2),
+            ],
             'gateway_online'=>$gateway!==null,
             'caddy_listening'=>$caddy,
             'backend_ready'=>$backend,

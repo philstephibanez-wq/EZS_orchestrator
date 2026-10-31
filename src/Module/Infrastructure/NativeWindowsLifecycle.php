@@ -184,7 +184,6 @@ final class NativeWindowsLifecycle
     }
     public function status():array
     {
-        $this->assertNoPending();
         [$processes,$ports]=$this->observations();$stored=$this->records();$result=[];
         foreach($this->managedSpecs as $name=>$spec){
             $rec=$stored[$name]??null;
@@ -342,7 +341,138 @@ final class NativeWindowsLifecycle
             return $stopped;
         });
     }
+    /** Recupere uniquement les FastCGI applicatifs du groupe, sans pending global. */
+    public function reconcileFastCgiGroup(string $group, bool $wanted): array
+    {
+        $names = array_values(array_filter($this->groupNames($group),
+            static fn(string $name): bool => FastCgiPolicy::isFastCgi($name)));
+        if ($names === []) throw new \InvalidArgumentException('EZS_FASTCGI_GROUP_EMPTY');
+        return $this->withLock(function () use ($names, $wanted): array {
+            $stored = $this->records();
+            $started = [];
+            $journal = $this->runtime.'/native-reconciled.log';
+            // Snapshot shared by healthy group members; refresh only after a mutation.
+            [$processes, $ports] = $this->observations();
+            $dirty = false;
+            foreach ($names as $name) {
+                $spec = $this->managedSpecs[$name];
+                if ($dirty) {
+                    [$processes, $ports] = $this->observations();
+                    $dirty = false;
+                }
+                $owned = [];
+                foreach ($processes as $pid => $observed) {
+                    $rec = ['pid'=>(int)$pid, 'created'=>(string)($observed['created']??'')];
+                    // Attest executable + full command + creation, independently of listener.
+                    $candidate = $ports;
+                    foreach (self::portsOf($spec) as $port) $candidate[$port] = [(int)$pid];
+                    if (self::attest($rec, $spec, $observed, $candidate)) $owned[(int)$pid] = $rec;
+                }
+                $owners = $ports[$spec['port']] ?? [];
+                foreach ($owners as $pid) {
+                    if (!isset($owned[(int)$pid]))
+                        throw new \RuntimeException('EZS_FASTCGI_FOREIGN_LISTENER_'.$name);
+                }
+                $healthy = count($owners) === 1 ? (int)$owners[0] : 0;
+                if ($wanted && $healthy > 0 && isset($owned[$healthy]) && count($owned) === 1) {
+                    $stored[$name] = $owned[$healthy];
+                    $this->persist($stored);
+                    continue;
+                }
+                // Recheck every candidate immediately before termination, including PID reuse.
+                foreach ($owned as $pid => $record) {
+                    if ($wanted && $healthy === $pid) continue;
+                    [$nowProcesses, $nowPorts] = $this->observations();
+                    $observed = $nowProcesses[$pid] ?? null;
+                    if ($observed === null) continue;
+                    $fake = $nowPorts;
+                    foreach (self::portsOf($spec) as $port) $fake[$port] = [$pid];
+                    if (!self::attest($record, $spec, $observed, $fake))
+                        throw new \RuntimeException('EZS_FASTCGI_IDENTITY_CHANGED_'.$name);
+                    if (!(($this->terminate)($pid)))
+                        throw new \RuntimeException('EZS_FASTCGI_TERMINATE_FAILED_'.$name);
+                    $dirty = true;
+                    if (file_put_contents($journal, gmdate('c').' FASTCGI_STOP '.$name.' PID='.$pid."\n",FILE_APPEND|LOCK_EX) === false)
+                        throw new \RuntimeException('EZS_FASTCGI_AUDIT_FAILED');
+                }
+                if (!$wanted) {
+                    unset($stored[$name]);
+                    $this->persist($stored);
+                    continue;
+                }
+                if ($healthy > 0 && isset($owned[$healthy])) {
+                    $stored[$name] = $owned[$healthy];
+                    $this->persist($stored);
+                    continue;
+                }
+                // Give exited processes time to release their port.
+                $free = false;
+                for ($i=0; $i<20; $i++) {
+                    [$nowProcesses,$nowPorts] = $this->observations();
+                    if (!self::occupied($spec,$nowPorts)) { $free=true; break; }
+                    usleep(250000);
+                }
+                if (!$free) throw new \RuntimeException('EZS_FASTCGI_PORT_BUSY_'.$name);
+                if (!(($this->dependencyAvailable)($spec['exe'],$spec['cwd'])))
+                    throw new \RuntimeException('EZS_FASTCGI_DEPENDENCY_MISSING_'.$name);
+                $pid = ($this->spawn)($spec['exe'],$spec['args'],$spec['cwd']);
+                $dirty = true;
+                if (!is_int($pid) || $pid<1) throw new \RuntimeException('EZS_FASTCGI_SPAWN_FAILED_'.$name);
+                $ready = false;
+                for ($i=0; $i<40; $i++) {
+                    usleep(250000);
+                    [$nowProcesses,$nowPorts] = $this->observations();
+                    $observed = $nowProcesses[$pid] ?? null;
+                    $record = ['pid'=>$pid,'created'=>(string)($observed['created']??'')];
+                    if ($observed !== null && self::attest($record,$spec,$observed,$nowPorts)) {
+                        $stored[$name] = $record;
+                        $this->persist($stored);
+                        $started[$name] = $pid;
+                        $ready = true;
+                        break;
+                    }
+                }
+                if (!$ready) throw new \RuntimeException('EZS_FASTCGI_NOT_READY_'.$name.'_PID_'.$pid);
+            }
+            return $started;
+        });
+    }
+
     /** Groupes commandables séparément ; aucun groupe ne contient les processus racine de l'interface. */
+    /** Inventaire non mutateur des php-cgi.exe, avec preuve de commande et ecoute TCP. */
+    public function fastCgiProcessReport(): array
+    {
+        [$processes, $ports] = $this->observations();
+        $result = [];
+        foreach ($processes as $pid => $observed) {
+            $exe = strtolower(str_replace('\\', '/', (string)($observed['executable'] ?? '')));
+            if ($exe !== strtolower(str_replace('\\', '/', self::PHP_CGI))) continue;
+            $listening=[];
+            foreach ($ports as $port=>$owners) {
+                if (in_array((int)$pid, $owners, true)) $listening[]=(int)$port;
+            }
+            sort($listening, SORT_NUMERIC);
+            $matched=null;
+            foreach ($this->managedSpecs as $name=>$spec) {
+                if (!FastCgiPolicy::isFastCgi($name) && $name!=='root_php') continue;
+                $fake=[];
+                foreach (self::portsOf($spec) as $port) $fake[$port]=[(int)$pid];
+                $rec=['pid'=>(int)$pid,'created'=>(string)($observed['created'] ?? '')];
+                if (self::attest($rec,$spec,$observed,$fake)) {$matched=$name;break;}
+            }
+            $expectedPort=$matched!==null ? (int)$this->managedSpecs[$matched]['port'] : 0;
+            $active=$expectedPort>0 && in_array($expectedPort,$listening,true);
+            $result[]=[
+                'pid'=>(int)$pid,
+                'service'=>$matched ?? 'UNVERIFIED',
+                'state'=>FastCgiProcessClassification::label($matched!==null,$active),
+                'ports'=>$listening,
+            ];
+        }
+        usort($result, static fn(array $a,array $b):int=>$a['pid']<=>$b['pid']);
+        return $result;
+    }
+
     public static function groups(): array
     {
         return [
@@ -366,6 +496,7 @@ final class NativeWindowsLifecycle
     /** Démarre exclusivement le groupe demandé, en conservant les preuves des autres groupes. */
     public function startGroup(string $group): array
     {
+        if ($group !== 'root') return $this->reconcileFastCgiGroup($group,true);
         $names = $this->groupNames($group);
         return $this->withLock(function () use ($names): array {
             $this->reconcilePending();
@@ -429,6 +560,7 @@ final class NativeWindowsLifecycle
     /** Arrête exclusivement le groupe demandé, jamais root_php/root_caddy ni l'IA. */
     public function stopGroup(string $group): array
     {
+        if ($group !== 'root') return $this->reconcileFastCgiGroup($group,false);
         $names = $this->groupNames($group);
         return $this->withLock(function () use ($names): array {
             $this->assertNoPending();
@@ -469,6 +601,56 @@ final class NativeWindowsLifecycle
             }
             return $stopped;
         });
+    }
+
+    /** Nettoyage du seul ROOT FastCGI ancien et sans port ; Caddy reste au watchdog. */
+    public function cleanupRootResidual(): array
+    {
+        if ($this->profile !== 'dev') throw new \RuntimeException('EZS_ROOT_CLEANUP_PROFILE_REFUSED');
+        return $this->withLock(function (): array {
+            $spec = $this->managedSpecs['root_php'];
+            [$processes, $ports] = $this->observations();
+            $owner = $ports[8791] ?? [];
+            if (count($owner) !== 1) return [];
+            $activePid = (int) $owner[0];
+            if (!isset($processes[$activePid])) return [];
+            $active = ['pid'=>$activePid,'created'=>(string)($processes[$activePid]['created']??'')];
+            if (!self::attest($active,$spec,$processes[$activePid],$ports)) return [];
+            $removed=[];
+            foreach ($processes as $pid=>$process) {
+                $pid=(int)$pid;
+                if ($pid === $activePid) continue;
+                if (self::hasListeningPort($pid,$ports)) continue;
+                $record=['pid'=>$pid,'created'=>(string)($process['created']??'')];
+                $expected=[8791=>[$pid]];
+                if (!self::attest($record,$spec,$process,$expected)) continue;
+                // Verification differée pour eviter de tuer un FastCGI en cours de demarrage.
+                usleep(500000);
+                [$again,$portsAgain]=$this->observations();
+                if (($portsAgain[8791]??[])!==[$activePid]) continue;
+                if (!isset($again[$activePid]) || !self::attest($active,$spec,$again[$activePid],$portsAgain)) continue;
+                if (!isset($again[$pid]) || self::hasListeningPort($pid,$portsAgain)) continue;
+                if (!self::attest($record,$spec,$again[$pid],[8791=>[$pid]])) continue;
+                $taskkill=new \Symfony\Component\Process\Process([
+                    'C:/Windows/System32/taskkill.exe','/PID',(string)$pid,'/F'
+                ]);
+                $taskkill->setTimeout(8);
+                $taskkill->run();
+                if (!$taskkill->isSuccessful()) throw new \RuntimeException('EZS_ROOT_RESIDUAL_TASKKILL_FAILED_PID_'.$pid);
+                $removed[]=$pid;
+                $entry=gmdate('c').' ROOT_RESIDUAL_CLEANED PID='.$pid."\n";
+                if (file_put_contents($this->runtime.'/native-reconciled.log',$entry,FILE_APPEND|LOCK_EX)===false)
+                    throw new \RuntimeException('EZS_ROOT_RESIDUAL_JOURNAL_FAILED');
+                [$processes,$ports]=$this->observations();
+            }
+            return $removed;
+        });
+    }
+
+    private static function hasListeningPort(int $pid, array $ports): bool
+    {
+        foreach ($ports as $owners) if (in_array($pid,$owners,true)) return true;
+        return false;
     }
 
     private static function wmi():object

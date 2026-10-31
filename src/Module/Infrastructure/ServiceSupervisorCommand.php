@@ -14,14 +14,14 @@ use Symfony\Component\Console\Output\OutputInterface;
 final class ServiceSupervisorCommand extends Command
 {
     private const ROOT='H:/EZS_orchestrator';
-    private const GROUPS=['root','dev','lab','assistant','assistant_ai','prod'];
+    private const GROUPS=['root','dev','lab','assistant','prod'];
     private const RETRY=self::ROOT.'/runtime/supervision/retry.json';
     private const LOG=self::ROOT.'/var/log/supervision/events.log';
 
     protected function configure():void
     {
-        $this->addArgument('action',InputArgument::REQUIRED,'status|tick|start|stop|restart')
-             ->addArgument('group',InputArgument::OPTIONAL,'root|dev|lab|assistant|assistant_ai|prod');
+        $this->addArgument('action',InputArgument::REQUIRED,'status|tick|diagnostics|start|stop|restart')
+             ->addArgument('group',InputArgument::OPTIONAL,'root|dev|lab|assistant|prod');
     }
 
     private static function native(string $group):NativeWindowsLifecycle
@@ -38,6 +38,7 @@ final class ServiceSupervisorCommand extends Command
     {
         $plan=[];
         foreach(self::GROUPS as $group){
+            if($group==='root')continue; // ROOT belongs to the Windows watchdog.
             if(($desired[$group]??DesiredServiceState::STOPPED)===DesiredServiceState::RUNNING)$plan[]=$group;
         }
         return $plan;
@@ -75,21 +76,22 @@ final class ServiceSupervisorCommand extends Command
 
     private static function runOne(string $group):array
     {
-        if($group==='assistant_ai'){
-            $res=(new LocalAiLifecycle())->start();
-            return ['assistant_ai'=>$res['pid']];
+        if ($group === 'assistant') {
+            $web = self::native('assistant')->reconcileFastCgiGroup('assistant', true);
+            $ai = AssistantDependencyLifecycle::ensureRunning();
+            return $web + $ai;
         }
-        return self::native($group)->startGroup($group);
+        return self::native($group)->reconcileFastCgiGroup($group, true);
     }
 
     private static function stopOne(string $group):array
     {
-        if($group==='assistant_ai'){
-            // LocalAiLifecycle ne possède pas encore de STOP attesté.
-            // Mémoriser STOPPED avant l'arrêt externe, ne jamais tuer un PID supposé.
-            throw new \RuntimeException('EZS_ASSISTANT_AI_STOP_REQUIRES_OWNED_TERMINATION');
+        if ($group === 'assistant') {
+            // A failure to attest the AI must not be hidden by stopping the web interface.
+            $ai = AssistantDependencyLifecycle::stopOwned();
+            return $ai + self::native('assistant')->reconcileFastCgiGroup('assistant', false);
         }
-        return self::native($group)->stopGroup($group);
+        return self::native($group)->reconcileFastCgiGroup($group, false);
     }
 
     private static function tick(OutputInterface $output):int
@@ -105,15 +107,38 @@ final class ServiceSupervisorCommand extends Command
         try{
             $desired=(new DesiredServiceState())->all();
             $retry=self::retryRead();
-            return ServiceSupervisorCycle::run(
+            // Enforce STOPPED even if orphan FastCGI survived a previous stop.
+            foreach (['dev','lab','assistant','prod'] as $stoppedGroup) {
+                if (($desired[$stoppedGroup]??DesiredServiceState::STOPPED)!==DesiredServiceState::STOPPED) continue;
+                try { self::stopOne($stoppedGroup); }
+                catch (\Throwable $e) { self::log('ERROR',$stoppedGroup,'STOP_CLEANUP_FAILED '.$e->getMessage()); }
+            }
+            $tickBegin=hrtime(true);
+            $result=ServiceSupervisorCycle::run(
                 $desired,
                 $retry,
                 time(),
-                self::runOne(...),
+                static function(string $group) use ($output):array {
+                    $t=hrtime(true);
+                    try {return self::runOne($group);}
+                    finally {$output->writeln('EZS_TIMING_GROUP_'.$group.'_MS='.round((hrtime(true)-$t)/1000000,2));}
+                },
                 self::log(...),
                 self::retrySave(...),
                 static fn(string $line): mixed => $output->writeln($line)
             );
+            // ROOT est supervisé par le watchdog. Nettoyer seulement un ancien ROOT
+            // sans port si un ROOT actif est atteste sur 8791.
+            if (($desired['root']??null)===DesiredServiceState::RUNNING) {
+                $cleanupBegin=hrtime(true);
+                $cleaned=(new NativeWindowsLifecycle())->cleanupRootResidual();
+                foreach ($cleaned as $pid) {
+                    $output->writeln('EZS_ROOT_RESIDUAL_CLEANED_PID='.$pid);
+                }
+                $output->writeln('EZS_TIMING_ROOT_CLEANUP_MS='.round((hrtime(true)-$cleanupBegin)/1000000,2));
+            }
+            $output->writeln('EZS_TIMING_TICK_TOTAL_MS='.round((hrtime(true)-$tickBegin)/1000000,2));
+            return $result;
         }finally{flock($lock,LOCK_UN);fclose($lock);}
     }
 
@@ -121,13 +146,30 @@ final class ServiceSupervisorCommand extends Command
     {
         $action=(string)$input->getArgument('action');
         $group=(string)($input->getArgument('group')??'');
-        if(!in_array($action,['status','tick','start','stop','restart'],true)||
-            ($action!=='status'&&$action!=='tick'&&!in_array($group,self::GROUPS,true)))
+        if(!in_array($action,['status','tick','diagnostics','start','stop','restart'],true)||
+            ($action!=='status'&&$action!=='tick'&&$action!=='diagnostics'&&!in_array($group,self::GROUPS,true)))
             return Command::INVALID;
         try{
             $intent=new DesiredServiceState();
             if($action==='status'){
                 foreach($intent->all() as $name=>$state)$output->writeln($name.'='.$state);
+                return Command::SUCCESS;
+            }
+            if($action==='diagnostics') {
+                $rows=[];
+                foreach (['dev','prod'] as $profile) {
+                    foreach ((new NativeWindowsLifecycle(profile:$profile))->fastCgiProcessReport() as $item) {
+                        $pid=(int)$item['pid'];
+                        if (!isset($rows[$pid]) || ($rows[$pid]['service']==='UNVERIFIED' && $item['service']!=='UNVERIFIED')) {
+                            $rows[$pid]=$item;
+                        }
+                    }
+                }
+                ksort($rows,SORT_NUMERIC);
+                foreach ($rows as $r) {
+                    $output->writeln('EZS_PHP_CGI PID='.$r['pid'].' STATE='.$r['state'].' SERVICE='.$r['service'].' PORTS='.implode(',',$r['ports']));
+                }
+                $output->writeln('EZS_PHP_CGI_TOTAL='.count($rows));
                 return Command::SUCCESS;
             }
             if($action==='tick')return self::tick($output);
