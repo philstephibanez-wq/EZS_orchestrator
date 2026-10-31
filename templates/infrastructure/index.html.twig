@@ -2,10 +2,12 @@
 {% block title %}EZS Orchestrator — Infrastructure{% endblock %}
 {% block page_scripts %}
     <script src="/assets/ezs-infrastructure.js" defer></script>
+    <script src="/assets/ezs-recovery-preflight.js" defer></script>
     <script src="/assets/ezs-prod-control.js" defer></script>
 {% endblock %}
 {% block content %}
     <main class="container-fluid py-4 ezs-main">
+        <p id="ezs-web-recovery-preflight-status" role="status" aria-live="polite">Diagnostic de supervision en attente</p>
         <div class="ezs-statusline mb-2"><strong>Infrastructure</strong><span class="text-body-secondary">État des environnements — lecture seule, actions en migration</span><span id="dev-health-feedback" role="status" aria-live="polite">En attente…</span><button type="button" id="refresh-dev-health" class="btn btn-outline-info btn-sm">Actualiser</button></div>
         <div class="ezs-server-grid">
           <section class="card ezs-server-card border-primary" aria-labelledby="dev-title">

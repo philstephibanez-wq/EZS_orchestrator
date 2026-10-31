@@ -78,3 +78,9 @@ Chaque commit publié doit être intelligible sans ouvrir le diff. Rédiger **en
 - Si une contrainte du dépôt exige de modifier `VERSION`, la respecter, y compris pour les livraisons documentaires.
 
 Cette règle s'applique aux contributions humaines, assistants et automatisations sur tous les dépôts du projet.
+
+## CONTRAT TRANSVERSAL - Dialogues et supervision
+
+- Ne jamais utiliser window.confirm(), window.alert(), window.prompt() ou MsgBox natif pour les confirmations de l'interface EZS. Utiliser une modale HTML accessible, dont la fermeture vaut annulation.
+- Ne pas declencher de processus Windows depuis une minuterie jQuery sans verification native de l'absence de console et de vol de focus.
+- Cette regle concerne tous les depots EZS et leurs interfaces.

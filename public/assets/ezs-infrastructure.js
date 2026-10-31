@@ -142,7 +142,50 @@
                   });
               });
         }
-        function action(group, verb) {
+        // EZS_DIALOG_CONFIRM_V1: no window.confirm/alert/prompt or OS message box.
+        function confirmEzs(message) {
+            return new Promise(function (resolve) {
+                const dialog = document.createElement('dialog');
+                dialog.setAttribute('aria-label', 'Confirmer l’action');
+                dialog.className = 'ezs-confirm-dialog';
+                dialog.style.cssText = 'border:1px solid #777;border-radius:12px;padding:0;max-width:min(460px,94vw);width:100%;background:var(--bs-body-bg,#fff);color:var(--bs-body-color,#222);box-shadow:0 12px 48px #0006';
+                const body = document.createElement('div');
+                body.className = 'p-4';
+                const title = document.createElement('h2');
+                title.className = 'h5';
+                title.textContent = 'Confirmer l’action';
+                const detail = document.createElement('p');
+                detail.textContent = message;
+                const actions = document.createElement('div');
+                actions.className = 'd-flex gap-2 justify-content-end mt-3';
+                const cancel = document.createElement('button');
+                cancel.type = 'button';
+                cancel.className = 'btn btn-outline-secondary';
+                cancel.textContent = 'Annuler';
+                const accept = document.createElement('button');
+                accept.type = 'button';
+                accept.className = 'btn btn-primary';
+                accept.textContent = 'Confirmer';
+                actions.append(cancel, accept);
+                body.append(title, detail, actions);
+                dialog.appendChild(body);
+                document.body.appendChild(dialog);
+                let settled = false;
+                function settle(accepted) {
+                    if (settled) return;
+                    settled = true;
+                    dialog.close();
+                    dialog.remove();
+                    resolve(accepted);
+                }
+                cancel.addEventListener('click', function () { settle(false); });
+                accept.addEventListener('click', function () { settle(true); });
+                dialog.addEventListener('cancel', function (event) { event.preventDefault(); settle(false); });
+                try { dialog.showModal(); cancel.focus(); }
+                catch (_) { settle(false); }
+            });
+        }
+        async function action(group, verb) {
             if (!controls[group]) return;
             const button = verb === 'stop' ? controls[group].stop : controls[group].start;
             if (acting || !csrf || !button || button.prop('disabled')) return;
@@ -151,7 +194,7 @@
                 'Arrêter les processus natifs de '+label+' ? Les travaux en cours peuvent être interrompus. Les autres groupes et l’IA restent inchangés.' :
                 verb === 'restart' ? 'Redémarrer les processus natifs de '+label+' ? Les travaux en cours peuvent être interrompus. Si la relance échoue, le groupe peut rester arrêté. PROD et les autres groupes restent inchangés.' :
                 'Démarrer uniquement les processus natifs de '+label+' ?';
-            if (!window.confirm(confirmation)) return;
+            if (!(await confirmEzs(confirmation))) return;
             acting = true;
             disableAll();
             $feedback.text((verb === 'start' ? 'Démarrage' : verb === 'restart' ? 'Redémarrage' : 'Arrêt')+' '+label+' en cours…');
