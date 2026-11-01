@@ -7,3 +7,5 @@ services:
         exclude:
             - '../src/Kernel.php'
             - '../src/Module/Coordination/ExclusiveLease.php'
+            # Immutable message DTO: never register as a Symfony service.
+            - '../src/Module/Coordination/Messenger/QueueJobReference.php'
