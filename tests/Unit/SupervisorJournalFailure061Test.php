@@ -10,7 +10,7 @@ final class SupervisorJournalFailure061Test extends TestCase
     {
         $started = [];
         $saved = [];
-        $desired = ['root' => 'RUNNING'];
+        $desired = ['lab' => 'RUNNING'];
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('JOURNAL_UNAVAILABLE');
         try {
@@ -18,7 +18,7 @@ final class SupervisorJournalFailure061Test extends TestCase
                 $desired, [], 1000,
                 static function (string $group) use (&$started): array {
                     $started[] = $group;
-                    return ['root_php' => 1234];
+                    return ['lab' => 1234];
                 },
                 static function (string $level, string $group, string $message): void {
                     throw new RuntimeException('JOURNAL_UNAVAILABLE');
@@ -27,7 +27,7 @@ final class SupervisorJournalFailure061Test extends TestCase
                 static function (string $line): void {}
             );
         } finally {
-            self::assertSame(['root'], $started);
+            self::assertSame(['lab'], $started);
             self::assertSame([], $saved);
         }
     }

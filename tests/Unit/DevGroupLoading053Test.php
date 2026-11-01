@@ -3,23 +3,23 @@ declare(strict_types=1);
 
 use PHPUnit\Framework\TestCase;
 
+/** A missing or unverified native attestation must never enable service controls. */
 final class DevGroupLoading053Test extends TestCase
 {
-    public function testSpinnerIsOnlyPresentDuringUnverifiedState(): void
+    public function testControlsStayDisabledUntilTheServerAttestsPermissions(): void
     {
         $root = dirname(__DIR__, 2);
         $js = (string) file_get_contents($root.'/public/assets/ezs-infrastructure.js');
-        $css = (string) file_get_contents($root.'/public/assets/ezs-debug-layout.css');
 
-        self::assertStringContainsString('spinner-border spinner-border-sm ezs-command-spinner', $js);
-        self::assertStringContainsString('aria-hidden="true"', $js);
-        self::assertStringContainsString('$button.prop(\'disabled\', true).attr(\'aria-busy\', \'true\').html(checkingMarkup)', $js);
-        self::assertStringContainsString("if (!modes[group]) checking(controls[group].start)", $js);
-        self::assertStringContainsString("controls[group].start.removeAttr('aria-busy')", $js);
+        self::assertStringContainsString('$buttons.removeAttr(\'title\').prop(\'disabled\', true)', $js);
+        self::assertStringContainsString("controls[group].start.text('État inconnu')", $js);
+        self::assertStringContainsString("if (acting || groupsPending) return", $js);
         self::assertStringContainsString("state.state === 'RUNNING' && state.restart === true", $js);
         self::assertStringContainsString("state.state === 'STOPPED' && state.start === true", $js);
-        self::assertStringContainsString('animation: ezs-debug-rotate 0.7s linear infinite', $css);
-        self::assertStringContainsString('.ezs-server-card:has(#assistant-title) .ezs-command-spinner', $css);
+        self::assertStringContainsString("controls[group].start.prop('disabled', mode === null)", $js);
+        self::assertStringContainsString("controls[group].stop.prop('disabled', !next.stop)", $js);
+        self::assertStringContainsString('$cardFor(group).attr(\'data-ezs-probe\', \'unavailable\')', $js);
+        self::assertStringContainsString("disableAll();", $js);
         self::assertStringNotContainsString("dev-groups/'+group+'/restart", $js);
     }
 }

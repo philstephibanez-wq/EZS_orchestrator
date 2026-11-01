@@ -14,7 +14,7 @@ final class NativeStateIsolation063Test extends TestCase
         try {
             $state = new DesiredServiceState($path);
             $values = $state->all();
-            self::assertSame(['root','dev','lab','assistant','assistant_ai','prod'], array_keys($values));
+            self::assertSame(['root','dev','lab','assistant','prod'], array_keys($values));
             foreach ($values as $value) self::assertSame(DesiredServiceState::STOPPED,$value);
             self::assertFileDoesNotExist($path);
         } finally {

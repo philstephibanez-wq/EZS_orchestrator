@@ -70,12 +70,12 @@ final class SupervisorOrderedBoot059Test extends TestCase
             $desired->setMany(['root'=>'RUNNING', 'dev'=>'RUNNING', 'lab'=>'RUNNING',
                 'assistant'=>'RUNNING', 'prod'=>'RUNNING']);
             $cycle();
-            self::assertSame(['root_php','root_caddy','ezscore_dev','ezscore_preview',
-                'lab','assistant','prod_backend','prod_gateway','prod_caddy'], $spawned);
-            self::assertCount(9, $alive);
+            self::assertSame(['ezscore_dev','ezscore_preview',
+                'lab','assistant','prod_backend','prod_gateway'], $spawned);
+            self::assertCount(6, $alive);
             // Warm boot must be idempotent and must not terminate or duplicate processes.
             $cycle();
-            self::assertCount(9, $spawned);
+            self::assertCount(6, $spawned);
             self::assertSame([], $terminated);
             // Unexpected LAB crash: stale proof is reconciled, ONLY LAB restarts.
             $labPid = array_search($devSpecs['lab'], $alive, true);
@@ -83,8 +83,8 @@ final class SupervisorOrderedBoot059Test extends TestCase
             unset($alive[$labPid]);
             $cycle();
             self::assertSame('lab', end($spawned));
-            self::assertCount(10, $spawned);
-            self::assertCount(9, $alive);
+            self::assertCount(7, $spawned);
+            self::assertCount(6, $alive);
             self::assertSame([], $terminated);
             self::assertStringContainsString('DEAD_RECORD lab PID='.$labPid,
                 (string)file_get_contents($base.'/dev/native-reconciled.log'));
@@ -96,15 +96,15 @@ final class SupervisorOrderedBoot059Test extends TestCase
             self::assertSame($before, count($spawned));
             self::assertSame('STOPPED', (new DesiredServiceState($base.'/desired.json'))->get('lab'));
             // A changed PID belonging to a foreign process is refused, never terminated.
-            $caddyPid = array_search($prodSpecs['prod_caddy'], $alive, true);
-            self::assertIsInt($caddyPid);
-            $alive[$caddyPid]['exe'] = 'C:/foreign.exe';
+            $gatewayPid = array_search($prodSpecs['prod_gateway'], $alive, true);
+            self::assertIsInt($gatewayPid);
+            $alive[$gatewayPid]['exe'] = 'C:/foreign.exe';
             $beforeTerminated = count($terminated);
             try {
                 $cycle();
                 self::fail('FOREIGN_PID_MUST_BE_REFUSED');
             } catch (RuntimeException $e) {
-                self::assertStringContainsString('IDENTITY_UNVERIFIED_prod_caddy', $e->getMessage());
+                self::assertStringContainsString('IDENTITY_UNVERIFIED_prod_gateway', $e->getMessage());
             }
             self::assertCount($beforeTerminated, $terminated);
         } finally {

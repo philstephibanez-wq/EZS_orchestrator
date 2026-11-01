@@ -36,16 +36,16 @@ final class SupervisorRealTick060Test extends TestCase
         $desired['lab'] = 'RUNNING';
         $desired['prod'] = 'RUNNING';
         self::assertSame(0, $cycle(1001));
-        self::assertSame(['root','dev','lab','prod'], $spawn); // Production ordering.
+        self::assertSame(['dev','lab','prod'], $spawn); // Production ordering.
         self::assertSame(0, $cycle(1002)); // Warm boot is idempotent.
-        self::assertCount(4, $spawn);
+        self::assertCount(3, $spawn);
         unset($running['lab']); // Simulated crash.
         self::assertSame(0, $cycle(1003));
-        self::assertSame(['root','dev','lab','prod','lab'], $spawn);
+        self::assertSame(['dev','lab','prod','lab'], $spawn);
         $desired['lab'] = 'STOPPED'; // An operator stop persists into following cycles.
         unset($running['lab']);
         self::assertSame(0, $cycle(1004));
-        self::assertCount(5, $spawn);
+        self::assertCount(4, $spawn);
         self::assertSame([], $retry);
         self::assertNotEmpty($events);
         self::assertNotEmpty($writes);
@@ -83,7 +83,7 @@ final class SupervisorRealTick060Test extends TestCase
     public function testPersistFailureCannotBeReportedAsSuccess(): void
     {
         $desired = array_fill_keys(DesiredServiceState::GROUPS, 'STOPPED');
-        $desired['root'] = 'RUNNING';
+        $desired['dev'] = 'RUNNING';
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('STORAGE_FAILED');
         ServiceSupervisorCycle::run($desired, [], 1000,

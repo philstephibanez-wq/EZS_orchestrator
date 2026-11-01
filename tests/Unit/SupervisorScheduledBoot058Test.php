@@ -26,9 +26,9 @@ final class SupervisorScheduledBoot058Test extends TestCase
             $state->setMany(['root' => DesiredServiceState::RUNNING, 'dev' => DesiredServiceState::RUNNING,
                 'prod' => DesiredServiceState::STOPPED]);
             $reloaded = new DesiredServiceState($path);
-            self::assertSame(['root','dev'], ServiceSupervisorCommand::planned($reloaded->all()));
+            self::assertSame(['dev'], ServiceSupervisorCommand::planned($reloaded->all()));
             $state->set('dev', DesiredServiceState::STOPPED);
-            self::assertSame(['root'], ServiceSupervisorCommand::planned((new DesiredServiceState($path))->all()));
+            self::assertSame([], ServiceSupervisorCommand::planned((new DesiredServiceState($path))->all()));
         } finally {
             @unlink($dir.'/state.json');
             @unlink($dir.'/desired-services.lock');
@@ -45,7 +45,7 @@ final class SupervisorScheduledBoot058Test extends TestCase
         self::assertIsString($runner);
         self::assertStringContainsString("'Install','Update','Remove'", $installer);
         self::assertStringContainsString('EZS_SUPERVISOR_TASK_ALREADY_EXISTS', $installer);
-        self::assertStringContainsString('ezs:services tick', $runner);
+        self::assertStringContainsString('Start-RootFastCgi', $runner);
         self::assertStringNotContainsString('ezs:services start', $runner);
         self::assertStringNotContainsString('extension=$extension', $runner);
         self::assertStringContainsString('wscript.exe', $installer);

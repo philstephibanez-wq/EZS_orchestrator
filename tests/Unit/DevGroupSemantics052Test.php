@@ -11,7 +11,7 @@ final class DevGroupSemantics052Test extends TestCase
         $diagnostic = (string) file_get_contents($root.'/public/assets/ezs-dev-debug.js');
         self::assertStringContainsString("state.state === 'RUNNING' && state.restart === true", $js);
         self::assertStringContainsString("state.state === 'STOPPED' && state.start === true", $js);
-        self::assertStringContainsString('Vérification…', $js);
+        self::assertStringContainsString("controls[group].start.text('État inconnu')", $js);
         self::assertStringContainsString('data-ezs-state-probe-ms', $js);
         self::assertStringContainsString('Commandes natives disponibles', $js);
         self::assertStringContainsString('data-ezs-state="STOPPED"', $css);

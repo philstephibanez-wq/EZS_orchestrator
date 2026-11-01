@@ -36,7 +36,7 @@ final class ProdNativeIsolation056Test extends TestCase
         self::assertStringContainsString('php_fastcgi 127.0.0.1:18515',$c);
         self::assertStringContainsString('php_fastcgi 127.0.0.1:8512',$c);
     }
-    public function testProdNativeRecoversOnlyCaddyAfterCrashAndRefusesForeignPid():void
+    public function testProdNativeRecoversOnlyGatewayAfterCrashAndRefusesForeignPid():void
     {
         $dir=sys_get_temp_dir().'/ezs-prod-'.bin2hex(random_bytes(5));
         self::assertTrue(mkdir($dir));
@@ -74,23 +74,23 @@ final class ProdNativeIsolation056Test extends TestCase
             $svc=new NativeWindowsLifecycle($inventory,$listeners,$spawn,$terminate,$dir,
                 static fn():bool=>true, static fn():?int=>null,'prod');
             $first=$svc->startGroup('prod');
-            self::assertSame(['prod_backend','prod_gateway','prod_caddy'],array_keys($first));
+            self::assertSame(['prod_backend','prod_gateway'],array_keys($first));
             self::assertSame([],$svc->startGroup('prod'));
-            unset($alive[$first['prod_caddy']]);
+            unset($alive[$first['prod_gateway']]);
             $second=$svc->startGroup('prod');
-            self::assertSame(['prod_caddy'],array_keys($second));
+            self::assertSame(['prod_gateway'],array_keys($second));
             self::assertSame($first['prod_backend'],array_search($specs['prod_backend'],$alive,true));
-            self::assertSame($first['prod_gateway'],array_search($specs['prod_gateway'],$alive,true));
+            self::assertSame($second['prod_gateway'],array_search($specs['prod_gateway'],$alive,true));
             self::assertSame([],$killed);
             // PID reutilise avec autre commande : ni adoption ni termination.
-            $stolen=$second['prod_caddy'];
+            $stolen=$second['prod_gateway'];
             $alive[$stolen]=['port'=>8501,'additional_ports'=>[8510,8511],
                 'exe'=>'C:/foreign.exe','cwd'=>'C:/foreign','args'=>'-b 127.0.0.1:8501'];
             try{
                 $svc->startGroup('prod');
                 self::fail('foreign pid must be refused');
             }catch(RuntimeException $failure){
-                self::assertStringContainsString('EZS_NATIVE_IDENTITY_UNVERIFIED_prod_caddy',$failure->getMessage());
+                self::assertStringContainsString('EZS_NATIVE_IDENTITY_UNVERIFIED_prod_gateway',$failure->getMessage());
             }
             self::assertSame([],$killed);
         }finally{
