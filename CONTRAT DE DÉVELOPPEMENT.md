@@ -300,3 +300,30 @@ Il faut démontrer cumulativement : disponibilité HTTP de ROOT, reprise automat
 - Ne jamais utiliser window.confirm(), window.alert(), window.prompt() ou MsgBox natif pour les confirmations de l'interface EZS. Utiliser une modale HTML accessible, dont la fermeture vaut annulation.
 - Ne pas declencher de processus Windows depuis une minuterie jQuery sans verification native de l'absence de console et de vol de focus.
 - Cette regle concerne tous les depots EZS et leurs interfaces.
+
+## CONTRAT TRANSVERSAL — Structure Symfony et cleanup obligatoires
+
+Cette section est normative pour **EZS_orchestrator, EZStudio_lab, EZStudioLab_assistant, EZScore (DEV et PROD)** et toute application intégrée à l'écosystème. La même version du présent contrat est conservée à la racine de chaque dépôt ; les contraintes spécifiques de `AGENTS.md` s'ajoutent sans amoindrir ces obligations.
+
+### Arborescence et responsabilité unique
+
+- Respecter les conventions Symfony : `src/` pour le code PHP applicatif, `config/` pour la configuration, `templates/` pour Twig, `public/` pour les ressources publiques, `assets/` si une chaîne d'assets est utilisée, `tests/` pour PHPUnit et tests de contrat, `migrations/` en cas de schéma persistant, `translations/` si nécessaire, `bin/` pour les entrées CLI, `var/` pour les données runtime/cache/log non versionnées, et `vendor/` pour Composer non versionné. `composer.json` et `composer.lock` sont gérés à la racine.
+- Préserver une seule implantation canonique par fonctionnalité et une seule route/commande/queue/worker propriétaire. Les modules Symfony restent clairement séparés, sans contrôleurs ou services dupliqués dans des arborescences historiques.
+- Éviter les racines applicatives parallèles (par exemple `web/` et racine) lorsqu'elles désignent deux applications concurrentes. Toute exception architecturale est explicitement documentée, avec propriété et plan de convergence.
+- Conserver Python uniquement là où nécessaire aux moteurs scientifiques et à l'IA, dans un espace identifié appartenant à LAB, Assistant ou EZScore ; aucun retour de logique d'orchestration Python dans EZS_orchestrator.
+- Utiliser Twig, jQuery et Bootstrap pour l'interface standardisée, PHPUnit pour les tests PHP et les composants Symfony maintenus plutôt que des mécanismes maison redondants.
+
+### Cleanup obligatoire à chaque livraison
+
+1. **Avant écriture** : inventorier les fichiers, services, routes, scripts, fixtures, tests, dépendances et répertoires touchés ; identifier les doublons, le legacy et les données à conserver. Comparer le dépôt GitHub et le worktree MAIN, sans écraser les changements locaux.
+2. **Dans la même livraison que le remplacement validé** : retirer les fichiers et références devenus réellement obsolètes (routes, scripts, imports, services, configurations, tests anciens) après preuve de parité et d'absence d'usage. Aucun empilement de versions `*_old`, `*_backup`, `*_fix`, `*_v2` ou copies parallèles dans le dépôt.
+3. **Hors dépôt** : placer ZIP, scripts de patch ponctuels, backups, dumps, rapports de diagnostic et fichiers temporaires sous `H:\temp`. Ne jamais versionner `vendor/`, `var/cache`, `var/log`, modèles IA, secrets, datasets, résultats scientifiques temporaires ni fichiers générés ; appliquer les `.gitignore`/`.gitattributes` appropriés sans supprimer de preuves utiles.
+4. **Protection des données** : ne jamais purger automatiquement queues persistantes, jobs, attempts, SQLite, résultats, presets, médias, historiques ou traces d'incident. Leur migration, archivage ou suppression exige un inventaire et une procédure explicitement validée.
+5. **Vérifications bloquantes** : contrôler l'arborescence, `git status --short`, `git diff --check`, fichiers non suivis, routes/services concurrents, absence de temporaires, décodage UTF-8 strict sans BOM, `composer validate`, lint PHP/Twig et tests PHPUnit/contrats appropriés. Une livraison n'est pas terminée si le cleanup prévu n'est pas exécuté ou si ses preuves manquent.
+6. **Traçabilité** : inscrire dans l'issue/handoff les éléments conservés, supprimés et différés, les raisons des exceptions de structure, les tests réellement exécutés et le plan de migration. Le nettoyage n'autorise jamais une régression métier.
+
+### Installation et restauration
+
+- Préflight, application, recette, validation, publication sont des étapes distinctes. Aucun rollback automatique ni étape de rollback dans la séquence d'application normale.
+- Préserver les sauvegardes nécessaires **hors dépôt**, sans les réappliquer tant qu'une restauration n'est pas explicitement décidée.
+- Toute refactorisation transversale est livrée par lots atomiques testés, sous version canonique propre à chaque projet et commit/push effectué par le mainteneur.
