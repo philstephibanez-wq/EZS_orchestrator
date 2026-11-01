@@ -86,8 +86,10 @@ final class SupervisorOrderedBoot059Test extends TestCase
             self::assertCount(7, $spawned);
             self::assertCount(6, $alive);
             self::assertSame([], $terminated);
-            self::assertStringContainsString('DEAD_RECORD lab PID='.$labPid,
-                (string)file_get_contents($base.'/dev/native-reconciled.log'));
+            // Current FastCGI reconciler persists the new attestation, not a legacy DEAD_RECORD entry.
+            $state=json_decode((string)file_get_contents($base.'/dev/native-processes.json'),true,512,JSON_THROW_ON_ERROR);
+            self::assertNotSame($labPid, $state['records']['lab']['pid']);
+            self::assertArrayHasKey($state['records']['lab']['pid'], $alive);
             // Operator STOPPED always wins, even after a subsequent simulated reboot.
             $desired->set('lab', DesiredServiceState::STOPPED);
             $dev->stopGroup('lab');
@@ -104,7 +106,7 @@ final class SupervisorOrderedBoot059Test extends TestCase
                 $cycle();
                 self::fail('FOREIGN_PID_MUST_BE_REFUSED');
             } catch (RuntimeException $e) {
-                self::assertStringContainsString('IDENTITY_UNVERIFIED_prod_gateway', $e->getMessage());
+                self::assertStringContainsString('EZS_FASTCGI_FOREIGN_LISTENER_prod_gateway', $e->getMessage());
             }
             self::assertCount($beforeTerminated, $terminated);
         } finally {

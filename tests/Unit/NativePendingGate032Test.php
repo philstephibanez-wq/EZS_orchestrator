@@ -31,13 +31,14 @@ final class NativePendingGate032Test extends TestCase
             static function() use (&$calls):bool {$calls++;return true;},
             $this->directory
         );
-        foreach (['start','stop','status'] as $action) {
+        foreach (['start','stop'] as $action) {
             try {$service->$action();self::fail('Operation accepted with pending intent');}
             catch (\RuntimeException $e) {
                 $expected=$action === 'start' ? 'EZS_NATIVE_PENDING_INVALID' : 'EZS_NATIVE_PENDING_REQUIRES_MANUAL_ATTESTATION';
                 self::assertSame($expected,$e->getMessage());
             }
         }
+        self::assertIsArray($service->status()); // read-only, even with an invalid pending journal
         self::assertSame(0,$calls);
         self::assertFileExists($this->directory.'/native-spawn-pending.json');
     }

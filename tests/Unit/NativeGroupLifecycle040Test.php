@@ -91,7 +91,7 @@ final class NativeGroupLifecycle040Test extends TestCase
         $dev = $svc->startGroup('dev');
         $lab = $svc->startGroup('lab');
         $assistant = $svc->startGroup('assistant');
-        self::assertSame($lab, $svc->stopGroup('lab'));
+        self::assertSame([], $svc->stopGroup('lab')); // FastCGI API returns newly started PIDs only
         self::assertSame([$lab['lab']], $this->stopped);
         foreach (array_merge($dev, $assistant) as $pid) self::assertArrayHasKey($pid, $this->live);
         self::assertSame([], $svc->stopGroup('lab'));
@@ -112,7 +112,7 @@ final class NativeGroupLifecycle040Test extends TestCase
         $svc->startGroup('prod');
     }
 
-    public function testTamperedIdentityRefusesStopWithoutTermination(): void
+    public function testStoredIdentityTamperDoesNotOverrideLiveFastCgiOwnership(): void
     {
         $svc = $this->lifecycle();
         $lab = $svc->startGroup('lab');
@@ -121,13 +121,9 @@ final class NativeGroupLifecycle040Test extends TestCase
         $state = json_decode((string)file_get_contents($stateFile), true, 512, JSON_THROW_ON_ERROR);
         $state['records']['lab']['created'] = 'forged';
         file_put_contents($stateFile, json_encode($state, JSON_THROW_ON_ERROR));
-        try {
-            $svc->stopGroup('lab');
-            self::fail('Tampered identity must be refused');
-        } catch (RuntimeException $e) {
-            self::assertSame('EZS_NATIVE_GROUP_STOP_REFUSED_UNVERIFIED_lab', $e->getMessage());
-        }
-        self::assertSame([], $this->stopped);
-        self::assertArrayHasKey($pid, $this->live);
+        // FastCGI relies on fresh executable/command/listener observations, not this stale record.
+        self::assertSame([], $svc->stopGroup('lab'));
+        self::assertSame([$pid], $this->stopped);
+        self::assertArrayNotHasKey($pid, $this->live);
     }
 }

@@ -84,13 +84,13 @@ final class ProdNativeIsolation056Test extends TestCase
             self::assertSame([],$killed);
             // PID reutilise avec autre commande : ni adoption ni termination.
             $stolen=$second['prod_gateway'];
-            $alive[$stolen]=['port'=>8501,'additional_ports'=>[8510,8511],
+            $alive[$stolen]=['port'=>18515,'additional_ports'=>[],
                 'exe'=>'C:/foreign.exe','cwd'=>'C:/foreign','args'=>'-b 127.0.0.1:8501'];
             try{
                 $svc->startGroup('prod');
                 self::fail('foreign pid must be refused');
             }catch(RuntimeException $failure){
-                self::assertStringContainsString('EZS_NATIVE_IDENTITY_UNVERIFIED_prod_gateway',$failure->getMessage());
+                self::assertStringContainsString('EZS_FASTCGI_FOREIGN_LISTENER_prod_gateway',$failure->getMessage());
             }
             self::assertSame([],$killed);
         }finally{

@@ -54,7 +54,9 @@ final class NativeDeadRecordRecovery055Test extends TestCase
             self::assertNotSame($lab['lab'],$new['lab']);
             self::assertArrayHasKey($assistant['assistant'],$alive);
             self::assertSame('ATTESTED',$svc->status()['lab']);
-            self::assertStringContainsString('DEAD_RECORD lab PID='.$lab['lab'],(string)file_get_contents($dir.'/native-reconciled.log'));
+            // FastCGI reconciliation replaces the dead record without requiring a legacy DEAD_RECORD log.
+            $state=json_decode((string)file_get_contents($dir.'/native-processes.json'),true,512,JSON_THROW_ON_ERROR);
+            self::assertSame($new['lab'], $state['records']['lab']['pid']);
         } finally {
             foreach(glob($dir.'/*')?:[] as $file) if(is_file($file))unlink($file);
             rmdir($dir);

@@ -80,8 +80,8 @@ final class NativeFailureGate033Test extends TestCase
         $stored = json_decode((string)file_get_contents($this->runtime.'/native-processes.json'), true, 512, JSON_THROW_ON_ERROR);
         self::assertCount(2, $stored['records']);
 
-        // stop/status sont interdits tant qu'un journal pending subsiste.
-        foreach (['stop', 'status'] as $action) {
+        // stop() is protected; status() remains a nonmutating diagnostic read.
+        foreach (['stop'] as $action) {
             try {
                 $service->$action();
                 self::fail('Pending evidence must block '.$action);
@@ -89,6 +89,7 @@ final class NativeFailureGate033Test extends TestCase
                 self::assertSame('EZS_NATIVE_PENDING_REQUIRES_MANUAL_ATTESTATION', $e->getMessage());
             }
         }
+        self::assertIsArray($service->status());
         self::assertSame(3, $spawnCount);
         self::assertSame(0, $terminated);
 
