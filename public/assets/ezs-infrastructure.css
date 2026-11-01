@@ -42,3 +42,11 @@ main.container-fluid.ezs-main {
 }
 
 .ezs-tech-grid{display:grid;grid-template-columns:minmax(8rem,34%) minmax(0,1fr);gap:.35rem .75rem}.ezs-tech-grid dt{color:var(--bs-secondary-color)}.ezs-tech-grid dd{margin:0;overflow-wrap:anywhere}.ezs-server-card details{margin-top:.6rem}@media(max-width:700px){.ezs-tech-grid{grid-template-columns:1fr}}
+
+/* EZS 4.2c86 — PROD business maintenance state, separate from service health. */
+.ezs-prod-maintenance-active{border:2px solid #efab38!important;box-shadow:0 0 0 2px rgba(239,171,56,.16)}
+.ezs-prod-maintenance-badge{font-size:.79rem;padding:.5rem .65rem;color:#191006!important;background:#ffbf4d!important}
+.ezs-prod-maintenance-banner{background:#59370a;color:#fff3db;border:1px solid #ffbf4d;border-radius:6px;padding:10px 12px;margin:0 0 10px;font-weight:700;letter-spacing:.015em}
+.ezs-prod-maintenance-pulse{font-weight:700;animation:ezs-prod-pulse 2.5s ease-in-out infinite}
+@keyframes ezs-prod-pulse{0%,100%{box-shadow:0 0 0 0 rgba(255,191,77,.12)}50%{box-shadow:0 0 0 5px rgba(255,191,77,.40)}}
+@media (prefers-reduced-motion: reduce){.ezs-prod-maintenance-pulse{animation:none}}

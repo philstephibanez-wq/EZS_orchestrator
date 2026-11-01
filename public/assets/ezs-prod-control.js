@@ -10,6 +10,22 @@
     let token='',busy=false,pending=null,capabilities={maintenance:false,normal:false};
     let lastGood=null;
     const $diagnostic=$('#prod-refresh-diagnostic');
+    const $prodCard=$('#ezs-prod-card'), $maintenanceBadge=$('#prod-maintenance-badge'), $banner=$('#prod-maintenance-banner');
+    function showMaintenance(value){
+      const active=value===true;
+      $prodCard.toggleClass('ezs-prod-maintenance-active',active);
+      $maintenanceBadge.toggleClass('d-none',!active);
+      $banner.toggleClass('d-none',!active);
+      $maintenance.toggleClass('ezs-prod-maintenance-pulse btn-warning',active)
+        .toggleClass('btn-outline-warning',!active);
+      if(value===null){
+        $maintenanceBadge.removeClass('d-none').text('MAINTENANCE INDÉTERMINÉE');
+        $banner.removeClass('d-none').text('État de maintenance PROD indisponible');
+      } else {
+        $maintenanceBadge.text('⚠ MAINTENANCE ACTIVE');
+        $banner.text('⚠ PROD EN MAINTENANCE — accès public suspendu');
+      }
+    }
     function observation(text){if($diagnostic.length)$diagnostic.text(text);}
     function setButtons(){
       $maintenance.prop('disabled',busy||!capabilities.maintenance||!modal);
@@ -29,9 +45,10 @@
          const x=d.timing_ms||{};
          observation('API '+Math.round(performance.now()-start)+' ms · serveur '+(x.total??'?')+' ms · gateway '+(x.gateway??'?')+' ms · backend '+(x.backend??'?')+' ms · validé '+lastGood.toLocaleTimeString('fr-FR'));
          $mode.text(d.maintenance===true?'Activée':d.maintenance===false?'Mode normal':'Indéterminée');
+         showMaintenance(typeof d.maintenance==='boolean'?d.maintenance:null);
          $edge.text(d.caddy_listening?'Écoute 8501':'Arrêté');
          if (d.gateway_online && d.backend_ready) {
-           setStatus('Gateway et Symfony actifs','success');
+           setStatus('Répond','success');
          } else if (d.gateway_online) {
            setStatus('Gateway active, backend indisponible','warning');
          } else {
@@ -47,6 +64,7 @@
          observation(info+(lastGood?' · dernier état valide '+lastGood.toLocaleTimeString('fr-FR'):''));
          // Never authorize an action from stale information.
          capabilities={maintenance:false,normal:false};setButtons();
+         showMaintenance(null);
          if (lastGood) setStatus('Statut non actualisé','warning');
          else setStatus('État indisponible','secondary');
        });

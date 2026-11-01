@@ -173,8 +173,13 @@ final class NativeWindowsLifecycle
     {
         $processes=self::index(($this->inventory)());
         $ports=($this->listeners)();
+        // Each target port is checked once per observation snapshot. A shared port
+        // must not trigger repeated native TCP probes; preserve the same proof rule.
+        $checkedPorts=[];
         foreach($this->managedSpecs as $spec){
             foreach(self::portsOf($spec) as $port){
+                if(isset($checkedPorts[$port]))continue;
+                $checkedPorts[$port]=true;
                 if(($ports[$port]??[])!==[])continue;
                 $owner=($this->activeOwner)($port);
                 if(is_int($owner) && $owner>0 && isset($processes[$owner]))$ports[$port]=[$owner];
