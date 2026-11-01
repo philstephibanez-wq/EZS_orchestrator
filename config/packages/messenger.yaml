@@ -1,0 +1,5 @@
+# Bootstrap only: no transport, no routing, no consumer.
+framework:
+    messenger:
+        transports: { }
+        routing: { }

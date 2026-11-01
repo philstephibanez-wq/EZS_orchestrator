@@ -9,7 +9,8 @@
         "symfony/yaml": "7.4.*",
         "symfony/monolog-bundle": "^3.0",
         "symfony/console": "7.4.*",
-        "symfony/process": "7.4.*"
+        "symfony/process": "7.4.*",
+        "symfony/messenger": "7.4.*"
     },
     "require-dev": {
         "symfony/debug-bundle": "7.4.*",
