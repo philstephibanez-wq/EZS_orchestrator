@@ -91,8 +91,19 @@ function Start-RootFastCgi {
         Write-Event 'ROOT_FASTCGI_BOOT_ABORTED_FINAL_CHECK'
         return
     }
-    $p = Start-Process -FilePath $phpCgi -ArgumentList @('-b','127.0.0.1:8791') -WorkingDirectory $root -PassThru -WindowStyle Hidden
-    Write-Event ('ROOT_FASTCGI_START_PID=' + $p.Id)
+    # L'environnement Symfony est propre au FastCGI ROOT et ne doit pas contaminer Caddy/PROD.
+    # Les variables du watchdog sont restaurees meme si Start-Process echoue.
+    $previousAppEnv = [Environment]::GetEnvironmentVariable('APP_ENV', 'Process')
+    $previousAppDebug = [Environment]::GetEnvironmentVariable('APP_DEBUG', 'Process')
+    try {
+        [Environment]::SetEnvironmentVariable('APP_ENV', 'dev', 'Process')
+        [Environment]::SetEnvironmentVariable('APP_DEBUG', '1', 'Process')
+        $p = Start-Process -FilePath $phpCgi -ArgumentList @('-b','127.0.0.1:8791') -WorkingDirectory $root -PassThru -WindowStyle Hidden
+    } finally {
+        [Environment]::SetEnvironmentVariable('APP_ENV', $previousAppEnv, 'Process')
+        [Environment]::SetEnvironmentVariable('APP_DEBUG', $previousAppDebug, 'Process')
+    }
+    Write-Event ('ROOT_FASTCGI_START_PID=' + $p.Id + ' APP_ENV=dev APP_DEBUG=1')
 }
 if (!(Test-Path $runtime)) { New-Item -ItemType Directory -Force -Path $runtime | Out-Null }
 if (!(Test-Path $logDir)) { New-Item -ItemType Directory -Force -Path $logDir | Out-Null }

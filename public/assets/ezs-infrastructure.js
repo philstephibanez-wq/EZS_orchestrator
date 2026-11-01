@@ -72,75 +72,77 @@
             if (group === 'lab' || group === 'assistant') $card.find('dt').filter(function () { return $(this).text().trim() === 'Autorité Orchestrator'; })
                 .next('dd').text('Orchestrator local · processus attestés · protection CSRF');
         });
-        // Indicateur visuel uniquement. Les droits continuent de dépendre exclusivement du serveur.
-        const checkingMarkup = '<span class="spinner-border spinner-border-sm ezs-command-spinner" aria-hidden="true"></span><span>Vérification…</span>';
-        function checking($button) {
-            $button.prop('disabled', true).attr('aria-busy', 'true').html(checkingMarkup);
-        }
+        // EZS_GROUPS_STABLE_R82: seule une attestation change l'etat visible.
+        let groupsPending = false;
+        let groupsEpoch = 0;
+        const rendered = {dev:null,lab:null,assistant:null};
         Object.keys(groups).forEach(function(group) {
-            const $card = $(groups[group]).closest('.ezs-server-card');
-            const $buttons = $card.find('.ezs-server-actions button');
+            const $buttons = $(groups[group]).closest('.ezs-server-card').find('.ezs-server-actions button');
             controls[group] = {start:$buttons.eq(0), stop:$buttons.eq(1)};
             $buttons.removeAttr('title').prop('disabled', true);
-            checking(controls[group].start);
-            controls[group].start.attr('aria-label', 'Vérification de l’état natif');
-            controls[group].stop.attr('aria-label', 'Arrêter — vérification en cours');
+            controls[group].start.text('État inconnu');
         });
         function disableAll() {
             Object.keys(controls).forEach(function(group) {
                 controls[group].start.prop('disabled', true);
                 controls[group].stop.prop('disabled', true);
-                modes[group] = null;
-                controls[group].start.text('Indisponible');
-                controls[group].start.removeAttr('aria-busy');
             });
         }
         function $cardFor(group) { return $(groups[group]).closest('.ezs-server-card'); }
         function refreshGroups() {
-            if (acting) return;
+            if (acting || groupsPending) return;
+            groupsPending = true;
+            const epoch = ++groupsEpoch;
             const startedAt = window.performance.now();
-            Object.keys(controls).forEach(function (group) {
-                groupRequestStart[group] = startedAt;
-                if (!modes[group]) checking(controls[group].start);
-            });
             $.ajax({url:'/api/v2/infrastructure/dev-groups',method:'GET',dataType:'json',timeout:10000,cache:false})
               .done(function(data) {
+                  if (acting || epoch !== groupsEpoch) return;
                   if (!data || data.schema !== 'ezs.dev_groups.v1' || !data.groups || !data.csrf) {
-                      csrf = ''; disableAll(); return;
+                      csrf = '';
+                      disableAll();
+                      $feedback.text('Pilotage DEV : réponse de supervision invalide');
+                      return;
                   }
                   csrf = data.csrf;
                   Object.keys(controls).forEach(function(group) {
                       const state = data.groups[group] || {};
                       const mode = state.state === 'RUNNING' && state.restart === true ? 'restart'
                           : state.state === 'STOPPED' && state.start === true ? 'start' : null;
+                      const next = {state:state.state || 'UNVERIFIED',mode:mode,stop:state.stop === true};
+                      const previous = rendered[group];
                       modes[group] = mode;
-                      controls[group].start.text(mode === 'restart' ? 'Redémarrer' : mode === 'start' ? 'Démarrer' : 'Indisponible');
-                      controls[group].start.removeAttr('aria-busy');
-                      controls[group].start.attr('aria-label', mode === 'restart' ? 'Redémarrer ' + group : mode === 'start' ? 'Démarrer ' + group : 'Commande indisponible pour ' + group);
-                      controls[group].stop.attr('aria-label', 'Arrêter ' + group);
-                      $cardFor(group).attr('data-ezs-state', state.state || 'UNVERIFIED');
-                      controls[group].start.prop('disabled', mode === null)
-                          .toggleClass('btn-outline-primary', mode !== null)
-                          .toggleClass('btn-outline-secondary', mode === null);
-                      controls[group].stop.prop('disabled', state.stop !== true)
-                          .toggleClass('btn-outline-danger', state.stop === true)
-                          .toggleClass('btn-outline-secondary', state.stop !== true);
-                      controls[group].start.attr('title', 'État natif : '+(state.state || 'indéterminé'));
-                      $cardFor(group).attr('data-ezs-state-probe-ms', String(Math.round(window.performance.now() - groupRequestStart[group])));
-                      controls[group].stop.attr('title', 'État natif : '+(state.state || 'indéterminé'));
+                      if (!previous || previous.state !== next.state || previous.mode !== next.mode || previous.stop !== next.stop) {
+                          const $start = controls[group].start;
+                          const $stop = controls[group].stop;
+                          $start.text(mode === 'restart' ? 'Redémarrer' : mode === 'start' ? 'Démarrer' : 'Indisponible');
+                          $start.removeAttr('aria-busy').attr('aria-label', mode === 'restart' ? 'Redémarrer ' + group : mode === 'start' ? 'Démarrer ' + group : 'Commande indisponible pour ' + group);
+                          $stop.attr('aria-label', 'Arrêter ' + group);
+                          $cardFor(group).attr('data-ezs-state', next.state);
+                          $start.toggleClass('btn-outline-primary', mode !== null)
+                              .toggleClass('btn-outline-secondary', mode === null);
+                          $stop.toggleClass('btn-outline-danger', next.stop)
+                              .toggleClass('btn-outline-secondary', !next.stop);
+                          $start.attr('title', 'État natif : ' + next.state);
+                          $stop.attr('title', 'État natif : ' + next.state);
+                          rendered[group] = next;
+                      }
+                      // Droits réévalués à chaque résultat attesté, sans changer les libellés.
+                      controls[group].start.prop('disabled', mode === null);
+                      controls[group].stop.prop('disabled', !next.stop);
+                      $cardFor(group).attr('data-ezs-state-probe-ms', String(Math.round(window.performance.now() - startedAt)));
                   });
               }).fail(function(xhr, textStatus) {
-                  // Ne jamais réactiver des boutons sans preuve API ; afficher la cause utile.
+                  if (acting || epoch !== groupsEpoch) return;
                   const status = xhr && xhr.status ? String(xhr.status) : (textStatus || 'réseau');
                   const reason = xhr && xhr.responseJSON && xhr.responseJSON.error ? String(xhr.responseJSON.error) : 'réponse indisponible';
                   $feedback.text('Pilotage DEV indisponible : HTTP ' + status + ' / ' + reason);
-                  csrf = ''; disableAll();
-                  Object.keys(controls).forEach(function (group) {
-                      controls[group].start.text('État indisponible');
-                      controls[group].start.removeAttr('aria-busy');
-                      $cardFor(group).attr('data-ezs-state', 'UNVERIFIED');
+                  csrf = '';
+                  disableAll();
+                  // Conserver le dernier libellé attesté. Ne pas convertir une panne API en STOPPED.
+                  Object.keys(controls).forEach(function(group) {
+                      $cardFor(group).attr('data-ezs-probe', 'unavailable');
                   });
-              });
+              }).always(function() { groupsPending = false; });
         }
         // EZS_DIALOG_CONFIRM_V1: no window.confirm/alert/prompt or OS message box.
         function confirmEzs(message) {

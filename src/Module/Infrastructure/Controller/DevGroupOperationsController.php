@@ -98,20 +98,36 @@ final class DevGroupOperationsController
         if ((string) $request->request->get('confirmation', '') !== strtoupper($action).'_'.strtoupper($group)) {
             return new JsonResponse(['error' => 'confirmation_required'], 400);
         }
+        $ezsTraceStart = hrtime(true); // EZS_C83_TIMING
+        $ezsTraceLast = $ezsTraceStart;
+        $ezsTrace = static function (string $stage) use ($group, $action, &$ezsTraceLast, $ezsTraceStart): void {
+            $now = hrtime(true);
+            $line = gmdate('c').' group='.$group.' action='.$action.' stage='.$stage
+                .' step_ms='.round(($now-$ezsTraceLast)/1000000,2)
+                .' total_ms='.round(($now-$ezsTraceStart)/1000000,2).PHP_EOL;
+            $ezsTraceLast = $now;
+            $path = 'H:/EZS_orchestrator/var/log/supervision/http-action-timing.log';
+            if (is_dir(dirname($path))) { @file_put_contents($path, $line, FILE_APPEND | LOCK_EX); }
+        };
+        $ezsTrace('accepted');
         try {
             $lifecycle = new NativeWindowsLifecycle();
             $states = $lifecycle->status();
+            $ezsTrace('inventory');
             $permission = self::permission($states, $group);
             if (!$permission[$action]) {
                 return new JsonResponse(['error' => 'action_not_available'], 409, ['Cache-Control' => 'no-store']);
             }
             // L'intention est durable AVANT toute mutation de processus.
             (new DesiredServiceState())->set($group, $action === 'stop' ? DesiredServiceState::STOPPED : DesiredServiceState::RUNNING);
+            $ezsTrace('intent_persisted');
             if ($action === 'start') {
                 $specs = array_intersect_key(NativeWindowsLifecycle::specs(), array_flip(NativeWindowsLifecycle::groups()[$group]));
                 $roots = SymfonyDevCachePreparation::rootsToPrepare(array_intersect_key($states, $specs), $specs);
                 SymfonyDevCachePreparation::prepare($roots);
+                $ezsTrace('cache_prepared');
                 $result = $lifecycle->startGroup($group);
+                $ezsTrace('group_started');
             } elseif ($action === 'restart') {
                 // Le cycle natif refuse tout PID non attesté et contrôle son identité à chaque arrêt.
                 // Vérifier les dépendances de relance AVANT toute interruption.
@@ -122,6 +138,7 @@ final class DevGroupOperationsController
                     }
                 }
                 $stopped = $lifecycle->stopGroup($group);
+                $ezsTrace('group_stopped_restart');
                 try {
                     $afterStop = $lifecycle->status();
                     if (self::permission($afterStop, $group)['state'] !== 'STOPPED') {
@@ -130,6 +147,7 @@ final class DevGroupOperationsController
                     $roots = SymfonyDevCachePreparation::rootsToPrepare(array_intersect_key($afterStop, $specs), $specs);
                     SymfonyDevCachePreparation::prepare($roots);
                     $started = $lifecycle->startGroup($group);
+                    $ezsTrace('group_started_restart');
                     $afterStart = $lifecycle->status();
                     if (self::permission($afterStart, $group)['state'] !== 'RUNNING') {
                         throw new \RuntimeException('EZS_RESTART_START_NOT_VERIFIED');
@@ -141,7 +159,9 @@ final class DevGroupOperationsController
                 }
             } else {
                 $result = $lifecycle->stopGroup($group);
+                $ezsTrace('group_stopped');
             }
+            $ezsTrace('completed');
             return new JsonResponse([
                 'schema' => 'ezs.dev_group_action.v1',
                 'group' => $group,
@@ -149,6 +169,7 @@ final class DevGroupOperationsController
                 'processes' => $result,
             ], 200, ['Cache-Control' => 'no-store']);
         } catch (\Throwable $failure) {
+            $ezsTrace('failed_'.preg_replace('/[^a-zA-Z0-9_]/','_',get_class($failure)));
             return new JsonResponse(['error' => $failure->getMessage()], 503, ['Cache-Control' => 'no-store']);
         }
     }
