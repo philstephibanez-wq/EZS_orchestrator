@@ -160,6 +160,11 @@ final class DevGroupOperationsController
             } else {
                 $result = $lifecycle->stopGroup($group);
                 $ezsTrace('group_stopped');
+                $afterStop = $lifecycle->status();
+                if (self::permission($afterStop, $group)['state'] !== 'STOPPED') {
+                    throw new \RuntimeException('EZS_STOP_NOT_VERIFIED_'.$group);
+                }
+                $ezsTrace('group_stop_verified');
             }
             $ezsTrace('completed');
             return new JsonResponse([

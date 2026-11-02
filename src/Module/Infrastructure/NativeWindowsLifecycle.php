@@ -397,6 +397,18 @@ final class NativeWindowsLifecycle
                     if (!(($this->terminate)($pid)))
                         throw new \RuntimeException('EZS_FASTCGI_TERMINATE_FAILED_'.$name);
                     $dirty = true;
+                    // Never persist STOPPED before the target PID has exited and its
+                    // dedicated port is free. No process outside this group is touched.
+                    $exited = false;
+                    for ($attempt = 0; $attempt < 40; $attempt++) {
+                        [$afterProcesses, $afterPorts] = $this->observations();
+                        if (!isset($afterProcesses[$pid]) && !self::occupied($spec, $afterPorts)) {
+                            $exited = true;
+                            break;
+                        }
+                        usleep(250000);
+                    }
+                    if (!$exited) throw new \RuntimeException('EZS_FASTCGI_STOP_NOT_EXITED_'.$name);
                     if (file_put_contents($journal, gmdate('c').' FASTCGI_STOP '.$name.' PID='.$pid."\n",FILE_APPEND|LOCK_EX) === false)
                         throw new \RuntimeException('EZS_FASTCGI_AUDIT_FAILED');
                 }
@@ -728,9 +740,16 @@ final class NativeWindowsLifecycle
 
     private static function nativeTerminate(int $pid):bool
     {
-        $service=self::wmi();
-        $process=$service->Get('Win32_Process.Handle="'.$pid.'"');
-        return (int)$process->Terminate(0)===0;
+        // Identity is attested immediately before invocation by reconcileFastCgiGroup.
+        // WMI Terminate raised com_exception on MAIN; use the existing native Windows
+        // termination mechanism without shell, wildcard, tree or foreign-process kill.
+        if ($pid < 1) return false;
+        $taskkill = new \Symfony\Component\Process\Process([
+            'C:/Windows/System32/taskkill.exe', '/PID', (string) $pid, '/F',
+        ]);
+        $taskkill->setTimeout(8);
+        $taskkill->run();
+        return $taskkill->isSuccessful();
     }
     private static function nativeListeners():array
     {

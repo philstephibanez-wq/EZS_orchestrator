@@ -174,8 +174,11 @@
                           rendered[group] = next;
                       }
                       // Droits réévalués à chaque résultat attesté, sans changer les libellés.
+                      // Apply the permission returned by the same verified native snapshot.
+                      // PARTIAL is intentionally stoppable when the API reports stop=true.
                       controls[group].start.prop('disabled', mode === null);
-                      controls[group].stop.prop('disabled', !next.stop);
+                      controls[group].stop.prop('disabled', next.stop !== true);
+                      $cardFor(group).attr('data-ezs-stop-authorized', next.stop ? 'true' : 'false');
                       $cardFor(group).attr('data-ezs-probe', 'verified');
                       $cardFor(group).attr('data-ezs-state-probe-ms', String(Math.round(window.performance.now() - startedAt)));
                   });
