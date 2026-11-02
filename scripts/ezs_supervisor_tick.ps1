@@ -147,6 +147,17 @@ function Start-RootFastCgi {
         }
         $payload = @{schema='ezs.root-recovery.v1';last_attempt=$nowHealth;pid=$targetPid} | ConvertTo-Json -Compress
         [System.IO.File]::WriteAllText($cooldownFile,$payload,(New-Object System.Text.UTF8Encoding($false)))
+
+        # R1I: enforce agreement with netstat immediately before the destructive step.
+        $finalNetstat = & "$env:SystemRoot\System32\netstat.exe" -ano -p tcp
+        if ($LASTEXITCODE -ne 0) { Write-Event 'ROOT_HEALTH_RECOVERY_REFUSED_FINAL_NETSTAT'; return }
+        $finalListening = @($finalNetstat | Where-Object { $_ -match '^\s*TCP\s+\S+:8791\s+\S+\s+LISTENING\s+\d+\s*$' })
+        if ($finalListening.Count -eq 0 -or @($finalListening | Where-Object {
+            $_ -notmatch ('\s+LISTENING\s+' + $targetPid + '\s*$')
+        }).Count -gt 0) {
+            Write-Event 'ROOT_HEALTH_RECOVERY_REFUSED_FINAL_NETSTAT_OWNER'
+            return
+        }
         Stop-Process -Id $targetPid -Force -ErrorAction Stop
         Write-Event ('ROOT_HEALTH_RECOVERY_STOP_PID=' + $targetPid)
         # Cold boot remains the responsibility of the existing next watchdog tick.
@@ -225,6 +236,27 @@ function Start-RootFastCgi {
         } catch { Write-Event 'ROOT_RECOVERY_REFUSED_DESIRED_CHANGED'; return }
         $payload = @{schema='ezs.root-recovery.v1';last_attempt=$nowSec;pid=$pidToStop} | ConvertTo-Json -Compress
         [System.IO.File]::WriteAllText($cooldownFile, $payload, (New-Object System.Text.UTF8Encoding($false)))
+
+        # R1I: any residual/foreign TCP ownership is a contradiction, NOT
+        # proof of a dead process. FIN_WAIT_1 is not a listener but still
+        # invalidates destructive decisions until the inventories agree.
+        $allTcp = @(Get-NetTCPConnection -LocalPort 8791 -ErrorAction Stop)
+        $conflicts = @($allTcp | Where-Object { [int]$_.OwningProcess -ne $pidToStop })
+        if ($conflicts.Count -gt 0) {
+            foreach ($entry in $conflicts) {
+                Write-Event ('ROOT_RECOVERY_REFUSED_TCP_CONFLICT state=' +
+                    [string]$entry.State + ' pid=' + [string]$entry.OwningProcess)
+            }
+            return
+        }
+        $finalNetstat = & "$env:SystemRoot\System32\netstat.exe" -ano -p tcp
+        if ($LASTEXITCODE -ne 0) { Write-Event 'ROOT_RECOVERY_REFUSED_FINAL_NETSTAT'; return }
+        if (@($finalNetstat | Where-Object {
+            $_ -match '^\s*TCP\s+\S+:8791\s+\S+\s+LISTENING\s+\d+\s*$'
+        }).Count -gt 0) {
+            Write-Event 'ROOT_RECOVERY_REFUSED_FINAL_NETSTAT_LISTENER'
+            return
+        }
         Stop-Process -Id $pidToStop -Force -ErrorAction Stop
         Write-Event ('ROOT_RECOVERY_STOP_CONFIRMED_PID=' + $pidToStop)
         Start-Sleep -Seconds 1
