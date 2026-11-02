@@ -327,3 +327,37 @@ Cette section est normative pour **EZS_orchestrator, EZStudio_lab, EZStudioLab_a
 - Préflight, application, recette, validation, publication sont des étapes distinctes. Aucun rollback automatique ni étape de rollback dans la séquence d'application normale.
 - Préserver les sauvegardes nécessaires **hors dépôt**, sans les réappliquer tant qu'une restauration n'est pas explicitement décidée.
 - Toute refactorisation transversale est livrée par lots atomiques testés, sous version canonique propre à chaque projet et commit/push effectué par le mainteneur.
+
+
+## CONTRAT TRANSVERSAL — Diagnostic brut, dumps JSON et séparation de responsabilités
+
+Cette règle s'applique à **EZS_orchestrator, EZStudio_lab, EZStudioLab_assistant, EZScore (DEV et PROD)** et à toute interface de diagnostic ou rapport automatisé de l'écosystème EZS. Elle prime sur les anciennes implémentations ou présentations des panneaux de diagnostic.
+
+### 1. Diagnostic : restitution de preuves, sans interprétation
+
+- Un panneau de diagnostic, y compris son template Twig, affiche les **résultats bruts structurés** des sources sous forme de **dumps JSON indentés, lisibles, copiables et exportables** ; le template se limite à la présentation, à la provenance et à l'organisation des blocs.
+- Conserver les noms de champs, types, valeurs et distinctions de la source : `null`, `false`, `0`, `PARTIAL`, `STOPPED`, `RUNNING`, codes HTTP, erreurs et absences de champs. Ne jamais inventer une valeur ou traduire un état technique en diagnostic métier.
+- **Aucun calcul de badge ou état synthétique, requalification, fallback heuristique, déduction ni fusion silencieuse** des résultats dans le volet de diagnostic. Les décisions métier et états affichés dans les interfaces opérationnelles appartiennent à une couche distincte.
+- Une observation API, une observation native, un relevé réseau et un instantané DOM sont des sources **distinctes**. Afficher chaque dump séparément avec sa provenance, sa date/heure de capture, son statut de collecte et, si utile, sa durée. Ne jamais masquer une divergence par une valeur recomposée.
+- Les champs additionnels de collecte (`source`, `timestamp_utc`, `http_status`, `collection_error`, etc.) doivent être placés dans une **enveloppe de métadonnées distincte**, identifiée comme telle ; le corps `data` contient les champs de la réponse source préservés.
+- En cas d'erreur de collecte, afficher **l'erreur réelle**, sa provenance et les données effectivement disponibles. Ne jamais présenter comme actuel un ancien résultat conservé ; l'éventuel dernier résultat valide doit être explicitement horodaté comme historique.
+
+### 2. Sécurité et intégrité des dumps
+
+- Les dumps « bruts » sont **fidèles aux données non sensibles** : retirer ou masquer, avant affichage, copie, export ou stockage, les secrets et identifiants sensibles (jetons CSRF, cookies, mots de passe, clés API, entêtes d'authentification, données privées). Un masquage est indiqué explicitement ; ne jamais exposer un corps HTTP brut non filtré.
+- La politique d'expurgation est déterministe, limitée aux champs sensibles, testée et documentée. Elle ne change jamais la sémantique des champs techniques restants. Préférer une liste blanche de champs diagnostiques si la source contient des données potentiellement privées.
+- Les outils de diagnostic sont **en lecture seule par défaut**. Aucun bouton de collecte ou export ne peut déclencher un START/STOP, une réconciliation ou un changement de l'état désiré.
+- Conserver un JSON valide, en **UTF-8 sans BOM** dans les artefacts, avec indentation stable, sans mojibake ; fournir une copie/export du même résultat expurgé effectivement affiché.
+
+### 3. Interface opérationnelle séparée
+
+- L'interface de pilotage peut calculer ses indicateurs à partir des preuves disponibles ; cette interprétation n'altère jamais les dumps du panneau de diagnostic.
+- Les badges principaux d'un service utilisent exclusivement **ONLINE**, **OFFLINE** ou **ERREUR**. `OFFLINE` est l'arrêt volontaire **effectivement confirmé** ; cet état normal n'est jamais une erreur. `ONLINE` nécessite une disponibilité attestée ; `ERREUR` signale une défaillance ou une impossibilité d'attester l'état attendu, dont la cause détaillée reste visible dans les dumps.
+- Un groupe partiellement arrêté n'est pas `OFFLINE` tant que l'arrêt complet n'est pas attesté. Les commandes `Ouvrir`, `Démarrer`, `Arrêter` reflètent les capacités et la disponibilité réelles ; `Ouvrir` n'est pas actif pour un service `OFFLINE` ou non accessible.
+- La **maintenance PROD** est un mode d'exploitation indépendant de ces trois états ; elle n'autorise aucun changement de processus ou configuration sans commande explicite.
+
+### 4. Tests contractuels et non-régression
+
+- Vérifier séparément : fidélité du JSON et de ses types ; provenance et horodatage ; expurgation des secrets ; affichage des erreurs de collecte ; absence d'inférence ou de transformation dans le diagnostic ; copie/export identiques à l'affichage.
+- Vérifier les transitions opérationnelles ONLINE/OFFLINE/ERREUR par attestation réelle quand elles impliquent le cycle de vie des services. Une suite PHPUnit verte ou une réponse HTTP 200 **ne prouve pas** un arrêt natif.
+- Ne jamais modifier les preuves d'incident ni les intentions persistées pour rendre un badge conforme. Un changement de contrat n'autorise pas à lui seul une modification des processus, de PROD ou des données persistantes.
