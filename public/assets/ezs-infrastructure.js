@@ -22,9 +22,9 @@
                     if (!key) return;
                     $('#tcp-'+key).text(item.tcp_listening ? 'Ouvert' : 'Fermé');
                     $('#http-'+key).text(item.http_status === null ? 'Sans réponse' : String(item.http_status));
-                    const label = item.http_status !== null ? ((item.http_status >= 500) ? 'Erreur HTTP' : 'Répond') : item.tcp_listening ? 'TCP seul' : 'Façade absente';
+                    const label = item.http_status !== null ? ((item.http_status >= 500) ? 'HTTP en erreur' : (item.http_status >= 300 && item.http_status < 400) ? 'HTTP ' + item.http_status + ' · redirection' : 'HTTP accessible') : item.tcp_listening ? 'TCP seul' : 'Façade absente';
                     const $badge = $('#state-'+key);
-                    $badge.text(label).removeClass('text-bg-secondary text-bg-success text-bg-warning').addClass(item.http_status !== null ? 'text-bg-success' : item.tcp_listening ? 'text-bg-warning' : 'text-bg-secondary');
+                    $badge.text(label).removeClass('text-bg-secondary text-bg-success text-bg-warning').addClass(item.http_status >= 500 ? 'text-bg-warning' : item.http_status !== null ? 'text-bg-success' : item.tcp_listening ? 'text-bg-warning' : 'text-bg-secondary');
                 });
                 if (labBackend) {
                     $('#lab-backend').text(labBackend.tcp_listening ? 'FastCGI TCP ouvert' : 'Arrêt / absent');
@@ -88,6 +88,14 @@
                 controls[group].stop.prop('disabled', true);
             });
         }
+        function indicateUnavailable(reason) {
+            Object.keys(controls).forEach(function(group) {
+                const card = $(groups[group]).closest('.ezs-server-card');
+                card.attr('data-ezs-probe', 'unavailable');
+                controls[group].start.attr('title', 'Permissions indisponibles : ' + reason);
+                controls[group].stop.attr('title', 'Permissions indisponibles : ' + reason);
+            });
+        }
         function $cardFor(group) { return $(groups[group]).closest('.ezs-server-card'); }
         function refreshGroups() {
             if (acting || groupsPending) return;
@@ -100,7 +108,8 @@
                   if (!data || data.schema !== 'ezs.dev_groups.v1' || !data.groups || !data.csrf) {
                       csrf = '';
                       disableAll();
-                      $feedback.text('Pilotage DEV : réponse de supervision invalide');
+                      indicateUnavailable('réponse invalide');
+                      $feedback.text('Pilotage DEV : permissions indisponibles (réponse invalide)');
                       return;
                   }
                   csrf = data.csrf;
@@ -129,15 +138,17 @@
                       // Droits réévalués à chaque résultat attesté, sans changer les libellés.
                       controls[group].start.prop('disabled', mode === null);
                       controls[group].stop.prop('disabled', !next.stop);
+                      $cardFor(group).attr('data-ezs-probe', 'verified');
                       $cardFor(group).attr('data-ezs-state-probe-ms', String(Math.round(window.performance.now() - startedAt)));
                   });
               }).fail(function(xhr, textStatus) {
                   if (acting || epoch !== groupsEpoch) return;
                   const status = xhr && xhr.status ? String(xhr.status) : (textStatus || 'réseau');
                   const reason = xhr && xhr.responseJSON && xhr.responseJSON.error ? String(xhr.responseJSON.error) : 'réponse indisponible';
-                  $feedback.text('Pilotage DEV indisponible : HTTP ' + status + ' / ' + reason);
+                  $feedback.text('Pilotage DEV : permissions indisponibles (HTTP ' + status + ' / ' + reason + ')');
                   csrf = '';
                   disableAll();
+                  indicateUnavailable('HTTP ' + status + ' / ' + reason);
                   // Conserver le dernier libellé attesté. Ne pas convertir une panne API en STOPPED.
                   Object.keys(controls).forEach(function(group) {
                       $cardFor(group).attr('data-ezs-probe', 'unavailable');

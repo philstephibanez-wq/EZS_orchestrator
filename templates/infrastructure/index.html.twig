@@ -1,7 +1,7 @@
 {% extends 'layout/base.html.twig' %}
 {% block title %}EZS Orchestrator — Infrastructure{% endblock %}
 {% block page_scripts %}
-    <script src="/assets/ezs-infrastructure.js" defer></script>
+    <script src="/assets/ezs-infrastructure.js?v={{ orchestrator_version|url_encode }}" defer></script>
     <script src="/assets/ezs-rest-supervision.js?v=4.2c85" defer></script>
     <script src="/assets/ezs-recovery-preflight.js" defer></script>
     <script src="/assets/ezs-prod-control.js?v=4.2c86" defer></script>
