@@ -39,32 +39,8 @@
                     <span id="ezs-debug-spinner" class="spinner-border spinner-border-sm text-info d-none" role="status" aria-label="Collecte du diagnostic en cours"></span>
                     <span role="status" aria-live="polite" id="ezs-debug-status" class="small text-body-secondary">Diagnostic non initialisé</span>
                 </div>
-                <section aria-label="États natifs PHP" class="mt-2">
-                    <h2 class="h6">États natifs du serveur PHP</h2>
-                    <div id="ezs-debug-native" class="table-responsive small" role="status">À actualiser à l’ouverture.</div>
-                </section>
-                <section aria-label="API et boutons" class="mt-3">
-                    <h2 class="h6">API et boutons observés dans le navigateur</h2>
-                    <div class="table-responsive">
-                        <table class="table table-sm table-dark small" id="ezs-debug-groups">
-                            <thead>
-                                <tr>
-                                    <th scope="col">Groupe</th>
-                                    <th scope="col">État API</th>
-                                    <th scope="col">Démarrer</th>
-                                    <th scope="col">Arrêter</th>
-                                    <th scope="col">Boutons</th>
-                                    <th scope="col">DOM démarrer</th>
-                                    <th scope="col">DOM arrêter</th>
-                                </tr>
-                            </thead>
-                            <tbody id="ezs-debug-groups-body"></tbody>
-                        </table>
-                    </div>
-                    <p id="ezs-debug-browser" class="small text-body-secondary"></p>
-                </section>
-                <pre id="ezs-debug-output" tabindex="0" class="p-3 border rounded bg-dark text-light small ezs-debug-report">Diagnostic non initialisé : script de diagnostic indisponible ou non exécuté.</pre>
-                <p class="small text-body-secondary mb-0">Aucun jeton, cookie, PID ni corps de réponse n'est copié. Aucun START/STOP n'est déclenché.</p>
+                <pre id="ezs-debug-output" tabindex="0" class="p-3 border rounded small ezs-debug-report">{ "status": "NON_COLLECTE" }</pre>
+                <p class="small text-body-secondary mb-0">Dumps JSON de sources GET et DOM, champs sensibles masqués. Aucun START/STOP n'est déclenché.</p>
             </details>
         </aside>
     {% endif %}

@@ -1,4 +1,4 @@
-/* DEV: diagnostic unifié; GET en lecture seule et export par liste blanche. */
+/* EZS DEV diagnostic: read-only, source-preserving JSON, redacted before display. */
 'use strict';
 (() => {
     const panel = document.getElementById('ezs-debug-panel');
@@ -8,166 +8,171 @@
     const copy = document.getElementById('ezs-debug-copy');
     const refresh = document.getElementById('ezs-debug-refresh');
     const spinner = document.getElementById('ezs-debug-spinner');
-    const rows = document.getElementById('ezs-debug-groups-body');
-    const native = document.getElementById('ezs-debug-native');
-    const browser = document.getElementById('ezs-debug-browser');
-    if (!output || !status || !copy || !refresh || !spinner || !rows || !native || !browser) return;
-    panel.dataset.ezsDebugReady = '1';
-    status.textContent = 'Diagnostic prêt';
-    output.textContent = 'En attente de collecte automatique.';
-    const groups = {dev: 'dev-title', lab: 'lab-title', assistant: 'assistant-title'};
-    const nativeNames = {dev:['ezscore_dev','ezscore_preview'], lab:['lab'], assistant:['assistant']};
-    const errors = [];
-    let report = '';
+    if (!output || !status || !copy || !refresh || !spinner) return;
+
+    // Passive observation of native lifecycle commands issued by Infrastructure.
+    // Never dispatch a command, observe only the existing jQuery transport.
+    const ezsActionTrace = [];
+    const ezsActionStarted = new WeakMap();
+    const ezsActionPath = /^\/api\/v2\/infrastructure\/dev-groups\/(dev|lab|assistant)\/(start|restart|stop)$/;
+    function ezsActionUrl(settings) {
+        try {
+            const url = new URL(settings.url, location.href);
+            return url.origin === location.origin && ezsActionPath.test(url.pathname) ? url.pathname : null;
+        } catch (_) { return null; }
+    }
+    function ezsActionParams(data) {
+        // Explicit allowlist. Never retain the CSRF header or arbitrary request data.
+        if (typeof data !== 'string') return {};
+        const match = new URLSearchParams(data).get('confirmation');
+        return match === null ? {} : {confirmation:match};
+    }
+    // jQuery events fire for the existing POST; this observer is read-only.
+    if (window.jQuery) {
+        window.jQuery(document).ajaxSend(function (_event, xhr, settings) {
+            const path = ezsActionUrl(settings);
+            if (!path || String(settings.type || settings.method).toUpperCase() !== 'POST') return;
+            ezsActionStarted.set(xhr, {
+                source:'infrastructure_jquery_ajax',
+                timestamp_utc:new Date().toISOString(),
+                began:performance.now(),
+                request:{method:'POST',path:path,params:ezsActionParams(settings.data)}
+            });
+        });
+        window.jQuery(document).ajaxComplete(function (_event, xhr, settings) {
+            const begin = ezsActionStarted.get(xhr);
+            if (!begin) return;
+            ezsActionStarted.delete(xhr);
+            const response = {http_status:xhr.status,body:null};
+            // Source JSON is retained with field types; only secrets are redacted.
+            if (xhr.responseJSON !== undefined) response.body = redact(xhr.responseJSON);
+            else response.collection_note = 'NO_JSON_RESPONSE_BODY';
+            const observation = {
+                source:begin.source,
+                timestamp_utc:begin.timestamp_utc,
+                completed_utc:new Date().toISOString(),
+                request:begin.request,
+                response:response,
+                duration_ms:Math.round(performance.now()-begin.began)
+            };
+            ezsActionTrace.push(observation);
+            if (ezsActionTrace.length > 30) ezsActionTrace.shift();
+            // Refresh the existing JSON console without launching another GET.
+            // This snapshot contains only observations already collected.
+            if (panel.open && output.textContent.startsWith('{')) {
+                try {
+                    const current = JSON.parse(output.textContent);
+                    current.action_requests_and_responses = ezsActionTrace.slice();
+                    output.textContent = JSON.stringify(current,null,2);
+                } catch (_) { /* ongoing collection: next snapshot contains the trace */ }
+            }
+        });
+    }
+
+    const sources = [
+        '/api/v2/infrastructure/dev-debug-native',
+        '/api/v2/infrastructure/dev-groups',
+        '/api/v2/infrastructure/dev-health',
+        '/api/v2/infrastructure/dev-backend'
+    ];
+    const secretKey = /(?:csrf|token|cookie|authorization|password|secret|api[_-]?key|private[_-]?key|session|credential)/i;
+    const privateKey = /(?:email|user[_-]?id|client[_-]?ip|address|hostname|command[_-]?line|executable[_-]?path|file[_-]?path)/i;
+    const MAX_BODY = 120000;
     let busy = false;
-    const buttonChanges = [];
-    // Observation uniquement : jamais de modification des boutons ni de la requête métier.
-    const observedButtons = Object.keys(groups).flatMap(group => {
-        const card = document.getElementById(groups[group])?.closest('.ezs-server-card');
-        return card ? [...card.querySelectorAll('.ezs-server-actions button')].slice(0, 2).map((button, index) => ({group, verb:index ? 'stop' : 'start', button})) : [];
+    const errors = [];
+    window.addEventListener('error', event => {
+        if (errors.length < 20) errors.push({kind:'error', message:String(event.message || 'SCRIPT_ERROR')});
     });
-    const buttonObserver = new MutationObserver(records => {
-        for (const record of records) {
-            const match = observedButtons.find(item => item.button === record.target);
-            if (!match || record.attributeName !== 'disabled') continue;
-            buttonChanges.push(new Date().toISOString() + ' ' + match.group + '/' + match.verb + ' disabled=' + match.button.disabled);
-            if (buttonChanges.length > 30) buttonChanges.shift();
+    window.addEventListener('unhandledrejection', () => {
+        if (errors.length < 20) errors.push({kind:'unhandledrejection'});
+    });
+
+    function redact(value, depth = 0) {
+        if (depth > 12) return '[TRONQUÉ : profondeur maximale]';
+        if (Array.isArray(value)) return value.map(item => redact(item, depth + 1));
+        if (value && typeof value === 'object') {
+            const result = {};
+            for (const [key, item] of Object.entries(value)) {
+                result[key] = secretKey.test(key) || privateKey.test(key) ? '[MASQUÉ]' : redact(item, depth + 1);
+            }
+            return result;
         }
-    });
-    observedButtons.forEach(item => buttonObserver.observe(item.button, {attributes:true, attributeFilter:['disabled']}));
+        if (typeof value === 'string' && value.length > MAX_BODY) return value.slice(0, MAX_BODY) + '[TRONQUÉ : longueur maximale]';
+        return value;
+    }
 
-    window.addEventListener('error', () => { if (errors.length < 10) errors.push('SCRIPT_ERROR'); });
-    window.addEventListener('unhandledrejection', () => { if (errors.length < 10) errors.push('PROMISE_REJECTION'); });
-    try { panel.open = sessionStorage.getItem('ezs_debug_open') === '1'; } catch (_) { /* facultatif */ }
-    panel.addEventListener('toggle', () => {
-        try { sessionStorage.setItem('ezs_debug_open', panel.open ? '1' : '0'); } catch (_) { /* facultatif */ }
-        if (panel.open) void collect();
-    });
+    function domDump() {
+        const result = {};
+        for (const group of ['dev','lab','assistant']) {
+            const card = document.getElementById(group + '-title')?.closest('.ezs-server-card');
+            const buttons = card ? [...card.querySelectorAll('.ezs-server-actions button')] : [];
+            result[group] = {
+                card_present: Boolean(card),
+                data_ezs_state: card?.getAttribute('data-ezs-state') ?? null,
+                data_ezs_probe: card?.getAttribute('data-ezs-probe') ?? null,
+                buttons: buttons.map(b => ({text:b.textContent.trim(),disabled:b.disabled,aria_label:b.getAttribute('aria-label')}))
+            };
+        }
+        return result;
+    }
 
-    function cell(row, value) {
-        const td = document.createElement('td');
-        td.textContent = String(value);
-        row.appendChild(td);
+    async function collectSource(url) {
+        const startedAt = performance.now();
+        const timestamp = new Date().toISOString();
+        const request = {method:'GET',path:url};
+        try {
+            const response = await fetch(url, {
+                method:'GET',credentials:'same-origin',cache:'no-store',
+                signal:AbortSignal.timeout(12000)
+            });
+            const raw = await response.text();
+            if (raw.length > MAX_BODY) {
+                return {source:url,timestamp_utc:timestamp,request,
+                    response:{http_status:response.status,body:null,collection_error:'BODY_TOO_LARGE',body_characters:raw.length}};
+            }
+            let body;
+            try { body = JSON.parse(raw); }
+            catch (_) { body = {non_json_response:true,body_characters:raw.length}; }
+            return {source:url,timestamp_utc:timestamp,request,
+                response:{http_status:response.status,body:redact(body)},
+                duration_ms:Math.round(performance.now()-startedAt)};
+        } catch (error) {
+            return {source:url,timestamp_utc:timestamp,request,
+                response:{http_status:null,collection_error:String(error?.name || 'FETCH_ERROR')},
+                duration_ms:Math.round(performance.now()-startedAt)};
+        }
     }
-    function safeStatus(value) {
-        return ['ATTESTED','ABSENT','RECORDED_UNVERIFIED','PORT_UNVERIFIED','MISSING'].includes(value) ? value : 'INCONNU';
-    }
-    function dom(group) {
-        const doc = document;
-        const card = doc.getElementById(groups[group])?.closest('.ezs-server-card');
-        const buttons = card ? [...card.querySelectorAll('.ezs-server-actions button')] : [];
-        return {count:card ? buttons.length : 'hors page', start:buttons[0] ? String(buttons[0].disabled) : 'ABSENT', stop:buttons[1] ? String(buttons[1].disabled) : 'ABSENT', label:buttons[0] ? buttons[0].textContent.trim() : 'ABSENT', age:card?.dataset.ezsStateProbeMs || 'inconnu'};
-    }
-    async function get(url) {
-        const response = await fetch(url,{method:'GET',credentials:'same-origin',cache:'no-store',signal:AbortSignal.timeout(10000)});
-        if (!response.ok) throw new Error('HTTP_' + response.status);
-        return response.json();
-    }
+
     async function collect() {
         if (busy || !panel.open) return;
         busy = true;
-        spinner.classList.remove('d-none');
         refresh.disabled = true;
-        status.textContent = report ? 'Actualisation du diagnostic… (dernières valeurs conservées)' : 'Actualisation du diagnostic…';
-        if (!report) output.textContent = 'Actualisation du diagnostic…';
-        let incomplete = false;
-        const lines = [
-            'EZS — DIAGNOSTIC DEV DÉTAILLÉ (lecture seule)',
-            'Horodatage UTC : ' + new Date().toISOString(),
-            'Version : ' + (document.querySelector('.navbar-brand small')?.textContent.trim() || 'inconnue'),
-            'Page : ' + location.pathname,
-            'Navigateur : ' + (navigator.userAgent.includes('Chrome') ? 'Chromium' : 'autre'),
-            'Document : ' + document.readyState,
-            'jQuery : ' + (window.jQuery ? 'présent' : 'absent'),
-            'Script Infrastructure : ' + document.querySelectorAll('script[src*="ezs-infrastructure.js"]').length,
-            'Erreurs JS observées : ' + (errors.join(', ') || 'aucune'),
-            '', 'ÉTATS NATIFS PHP'
-        ];
-        try {
-            const data = await get('/api/v2/infrastructure/dev-debug-native');
-            if (data.schema !== 'ezs.dev_group_native_debug.v1') throw new Error('SCHEMA');
-            const list = [];
-            for (const [group, names] of Object.entries(nativeNames)) {
-                for (const name of names) {
-                    const value = safeStatus(data.groups?.[group]?.[name]);
-                    lines.push(group + ' / ' + name + ' : ' + value);
-                    list.push(group + ' / ' + name + ' : ' + value);
-                }
-            }
-            if (data.error) {
-                incomplete = true;
-                lines.push('Inventaire : INDISPONIBLE');
-            }
-            native.textContent = list.join(' | ') + (data.error ? ' ; Inventaire indisponible' : '');
-        } catch (_) {
-            incomplete = true;
-            native.textContent = 'Inventaire natif indisponible';
-            lines.push('Inventaire natif : INDISPONIBLE');
-        }
-        lines.push('', 'API ET BOUTONS OBSERVÉS');
-        const divergences = [];
-        const newRows = document.createDocumentFragment();
-        const headers = document.querySelectorAll('#ezs-debug-groups thead th');
-        if (headers.length === 7) { headers[2].textContent = 'Action contextuelle'; headers[5].textContent = 'DOM action'; }
-        try {
-            const data = await get('/api/v2/infrastructure/dev-groups');
-            if (data.schema !== 'ezs.dev_groups.v1') throw new Error('SCHEMA');
-            lines.push('API GET : 200 ; schéma reconnu : true');
-            for (const group of Object.keys(groups)) {
-                const item = data.groups?.[group];
-                const state = ['RUNNING','STOPPED','UNVERIFIED','PARTIAL'].includes(item?.state) ? item.state : 'INCONNU';
-                const d = dom(group);
-                if (d.count === 'hors page') {
-                    divergences.push(group + ' : boutons absents sur cette page (non comparable)');
-                } else if (d.count !== 2) {
-                    divergences.push(group + ' : nombre de boutons inattendu (' + d.count + ')');
-                } else {
-                    const expectedMode = state === 'RUNNING' && item?.restart === true ? 'Redémarrer' : state === 'STOPPED' && item?.start === true ? 'Démarrer' : 'Indisponible';
-                    const expectedDisabled = expectedMode === 'Indisponible';
-                    // Une lecture API et l'application DOM sont asynchrones : ne pas qualifier une transition en anomalie.
-                    if (d.label !== 'Vérification…' && d.label !== 'État en cours…' && d.label !== 'État indisponible'
-                        && d.label !== expectedMode) divergences.push(group + ' / action : API=' + expectedMode + ', DOM=' + d.label);
-                    if (d.label === expectedMode && d.start !== String(expectedDisabled)) divergences.push(group + ' / action : disabled incohérent');
-                    if (d.stop !== String(item?.stop !== true)) divergences.push(group + ' / arrêter : API=' + (item?.stop === true) + ', DOM disabled=' + d.stop);
-                }
-                const row = document.createElement('tr');
-                [group,state,state === 'RUNNING' && item?.restart === true ? 'Redémarrer' : state === 'STOPPED' && item?.start === true ? 'Démarrer' : 'Indisponible',item?.stop === true,d.count,d.label + ' / disabled=' + d.start,d.stop].forEach(v => cell(row,v));
-                newRows.appendChild(row);
-                lines.push(group + ' : état=' + state + ' ; start=' + (item?.start === true) + ' ; restart=' + (item?.restart === true) + ' ; stop=' + (item?.stop === true)
-                    + ' ; DOM boutons=' + d.count + ', action=' + d.label + ', action.disabled=' + d.start + ', arreter.disabled=' + d.stop + ', attente permissions ms=' + d.age);
-            }
-        } catch (_) {
-            incomplete = true;
-            lines.push('API GET : INDISPONIBLE');
-            for (const group of Object.keys(groups)) {
-                const d = dom(group);
-                const row = document.createElement('tr');
-                [group,'INCONNU','INCONNU','INCONNU',d.count,d.start,d.stop].forEach(v => cell(row,v));
-                newRows.appendChild(row);
-                lines.push(group + ' : API indisponible ; DOM boutons=' + d.count + ', demarrer.disabled=' + d.start + ', arreter.disabled=' + d.stop);
-            }
-        }
-        lines.push('', 'ÉCARTS API / DOM (instantané, sans action)');
-        lines.push(...(divergences.length ? divergences : ['Aucun écart détecté à cet instant']));
-        lines.push('', 'CHANGEMENTS DES BOUTONS OBSERVÉS (max. 30, depuis ouverture de page)');
-        lines.push(...(buttonChanges.length ? buttonChanges : ['Aucun changement observé']));
-        rows.replaceChildren(newRows);
-        browser.textContent = 'jQuery : ' + (window.jQuery ? 'présent' : 'absent') + ' ; document : ' + document.readyState
-            + ' ; script Infrastructure : ' + document.querySelectorAll('script[src*="ezs-infrastructure.js"]').length;
-        report = lines.join('\n');
-        output.textContent = report;
-        status.textContent = incomplete ? 'Collecte incomplète — consulter le rapport (' + report.length + ' caractères)' : 'Diagnostic actualisé — ' + new Date().toLocaleTimeString('fr-FR') + ' (' + report.length + ' caractères)';
-        refresh.disabled = false;
+        spinner.classList.remove('d-none');
+        status.textContent = 'Collecte en cours…';
+        const captures = [];
+        // No interpretation of source values. Each GET result remains independent.
+        for (const url of sources) captures.push(await collectSource(url));
+        const snapshot = {
+            captured_utc:new Date().toISOString(),
+            browser:{path:location.pathname,document_ready_state:document.readyState,
+                jquery_present:Boolean(window.jQuery),javascript_errors:redact(errors)},
+            dom:{source:'DOM',timestamp_utc:new Date().toISOString(),data:domDump()},
+            action_requests_and_responses:ezsActionTrace.slice(),
+            requests_and_responses:captures
+        };
+        output.textContent = JSON.stringify(snapshot,null,2);
+        status.textContent = 'JSON actualisé — ' + new Date().toLocaleTimeString('fr-FR');
         spinner.classList.add('d-none');
+        refresh.disabled = false;
         busy = false;
     }
     refresh.addEventListener('click', () => { void collect(); });
     copy.addEventListener('click', async () => {
-        if (!report) await collect();
-        if (!report) return;
+        const value = output.textContent;
+        if (!value || !value.startsWith('{')) return;
         try {
-            await navigator.clipboard.writeText(report);
-            status.textContent = 'Diagnostic complet copié — coller dans le chat';
+            await navigator.clipboard.writeText(value);
+            status.textContent = 'JSON affiché copié';
         } catch (_) {
             output.focus();
             const selection = window.getSelection();
@@ -175,8 +180,9 @@
             range.selectNodeContents(output);
             selection.removeAllRanges();
             selection.addRange(range);
-            status.textContent = 'Copie automatique indisponible : Ctrl + C sur le texte sélectionné';
+            status.textContent = 'Sélection prête : Ctrl+C';
         }
     });
+    panel.addEventListener('toggle', () => { if (panel.open) void collect(); });
     if (panel.open) void collect();
 })();

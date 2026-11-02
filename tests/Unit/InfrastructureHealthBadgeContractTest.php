@@ -14,10 +14,10 @@ final class InfrastructureHealthBadgeContractTest extends TestCase
         self::assertStringContainsString("native === 'STOPPED'", $js);
         self::assertStringContainsString("native === 'RUNNING'", $js);
         self::assertStringContainsString('http >= 200 && http < 400', $js);
-        self::assertStringContainsString("'En ligne'", $js);
-        self::assertStringContainsString("'En erreur'", $js);
-        self::assertStringContainsString('\\u00c0 v\\u00e9rifier', $js);
-        self::assertStringContainsString('serviceNative[group] = null; renderServiceBadge(group);', $js);
+        self::assertStringContainsString("'ONLINE'", $js);
+        self::assertStringContainsString("'ERREUR'", $js);
+        self::assertStringContainsString("'OFFLINE'", $js);
+        self::assertStringContainsString('serviceNative[group] = null; serviceDesired[group] = null; renderServiceBadge(group);', $js);
         self::assertStringContainsString('serviceTransport[group] = null;', $js);
         self::assertStringNotContainsString("'HTTP accessible'", $js);
     }

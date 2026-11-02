@@ -74,6 +74,7 @@ final class DevGroupOperationsController
             $groups = [];
             foreach (NativeWindowsLifecycle::groups() as $name => $_members) {
                 $groups[$name] = self::permission($states, $name);
+                $groups[$name]['desired'] = (new DesiredServiceState())->get($name);
             }
             return new JsonResponse([
                 'schema' => 'ezs.dev_groups.v1',

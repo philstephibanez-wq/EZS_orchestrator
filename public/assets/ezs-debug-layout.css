@@ -77,3 +77,6 @@
 @media (prefers-reduced-motion: reduce) {
     .ezs-server-card .ezs-command-spinner { animation-duration: 1.5s; }
 }
+
+/* Console diagnostique DEV : JSON brut, contrasté, sans état synthétique. */
+.ezs-debug-region #ezs-debug-output { background:#000 !important; color:#00ff66 !important; border:1px solid #147b35 !important; font-family:Consolas, "Cascadia Mono", monospace; white-space:pre; overflow:auto; max-height:65vh; tab-size:2; }

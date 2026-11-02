@@ -13,8 +13,9 @@ final class InfrastructureStateContractTest extends TestCase
         self::assertStringContainsString('function renderServiceBadge(group)', $source);
         self::assertStringContainsString('serviceNative[group]', $source);
         self::assertStringContainsString('serviceTransport[group]', $source);
-        self::assertStringContainsString("'En ligne'", $source);
-        self::assertStringContainsString("'En erreur'", $source);
+        self::assertStringContainsString("'ONLINE'", $source);
+        self::assertStringContainsString("'OFFLINE'", $source);
+        self::assertStringContainsString("'ERREUR'", $source);
         self::assertStringNotContainsString("'HTTP accessible'", $source);
         self::assertStringNotContainsString("'Répond'", $source);
     }

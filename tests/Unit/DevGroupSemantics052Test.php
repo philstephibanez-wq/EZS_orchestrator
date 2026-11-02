@@ -16,9 +16,14 @@ final class DevGroupSemantics052Test extends TestCase
         self::assertStringContainsString('Commandes natives disponibles', $js);
         self::assertStringContainsString('data-ezs-state="STOPPED"', $css);
         self::assertStringContainsString('background: #a72432', $css);
-        self::assertStringContainsString('item?.restart === true', $diagnostic);
-        self::assertStringContainsString('attente permissions ms=', $diagnostic);
-        self::assertStringNotContainsString("if (d.start !== String(item?.start !== true))", $diagnostic);
-        self::assertSame(0, preg_match('/\bmethod\s*:\s*["\'](?:POST|PUT|PATCH|DELETE)["\']/i', $diagnostic));
+        self::assertStringContainsString("'data-ezs-state'", $diagnostic);
+        self::assertStringContainsString("'data-ezs-probe'", $diagnostic);
+        self::assertStringContainsString("method:'GET'", $diagnostic);
+        self::assertStringNotContainsString('ÉCARTS API / DOM', $diagnostic);
+        self::assertStringContainsString("window.jQuery(document).ajaxSend", $diagnostic);
+        self::assertStringContainsString("window.jQuery(document).ajaxComplete", $diagnostic);
+        self::assertStringContainsString("request:{method:'POST'", $diagnostic);
+        self::assertStringContainsString("method:'GET'", $diagnostic);
+        self::assertStringNotContainsString("fetch(url, {method:'POST'", $diagnostic);
     }
 }

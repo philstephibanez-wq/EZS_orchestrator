@@ -10,29 +10,31 @@
         // Snapshot fusion: an HTTP response alone never proves the native process is running.
         const serviceTransport = {dev:null,lab:null,assistant:null};
         const serviceNative = {dev:null,lab:null,assistant:null};
+        const groups = {dev:'#dev-title',lab:'#lab-title',assistant:'#assistant-title'};
+        const serviceDesired = {dev:null,lab:null,assistant:null};
         function renderServiceBadge(group) {
             const native = serviceNative[group];
+            const desired = serviceDesired[group];
             const transport = serviceTransport[group];
             const http = transport ? transport.http : null;
-            const tcp = transport ? transport.tcp : null;
-            const explicitFailure = transport && transport.applicationHealthy === false;
-            const explicitHealth = transport && transport.applicationHealthy === true;
-            // Native STOPPED is authoritative, even when a stale HTTP proxy still responds.
-            const failed = native === 'STOPPED' || explicitFailure ||
-                (transport && http !== null && http >= 500) ||
-                (transport && http === null && tcp === false);
-            // Green means native process attested and front HTTP reachable, not full workflow health.
-            const reachable = native === 'RUNNING' && transport &&
-                http !== null && http >= 200 && http < 400;
-            const verified = !failed && reachable &&
-                (explicitHealth || transport.applicationHealthy !== false);
-            const label = failed ? 'En erreur' : verified ? 'En ligne' : '\u00c0 v\u00e9rifier';
+            const healthy = transport && transport.applicationHealthy !== false;
+            const online = native === 'RUNNING' && desired === 'RUNNING' &&
+                http !== null && http >= 200 && http < 400 && healthy;
+            const offline = native === 'STOPPED' && desired === 'STOPPED';
+            const label = online ? 'ONLINE' : offline ? 'OFFLINE' : 'ERREUR';
+            const level = online ? 'success' : offline ? 'secondary' : 'danger';
             const $badge = $('#state-' + group);
             $badge.text(label).removeClass('text-bg-secondary text-bg-success text-bg-warning text-bg-danger')
-                .addClass(failed ? 'text-bg-danger' : verified ? 'text-bg-success' : 'text-bg-warning');
-            $badge.attr('title', 'Processus natif : ' + (native || 'non attest\u00e9') +
-                ' ; HTTP : ' + (http === null ? 'sans mesure' : http) +
-                ' ; sant\u00e9 fonctionnelle : ' + (explicitHealth ? 'attest\u00e9e' : explicitFailure ? 'en erreur' : 'non test\u00e9e'));
+                .addClass('text-bg-' + level);
+            $badge.attr('title', 'Natif : ' + (native || 'NON_ATTESTE') +
+                ' ; intention : ' + (desired || 'INCONNUE') +
+                ' ; HTTP : ' + (http === null ? 'sans mesure' : http));
+            const $open = $(groups[group] || '#missing-service').closest('.ezs-server-card')
+                .find('.ezs-server-actions a').first();
+            // Preserve href: never mutate the target; prevent activation when unavailable.
+            $open.toggleClass('disabled', !online)
+                .attr('aria-disabled', online ? 'false' : 'true')
+                .attr('tabindex', online ? '0' : '-1');
         }
         function refresh() {
             if (pending) return;
@@ -84,7 +86,6 @@
         }
 
         // Group control uses the existing buttons, without altering PROD or the Orchestrator root.
-        const groups = {dev:'#dev-title', lab:'#lab-title', assistant:'#assistant-title'};
         const controls = {};
         let csrf = '';
         let acting = false;
@@ -144,14 +145,15 @@
                       csrf = '';
                       disableAll();
                       indicateUnavailable('réponse invalide');
-                      Object.keys(serviceNative).forEach(function(group) { serviceNative[group] = null; renderServiceBadge(group); });
+                      Object.keys(serviceNative).forEach(function(group) { serviceNative[group] = null; serviceDesired[group] = null; renderServiceBadge(group); });
                       $feedback.text('Pilotage DEV : permissions indisponibles (réponse invalide)');
                       return;
                   }
                   csrf = data.csrf;
                   Object.keys(controls).forEach(function(group) {
                       const state = data.groups[group] || {};
-                       serviceNative[group] = state.state === 'RUNNING' || state.state === 'STOPPED' ? state.state : null;
+                       serviceNative[group] = state.state === 'RUNNING' || state.state === 'STOPPED' || state.state === 'PARTIAL' ? state.state : null;
+                       serviceDesired[group] = state.desired === 'RUNNING' || state.desired === 'STOPPED' ? state.desired : null;
                        renderServiceBadge(group);
                       const mode = state.state === 'RUNNING' && state.restart === true ? 'restart'
                           : state.state === 'STOPPED' && state.start === true ? 'start' : null;
@@ -190,7 +192,7 @@
                   csrf = '';
                   disableAll();
                   indicateUnavailable('HTTP ' + status + ' / ' + reason);
-                  Object.keys(serviceNative).forEach(function(group) { serviceNative[group] = null; renderServiceBadge(group); });
+                  Object.keys(serviceNative).forEach(function(group) { serviceNative[group] = null; serviceDesired[group] = null; renderServiceBadge(group); });
                   // Conserver le dernier libellé attesté. Ne pas convertir une panne API en STOPPED.
                   Object.keys(controls).forEach(function(group) {
                       $cardFor(group).attr('data-ezs-probe', 'unavailable');
@@ -270,6 +272,9 @@
                 refresh(); refreshBackend(); refreshGroups();
             });
         }
+        $('.ezs-server-card .ezs-server-actions a').on('click', function(event) {
+            if ($(this).attr('aria-disabled') === 'true') event.preventDefault();
+        });
         Object.keys(controls).forEach(function(group) {
             controls[group].start.on('click', function(){ if (modes[group]) action(group,modes[group]); });
             controls[group].stop.on('click', function(){ action(group,'stop'); });
