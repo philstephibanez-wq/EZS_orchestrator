@@ -331,7 +331,7 @@ Cette section est normative pour **EZS_orchestrator, EZStudio_lab, EZStudioLab_a
 
 ## CONTRAT TRANSVERSAL — Diagnostic brut, dumps JSON et séparation de responsabilités
 
-Cette règle s'applique à **EZS_orchestrator, EZStudio_lab, EZStudioLab_assistant, EZScore (DEV et PROD)** et à toute interface de diagnostic ou rapport automatisé de l'écosystème EZS. Elle prime sur les anciennes implémentations ou présentations des panneaux de diagnostic.
+Cette règle s'applique à **tous les modules et applications EZS en développement**, notamment EZS_orchestrator, EZStudio_lab, EZStudioLab_assistant et EZScore DEV, ainsi qu'à leurs interfaces de diagnostic et rapports automatisés. **EZScore PROD est exclusivement un déploiement du code EZScore DEV validé, et non un projet ou une branche de développement fonctionnel indépendant.** Les mêmes règles de diagnostic et de présentation s'appliquent à PROD lors du déploiement contrôlé de DEV vers PROD ; aucune correction spécifique en PROD ne doit créer de divergence fonctionnelle. Elle prime sur les anciennes implémentations ou présentations des panneaux de diagnostic.
 
 ### 1. Diagnostic : restitution de preuves, sans interprétation
 
