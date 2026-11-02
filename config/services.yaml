@@ -17,3 +17,5 @@ services:
             - '../src/Module/Coordination/ExecutorOwnershipRegistry.php'
             # Explicit synthetic CPU-only integration; never autostart a queue consumer.
             - '../src/Module/Coordination/SyntheticCpuQueueRunner.php'
+            # Explicit isolated synthetic child exercise; never autostart a process.
+            - '../src/Module/Coordination/SyntheticChildProcessRunner.php'
