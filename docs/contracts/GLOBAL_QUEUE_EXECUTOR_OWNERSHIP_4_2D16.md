@@ -1,0 +1,7 @@
+# 4.2d16 — Immutabilité de l'identité d'exécution
+
+Le registre `ExecutorOwnershipRegistry` écrit dans la **même base SQLite canonique** que `GlobalQueueStore`, table additionnelle `global_queue_executor_ownership` indexée par `(job_id,claim_generation)`. Aucune seconde queue. L'inscription exige un lease courant et son token secret, vérifiés dans une transaction `BEGIN IMMEDIATE`; les identités déjà inscrites sont immuables, et la relecture ne divulgue pas le token. Les générations historiques sont conservées.
+
+**Limite opérationnelle bloquante :** ce registre ne lance ni n'observe de processus; les identités node/PID/date de création/instance_id fournies lors de l'inscription doivent provenir du lanceur de confiance. Le registre n'est pas raccordé au lanceur MAIN/XPS, ni au balayage automatique. L'existence d'un enregistrement n'est jamais une preuve d'arrêt. Un job sans enregistrement reste non attestable et donc non récupérable automatiquement. Aucun effet sur les jobs MAIN par simple installation; création de la table uniquement si le composant est instancié.
+
+Impacts: schéma additionnel uniquement, pas de migration destructive, aucun fichier temporaire en dépôt, pas de démarrage de service, aucune mutation PROD. Recette avec bases SQLite isolées sous `H:\temp`; avant activation réelle, vérifier droits du lanceur, identité Windows (y compris enfants), scénario PID réutilisé, attestation distante indépendante, arrêts intentionnels et incidents.

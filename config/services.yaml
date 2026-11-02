@@ -13,3 +13,5 @@ services:
             - '../src/Module/Coordination/ExpiredLeaseSweep.php'
             # Requires a trusted independent observer and durable process ownership.
             - '../src/Module/Coordination/ExecutorStopAttestor.php'
+            # Database path must come from a trusted canonical queue configuration.
+            - '../src/Module/Coordination/ExecutorOwnershipRegistry.php'
