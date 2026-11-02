@@ -7,7 +7,7 @@ use PDO;
 
 /**
  * Single application-agnostic durable queue kernel.
- * No live worker, HTTP endpoint or automatic expired-lease reclamation.
+ * No live worker or HTTP mutation endpoint. Recovery requires a fenced executor attestation.
  */
 final class GlobalQueueStore
 {
@@ -155,6 +155,75 @@ final class GlobalQueueStore
             $event=$this->db->prepare('INSERT INTO global_queue_events(job_id,producer,event_type,progress_percent,phase,message,created_at) VALUES (?,?,?,?,?,?,?)');
             $event->execute([$id,$row['producer'],$percent===null?'heartbeat':'progress',$percent,$phase,$message,$now]);
             return ['job_id'=>$id,'lease_until'=>$now+$leaseSeconds,'event_id'=>(int)$this->db->lastInsertId(),'progress_percent'=>$percent];
+        });
+    }
+
+    /**
+     * Read-only inventory for a future independent supervisor. An expired lease is
+     * not evidence that its external process has stopped.
+     * No lease secrets are exposed in the returned rows.
+     */
+    public function expiredLeases(int $limit = 50): array
+    {
+        if ($limit < 1 || $limit > 100) {
+            throw new \InvalidArgumentException('invalid_expired_lease_limit');
+        }
+        $stmt = $this->db->prepare("SELECT id,producer,external_id,kind,resource_class,claim_generation,lease_until FROM global_queue_jobs WHERE state='running' AND lease_until < ? ORDER BY lease_until ASC,id ASC LIMIT ?");
+        $stmt->bindValue(1, time(), PDO::PARAM_INT);
+        $stmt->bindValue(2, $limit, PDO::PARAM_INT);
+        $stmt->execute();
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Recover a stopped executor only AFTER an independent authority attests
+     * that the previous execution was fenced/terminated. The attestation must
+     * be bound to this job and generation, not a generic boolean supplied by
+     * a producer. Retry budgets and automatic scheduling are separate work.
+     *
+     * @param \Closure(array): bool $attestStopped independent executor attestor
+     */
+    public function recoverExpired(int $id, int $expectedGeneration, \Closure $attestStopped): array
+    {
+        if ($id <= 0 || $expectedGeneration < 1) {
+            throw new \InvalidArgumentException('invalid_recovery_identity');
+        }
+
+        // Attestation may be slow: never hold a write lock across network I/O.
+        $candidate = $this->byId($id);
+        if ($candidate === null || $candidate['state'] !== 'running'
+            || (int)$candidate['claim_generation'] !== $expectedGeneration
+            || (int)$candidate['lease_until'] >= time()) {
+            throw new \DomainException('lease_not_expired_current');
+        }
+        $proof = [
+            'id' => (int)$candidate['id'],
+            'producer' => $candidate['producer'],
+            'external_id' => $candidate['external_id'],
+            'resource_class' => $candidate['resource_class'],
+            'claim_generation' => $expectedGeneration,
+            'lease_until' => (int)$candidate['lease_until'],
+        ];
+        if ($attestStopped($proof) !== true) {
+            throw new \DomainException('executor_not_attested_stopped');
+        }
+        return $this->transaction(function () use ($id, $expectedGeneration, $candidate): array {
+            $current = $this->byId($id);
+            if ($current === null || $current['state'] !== 'running'
+                || (int)$current['claim_generation'] !== $expectedGeneration
+                || (int)$current['lease_until'] >= time()
+                || !hash_equals((string)$candidate['lease_token'], (string)$current['lease_token'])) {
+                throw new \DomainException('recovery_generation_changed');
+            }
+            $now = time();
+            $stmt = $this->db->prepare("UPDATE global_queue_jobs SET state='queued',lease_token=NULL,lease_until=NULL,claim_generation=claim_generation+1,updated_at=? WHERE id=? AND state='running' AND claim_generation=? AND lease_token=? AND lease_until<?");
+            $stmt->execute([$now,$id,$expectedGeneration,$candidate['lease_token'],$now]);
+            if ($stmt->rowCount() !== 1) {
+                throw new \RuntimeException('recovery_conflict');
+            }
+            $event = $this->db->prepare("INSERT INTO global_queue_events(job_id,producer,event_type,progress_percent,phase,message,created_at) VALUES (?,?,'warning',NULL,'lease_recovery','executor_stopped_attested',?)");
+            $event->execute([$id,$current['producer'],$now]);
+            return $this->byId($id);
         });
     }
 
