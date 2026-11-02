@@ -10,9 +10,12 @@ final class InfrastructureStateContractTest extends TestCase
     {
         $source = file_get_contents(dirname(__DIR__, 2) . '/public/assets/ezs-infrastructure.js');
         self::assertIsString($source);
-        self::assertStringContainsString("'HTTP accessible'", $source);
-        self::assertStringContainsString("'HTTP en erreur'", $source);
-        self::assertStringContainsString("'HTTP ' + item.http_status + ' · redirection'", $source);
+        self::assertStringContainsString('function renderServiceBadge(group)', $source);
+        self::assertStringContainsString('serviceNative[group]', $source);
+        self::assertStringContainsString('serviceTransport[group]', $source);
+        self::assertStringContainsString("'En ligne'", $source);
+        self::assertStringContainsString("'En erreur'", $source);
+        self::assertStringNotContainsString("'HTTP accessible'", $source);
         self::assertStringNotContainsString("'Répond'", $source);
     }
 

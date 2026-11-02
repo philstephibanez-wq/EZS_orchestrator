@@ -7,6 +7,33 @@
         const $feedback = $('#dev-health-feedback');
         const $refresh = $('#refresh-dev-health');
         let pending = false;
+        // Snapshot fusion: an HTTP response alone never proves the native process is running.
+        const serviceTransport = {dev:null,lab:null,assistant:null};
+        const serviceNative = {dev:null,lab:null,assistant:null};
+        function renderServiceBadge(group) {
+            const native = serviceNative[group];
+            const transport = serviceTransport[group];
+            const http = transport ? transport.http : null;
+            const tcp = transport ? transport.tcp : null;
+            const explicitFailure = transport && transport.applicationHealthy === false;
+            const explicitHealth = transport && transport.applicationHealthy === true;
+            // Native STOPPED is authoritative, even when a stale HTTP proxy still responds.
+            const failed = native === 'STOPPED' || explicitFailure ||
+                (transport && http !== null && http >= 500) ||
+                (transport && http === null && tcp === false);
+            // Green means native process attested and front HTTP reachable, not full workflow health.
+            const reachable = native === 'RUNNING' && transport &&
+                http !== null && http >= 200 && http < 400;
+            const verified = !failed && reachable &&
+                (explicitHealth || transport.applicationHealthy !== false);
+            const label = failed ? 'En erreur' : verified ? 'En ligne' : '\u00c0 v\u00e9rifier';
+            const $badge = $('#state-' + group);
+            $badge.text(label).removeClass('text-bg-secondary text-bg-success text-bg-warning text-bg-danger')
+                .addClass(failed ? 'text-bg-danger' : verified ? 'text-bg-success' : 'text-bg-warning');
+            $badge.attr('title', 'Processus natif : ' + (native || 'non attest\u00e9') +
+                ' ; HTTP : ' + (http === null ? 'sans mesure' : http) +
+                ' ; sant\u00e9 fonctionnelle : ' + (explicitHealth ? 'attest\u00e9e' : explicitFailure ? 'en erreur' : 'non test\u00e9e'));
+        }
         function refresh() {
             if (pending) return;
             pending = true;
@@ -22,9 +49,11 @@
                     if (!key) return;
                     $('#tcp-'+key).text(item.tcp_listening ? 'Ouvert' : 'Fermé');
                     $('#http-'+key).text(item.http_status === null ? 'Sans réponse' : String(item.http_status));
-                    const label = item.http_status !== null ? ((item.http_status >= 500) ? 'HTTP en erreur' : (item.http_status >= 300 && item.http_status < 400) ? 'HTTP ' + item.http_status + ' · redirection' : 'HTTP accessible') : item.tcp_listening ? 'TCP seul' : 'Façade absente';
-                    const $badge = $('#state-'+key);
-                    $badge.text(label).removeClass('text-bg-secondary text-bg-success text-bg-warning').addClass(item.http_status >= 500 ? 'text-bg-warning' : item.http_status !== null ? 'text-bg-success' : item.tcp_listening ? 'text-bg-warning' : 'text-bg-secondary');
+                    serviceTransport[key] = {
+                        http:item.http_status, tcp:item.tcp_listening === true,
+                        applicationHealthy:item.application_healthy
+                    };
+                    renderServiceBadge(key);
                 });
                 if (labBackend) {
                     $('#lab-backend').text(labBackend.tcp_listening ? 'FastCGI TCP ouvert' : 'Arrêt / absent');
@@ -32,7 +61,13 @@
                 }
                 $feedback.text('Mesure DEV : ' + (data.timestamp_utc || 'récente'));
               })
-              .fail(function () { $feedback.text('Supervision DEV indisponible'); })
+              .fail(function () {
+                  Object.keys(serviceTransport).forEach(function(group) {
+                      serviceTransport[group] = null;
+                      renderServiceBadge(group);
+                  });
+                  $feedback.text('Supervision DEV indisponible');
+              })
               .always(function () { pending = false; $refresh.prop('disabled', false); });
         }
         function refreshBackend() {
@@ -109,12 +144,15 @@
                       csrf = '';
                       disableAll();
                       indicateUnavailable('réponse invalide');
+                      Object.keys(serviceNative).forEach(function(group) { serviceNative[group] = null; renderServiceBadge(group); });
                       $feedback.text('Pilotage DEV : permissions indisponibles (réponse invalide)');
                       return;
                   }
                   csrf = data.csrf;
                   Object.keys(controls).forEach(function(group) {
                       const state = data.groups[group] || {};
+                       serviceNative[group] = state.state === 'RUNNING' || state.state === 'STOPPED' ? state.state : null;
+                       renderServiceBadge(group);
                       const mode = state.state === 'RUNNING' && state.restart === true ? 'restart'
                           : state.state === 'STOPPED' && state.start === true ? 'start' : null;
                       const next = {state:state.state || 'UNVERIFIED',mode:mode,stop:state.stop === true};
@@ -149,6 +187,7 @@
                   csrf = '';
                   disableAll();
                   indicateUnavailable('HTTP ' + status + ' / ' + reason);
+                  Object.keys(serviceNative).forEach(function(group) { serviceNative[group] = null; renderServiceBadge(group); });
                   // Conserver le dernier libellé attesté. Ne pas convertir une panne API en STOPPED.
                   Object.keys(controls).forEach(function(group) {
                       $cardFor(group).attr('data-ezs-probe', 'unavailable');

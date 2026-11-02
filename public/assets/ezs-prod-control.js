@@ -47,12 +47,14 @@
          $mode.text(d.maintenance===true?'Activée':d.maintenance===false?'Mode normal':'Indéterminée');
          showMaintenance(typeof d.maintenance==='boolean'?d.maintenance:null);
          $edge.text(d.caddy_listening?'Écoute 8501':'Arrêté');
-         if (d.gateway_online && d.backend_ready) {
-           setStatus('Répond','success');
-         } else if (d.gateway_online) {
-           setStatus('Gateway active, backend indisponible','warning');
+         // Same user-facing service vocabulary as DEV, LAB and Assistant.
+         // Maintenance is a separate operational mode, not the service-health badge.
+         if (d.gateway_online === true && d.backend_ready === true) {
+           setStatus('En ligne','success');
+         } else if (d.gateway_online === false || (d.gateway_online === true && d.backend_ready === false)) {
+           setStatus('En erreur','danger');
          } else {
-           setStatus('Gateway absente','danger');
+           setStatus('À vérifier','warning');
          }
          capabilities={maintenance:!!d.actions.maintenance,normal:!!d.actions.normal};
          $normal.attr('title',d.note||'');
@@ -65,8 +67,8 @@
          // Never authorize an action from stale information.
          capabilities={maintenance:false,normal:false};setButtons();
          showMaintenance(null);
-         if (lastGood) setStatus('Statut non actualisé','warning');
-         else setStatus('État indisponible','secondary');
+         // Timeout is unknown health, not success and not a confirmed outage.
+         setStatus('À vérifier','warning');
        });
     }
     function ask(action){
@@ -91,7 +93,7 @@
         method:'POST',data:{confirmation:action==='normal'?'NORMAL':'MAINTENANCE'},
         headers:{'X-EZS-CSRF':token},timeout:30000
       }).done(function(d){
-        setStatus(d.result||'Commande exécutée','secondary');
+        setStatus('À vérifier','warning'); // Refresh will attest the new state.
         modal.hide();
       }).fail(function(xhr){
         const d=xhr.responseJSON||{};
