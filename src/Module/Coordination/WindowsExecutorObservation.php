@@ -5,10 +5,7 @@ namespace Ezs\Web\Module\Coordination;
 
 use Ezs\Web\Module\Infrastructure\WindowsProcessInventory;
 
-/**
- * Read-only local Windows observation for the strict attestor.
- * A missing PID is NOT proof that the original execution tree has stopped.
- */
+/** Read-only local Windows observation. Never infers complete termination. */
 final class WindowsExecutorObservation
 {
     public function __construct(
@@ -35,11 +32,13 @@ final class WindowsExecutorObservation
         } catch (\Throwable) {
             return ['status' => 'unknown', 'reason' => 'inventory_unavailable'];
         }
+
+        $byPid = [];
         foreach ($rows as $row) {
-            if ($row['pid'] !== $pid) {
-                continue;
-            }
-            if (!hash_equals($created, $row['created'])) {
+            $byPid[$row['pid']] = $row;
+        }
+        if (isset($byPid[$pid])) {
+            if (!hash_equals($created, $byPid[$pid]['created'])) {
                 return ['status' => 'unknown', 'reason' => 'pid_reused_or_timestamp_mismatch'];
             }
             return [
@@ -50,7 +49,21 @@ final class WindowsExecutorObservation
                 'instance_id' => $instance,
             ];
         }
-        // No process inventory snapshot can establish whether a descendant survived.
+
+        // A child may outlive its parent. Its ParentProcessId is a diagnostic
+        // clue, NOT proof of ownership (PIDs may have been reused).
+        foreach ($rows as $row) {
+            $seen = [];
+            $parent = $row['parent'];
+            while ($parent > 0 && !isset($seen[$parent])) {
+                if ($parent === $pid) {
+                    return ['status' => 'unknown', 'reason' => 'possible_descendant_still_running'];
+                }
+                $seen[$parent] = true;
+                $parent = $byPid[$parent]['parent'] ?? 0;
+            }
+        }
+        // A snapshot without a root/descendant cannot establish a stopped tree.
         return ['status' => 'unknown', 'reason' => 'pid_missing_tree_unverified'];
     }
 
