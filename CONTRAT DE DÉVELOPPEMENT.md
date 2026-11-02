@@ -361,3 +361,47 @@ Cette règle s'applique à **tous les modules et applications EZS en développem
 - Vérifier séparément : fidélité du JSON et de ses types ; provenance et horodatage ; expurgation des secrets ; affichage des erreurs de collecte ; absence d'inférence ou de transformation dans le diagnostic ; copie/export identiques à l'affichage.
 - Vérifier les transitions opérationnelles ONLINE/OFFLINE/ERREUR par attestation réelle quand elles impliquent le cycle de vie des services. Une suite PHPUnit verte ou une réponse HTTP 200 **ne prouve pas** un arrêt natif.
 - Ne jamais modifier les preuves d'incident ni les intentions persistées pour rendre un badge conforme. Un changement de contrat n'autorise pas à lui seul une modification des processus, de PROD ou des données persistantes.
+
+## CONTRAT TRANSVERSAL — Supervision fédérée, sondes système et REST
+
+Cette section s'applique à EZS_orchestrator, EZStudio_lab, EZStudioLab_assistant, EZScore DEV et à son déploiement PROD, ainsi qu'à toute application rejoignant l'écosystème EZS. Elle complète la section 16 (disponibilité autonome) et le contrat de diagnostic brut. En cas de divergence, les garanties d'isolation, d'attestation et de sécurité des processus restent prioritaires.
+
+### 1. Propriété et frontières de responsabilité
+
+- Le watchdog Windows, indépendant de ROOT, surveille et restaure **exclusivement** la disponibilité du socle ROOT Orchestrator, en respectant l'intention persistée et toutes les attestations de propriété. Il ne supervise ni ne recycle les applications clientes.
+- EZS_orchestrator assure le pilotage autorisé des **applications comme unités** : inventaire, disponibilité système, interrogation REST, conservation des preuves et commandes de cycle de vie explicitement permises. Il ne réimplémente pas leurs règles métier ni leur supervision interne.
+- Chaque application est l'unique propriétaire de ses composants internes (frontend, backend, processus auxiliaires, workers, files, bases, moteurs scientifiques, etc.), de leurs états, de leurs diagnostics et de leurs politiques de récupération. L'Orchestrator ne termine pas un worker interne parce qu'une API signale `DEGRADED`.
+- L'existence d'un frontend et d'un backend ne crée pas deux propriétaires de supervision. Une application fournit une vue cohérente de son périmètre, y compris lorsqu'un composant est indisponible. Les contrats applicatifs peuvent préciser plusieurs sondes sans transférer la propriété des composants.
+- Le mode maintenance et les intentions `RUNNING`/`STOPPED` sont indépendants des états de santé. Un `STOPPED` volontaire attesté n'autorise ni sonde déclenchant un démarrage ni récupération implicite. Aucune action implicite sur PROD.
+
+### 2. Deux catégories de sondes complémentaires
+
+- **Sonde système** : preuve native bornée de l'identité du processus, de son chemin, de sa commande, de sa date de création et, quand pertinent, de la connectivité TCP du port attendu. Les relevés WMI/CIM, TCP et netstat restent des observations distinctes. Un ICMP `ping` vers une adresse n'atteste jamais l'état d'un port ni d'une application.
+- **Sonde REST** : requête HTTP bornée vers un endpoint applicatif documenté, mesurant la disponibilité fonctionnelle et retournant les états de supervision que l'application peut attester. Une réponse HTTP du seul reverse proxy (`502`, `503` ou autre) n'établit pas la santé de l'application.
+- La disponibilité opérationnelle ne se déduit pas de la seule présence d'un PID, d'un port ouvert ou d'un HTTP `200` ne testant rien d'applicatif. Le code HTTP, le corps JSON valide et les critères du contrat applicatif doivent être évalués explicitement dans la couche opérationnelle.
+- Toute divergence (TCP ouvert / REST indisponible, REST disponible / attestation native impossible, données périmées) est conservée telle quelle et signalée comme anomalie, sans fusion ou correction heuristique du dump.
+
+### 3. API REST de santé et statut
+
+- `GET /health` (ou chemin équivalent versionné et documenté) : sonde **légère**, bornée, sans effets de bord, ne déclenchant ni analyse lourde, ni migration, ni réparation, ni démarrage de worker. Elle atteste le fonctionnement minimal réel de l'application et fournit un résultat interprétable par la supervision. Une absence de résultat est une erreur de collecte, jamais un `OK` présumé.
+- `GET /api/status` (ou chemin équivalent déclaré) : réponse JSON structurée, exposant les informations **nécessaires et disponibles** à la supervision globale : identité, version, instance/environnement, santé, activité, composants, anomalies et horodatage de la mesure. Les composants facultatifs et les états inconnus sont représentés honnêtement, sans valeur inventée.
+- La santé (`OK`, `DEGRADED`, `ERROR`, `UNKNOWN`) est distincte de l'activité (`IDLE`, `BUSY`, `PAUSED`, `UNKNOWN`). `BUSY` n'est pas une panne ; `DEGRADED` ne donne pas automatiquement le droit de redémarrer quoi que ce soit.
+- Les états applicatifs détaillés sont des **faits déclarés par l'application**, pas des attestations natives produites par l'Orchestrator. Les causes et métriques de workers/queues relèvent de l'application.
+- Chaque application documente le schéma et la version de son contrat REST, les champs requis et optionnels, leurs types, les éventuelles unités et la signification des erreurs HTTP. Les consommateurs acceptent explicitement les versions compatibles ; pas de fallback silencieux.
+- Les réponses doivent être bornées en taille et en temps, sécurisées sur le réseau local ou par authentification adaptée, et expurgées des tokens, cookies, secrets, chemins personnels sensibles et données métier privées. Une sonde ne doit pas provoquer de charge notable ni d'effet secondaire.
+
+### 4. Collecte, journaux et restitution
+
+- Watchdog et Orchestrator journalisent **séparément** les observations, décisions et actions avec heure UTC, ID de cycle, application/instance, provenance, durée, code HTTP, statut de collecte, résultat de l'attestation, identité attestée, erreur éventuelle et statut final.
+- Conserver une trace durable lisible machine (JSONL ou équivalent documenté) et les preuves d'incident, sans dépendance à `H:\temp` et sans suppression automatique des traces nécessaires. La rotation, si activée, préserve les incidents utiles.
+- Le résultat de cycle distingue explicitement `HEALTHY`, `RECOVERED`, `DEGRADED`, `FAILED` : `RECOVERED` requiert une **nouvelle sonde REST réussie après l'action**. Un redémarrage de processus sans rétablissement HTTP reste un échec.
+- Le code retour du watchdog, notamment vers le Planificateur de tâches, distingue succès, dégradation non récupérable et échec technique selon une table documentée. Une panne de ROOT ne peut pas être déclarée réussie par défaut parce que le script s'est exécuté.
+- Les dumps bruts système et REST restent **distincts**, avec enveloppes de métadonnées de collecte, sans inférence ni réécriture des valeurs dans le volet diagnostic. Les agrégations et badges appartiennent exclusivement à la couche opérationnelle (ONLINE/OFFLINE/ERREUR).
+
+### 5. Récupération, tests et déploiement
+
+- Le watchdog tente une récupération ROOT **seulement** après preuve de l'identité, de la propriété et des préconditions de sécurité. PID étranger/réutilisé, port sans propriétaire attribuable, observation incohérente et intention ambiguë imposent un refus journalisé ; pas de boucle agressive.
+- L'Orchestrator ne répare pas directement les composants internes des applications. Il conserve leur état déclaré et peut déclencher exclusivement les opérations globales explicitement autorisées, avec préflight, respect de l'intention et isolation PROD.
+- Les tests couvrent : système OK / REST OK ; système OK / REST KO ; système KO / REST KO ; système ambigu / REST OK ; retour REST invalide ou périmé ; application `BUSY` ; application `DEGRADED` ; `STOPPED` volontaire ; port/PID étranger ; échec puis réussite de récupération ; absence d'effet sur PROD.
+- Les tests unitaires sont indépendants des services réels. Une recette MAIN prouve séparément la sonde système, la réponse REST applicative, les journaux, l'absence de redémarrage abusif et l'absence d'impact PROD. Une suite de tests verte ne prouve pas la reprise opérationnelle.
+- **Ordre du chantier en cours** : restaurer et valider le watchdog ROOT et la disponibilité HTTP de l'Orchestrator ; ensuite seulement contractualiser et intégrer les endpoints de supervision des autres applications. Le présent amendement ne constitue aucune autorisation d'activer immédiatement des sondes ou actions sur PROD.
