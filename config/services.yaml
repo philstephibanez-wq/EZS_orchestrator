@@ -19,3 +19,5 @@ services:
             - '../src/Module/Coordination/SyntheticCpuQueueRunner.php'
             # Explicit isolated synthetic child exercise; never autostart a process.
             - '../src/Module/Coordination/SyntheticChildProcessRunner.php'
+            # Read-only WMI observation needs an explicit trusted local node identity.
+            - '../src/Module/Coordination/WindowsExecutorObservation.php'
