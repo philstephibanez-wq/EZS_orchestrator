@@ -83,13 +83,21 @@ final class GlobalQueueStore
         });
     }
 
-    /** Atomic claim for a compatible worker; never steals a running lease. */
+    /** Atomic claim; never shares a GPU slot and never steals a running lease. */
     public function claim(string $resourceClass, int $leaseSeconds = 120): ?array
     {
         if (!in_array($resourceClass, ['cpu','gpu'],true) || $leaseSeconds < 5 || $leaseSeconds > 3600) {
             throw new \InvalidArgumentException('invalid_claim');
         }
         return $this->transaction(function () use ($resourceClass,$leaseSeconds): ?array {
+            // The writer lock protects the slot check and the claim as one decision.
+            // An expired lease still occupies the slot until an explicit, fenced recovery.
+            if ($resourceClass === 'gpu') {
+                $busy = $this->db->query("SELECT 1 FROM global_queue_jobs WHERE resource_class='gpu' AND state='running' LIMIT 1");
+                if ($busy->fetchColumn() !== false) {
+                    return null;
+                }
+            }
             $q=$this->db->prepare("SELECT id FROM global_queue_jobs WHERE state='queued' AND resource_class=? ORDER BY priority DESC,created_at ASC,id ASC LIMIT 1");
             $q->execute([$resourceClass]);$id=$q->fetchColumn();
             if ($id===false) return null;
@@ -119,11 +127,7 @@ final class GlobalQueueStore
         });
     }
 
-
-    /**
-     * Worker-owned progress or heartbeat. No fabricated percentage or business interpretation.
-     * Heartbeats extend leases; progress remains monotonic (when supplied).
-     */
+    /** Worker-owned progress or heartbeat; never fabricate a percentage. */
     public function heartbeat(int $id, string $token, int $leaseSeconds = 120, ?int $percent = null, ?string $phase = null, ?string $message = null): array
     {
         if ($id <= 0 || !preg_match('/^[a-f0-9]{64}$/D', $token) || $leaseSeconds < 5 || $leaseSeconds > 3600) {
