@@ -13,13 +13,13 @@ final class DevGroupLoading053Test extends TestCase
 
         self::assertStringContainsString('$buttons.removeAttr(\'title\').prop(\'disabled\', true)', $js);
         self::assertStringContainsString("controls[group].start.text('État inconnu')", $js);
-        self::assertStringContainsString("if (acting || groupsPending) return", $js);
+        self::assertStringContainsString('if (groupPending[group] || groupActing[group]) return;', $js);
         self::assertStringContainsString("state.state === 'RUNNING' && state.restart === true", $js);
         self::assertStringContainsString("state.state === 'STOPPED' && state.start === true", $js);
-        self::assertStringContainsString("controls[group].start.prop('disabled', mode === null)", $js);
-        self::assertStringContainsString("controls[group].stop.prop('disabled', next.stop !== true)", $js);
-        self::assertStringContainsString('$cardFor(group).attr(\'data-ezs-probe\', \'unavailable\')', $js);
-        self::assertStringContainsString("disableAll();", $js);
+        self::assertStringContainsString('$start.prop(\'disabled\',mode === null)', $js);
+        self::assertStringContainsString('$stop.prop(\'disabled\',next.stop !== true)', $js);
+        self::assertStringContainsString('$cardFor(group).attr(\'data-ezs-probe\',\'unavailable\')', $js);
+        self::assertStringContainsString("failGroup(group,'réponse invalide')", $js);
         self::assertStringNotContainsString("dev-groups/'+group+'/restart", $js);
     }
 }

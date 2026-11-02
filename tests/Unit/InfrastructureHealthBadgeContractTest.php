@@ -17,7 +17,9 @@ final class InfrastructureHealthBadgeContractTest extends TestCase
         self::assertStringContainsString("'ONLINE'", $js);
         self::assertStringContainsString("'ERREUR'", $js);
         self::assertStringContainsString("'OFFLINE'", $js);
-        self::assertStringContainsString('serviceNative[group] = null; serviceDesired[group] = null; renderServiceBadge(group);', $js);
+        self::assertStringContainsString('serviceNative[group] = null;', $js);
+        self::assertStringContainsString('serviceDesired[group] = null;', $js);
+        self::assertStringContainsString('renderServiceBadge(group);', $js);
         self::assertStringContainsString('serviceTransport[group] = null;', $js);
         self::assertStringNotContainsString("'HTTP accessible'", $js);
     }

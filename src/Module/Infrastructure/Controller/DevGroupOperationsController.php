@@ -86,6 +86,28 @@ final class DevGroupOperationsController
         }
     }
 
+
+    #[Route('/api/v2/infrastructure/dev-group/{group}', name: 'ezs_dev_group_read_single', requirements: ['group' => 'dev|lab|assistant'], methods: ['GET'])]
+    public function readGroup(Request $request, string $group): JsonResponse
+    {
+        if (!$this->allowedRequest($request)) return new JsonResponse(['error' => 'forbidden'], 403);
+        try {
+            $lifecycle = new NativeWindowsLifecycle();
+            $states = $lifecycle->status();
+            return new JsonResponse([
+                'schema' => 'ezs.dev_group_single.v1',
+                'group' => $group,
+                'permission' => array_merge(
+                    self::permission($states, $group),
+                    ['desired' => (new DesiredServiceState())->get($group)]
+                ),
+                'csrf' => $this->token(),
+            ], 200, ['Cache-Control' => 'no-store']);
+        } catch (\Throwable $failure) {
+            return new JsonResponse(['error' => 'group_inventory_unavailable'], 503, ['Cache-Control' => 'no-store']);
+        }
+    }
+
     #[Route('/api/v2/infrastructure/dev-groups/{group}/{action}', name: 'ezs_dev_groups_action', requirements: ['group' => 'dev|lab|assistant', 'action' => 'start|stop|restart'], methods: ['POST'])]
     public function action(Request $request, string $group, string $action): JsonResponse
     {

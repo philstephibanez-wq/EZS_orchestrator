@@ -24,10 +24,10 @@ final class InfrastructureStateContractTest extends TestCase
     {
         $source = file_get_contents(dirname(__DIR__, 2) . '/public/assets/ezs-infrastructure.js');
         self::assertIsString($source);
-        self::assertStringContainsString('function disableAll()', $source);
-        self::assertStringContainsString('indicateUnavailable(', $source);
-        self::assertStringContainsString("data-ezs-probe', 'unavailable'", $source);
-        self::assertStringContainsString("data-ezs-probe', 'verified'", $source);
+        self::assertStringContainsString('function failGroup(group, reason)', $source);
+        self::assertStringContainsString("failGroup(group,(xhr && xhr.status) || textStatus || 'réseau')", $source);
+        self::assertStringContainsString("data-ezs-probe','unavailable'", $source);
+        self::assertStringContainsString("data-ezs-probe','verified'", $source);
     }
 
     public function testAssetCacheIsVersioned(): void

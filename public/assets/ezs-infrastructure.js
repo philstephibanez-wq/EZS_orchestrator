@@ -88,7 +88,7 @@
         // Group control uses the existing buttons, without altering PROD or the Orchestrator root.
         const controls = {};
         let csrf = '';
-        let acting = false;
+        // No global action flag: one inflight operation per group.
         const modes = {dev:null,lab:null,assistant:null};
         // La vérification native peut prendre plusieurs secondes ; ne jamais simuler un état prêt.
         const groupRequestStart = {dev:0, lab:0, assistant:0};
@@ -133,71 +133,68 @@
             });
         }
         function $cardFor(group) { return $(groups[group]).closest('.ezs-server-card'); }
-        function refreshGroups() {
-            if (acting || groupsPending) return;
-            groupsPending = true;
-            const epoch = ++groupsEpoch;
+        // Each group owns its own request, state and failure boundary.
+        const groupPending = {dev:false,lab:false,assistant:false};
+        const groupEpoch = {dev:0,lab:0,assistant:0};
+        const groupActing = {dev:false,lab:false,assistant:false};
+        function failGroup(group, reason) {
+            controls[group].start.prop('disabled', true);
+            controls[group].stop.prop('disabled', true);
+            $cardFor(group).attr('data-ezs-probe','unavailable');
+            serviceNative[group] = null;
+            serviceDesired[group] = null;
+            renderServiceBadge(group);
+            controls[group].start.attr('title', 'Permissions indisponibles : ' + reason);
+            controls[group].stop.attr('title', 'Permissions indisponibles : ' + reason);
+        }
+        function refreshGroup(group) {
+            if (groupPending[group] || groupActing[group]) return;
+            groupPending[group] = true;
+            const epoch = ++groupEpoch[group];
             const startedAt = window.performance.now();
-            $.ajax({url:'/api/v2/infrastructure/dev-groups',method:'GET',dataType:'json',timeout:10000,cache:false})
-              .done(function(data) {
-                  if (acting || epoch !== groupsEpoch) return;
-                  if (!data || data.schema !== 'ezs.dev_groups.v1' || !data.groups || !data.csrf) {
-                      csrf = '';
-                      disableAll();
-                      indicateUnavailable('réponse invalide');
-                      Object.keys(serviceNative).forEach(function(group) { serviceNative[group] = null; serviceDesired[group] = null; renderServiceBadge(group); });
-                      $feedback.text('Pilotage DEV : permissions indisponibles (réponse invalide)');
-                      return;
-                  }
-                  csrf = data.csrf;
-                  Object.keys(controls).forEach(function(group) {
-                      const state = data.groups[group] || {};
-                       serviceNative[group] = state.state === 'RUNNING' || state.state === 'STOPPED' || state.state === 'PARTIAL' ? state.state : null;
-                       serviceDesired[group] = state.desired === 'RUNNING' || state.desired === 'STOPPED' ? state.desired : null;
-                       renderServiceBadge(group);
-                      const mode = state.state === 'RUNNING' && state.restart === true ? 'restart'
-                          : state.state === 'STOPPED' && state.start === true ? 'start' : null;
-                      const next = {state:state.state || 'UNVERIFIED',mode:mode,stop:state.stop === true};
-                      const previous = rendered[group];
-                      modes[group] = mode;
-                      if (!previous || previous.state !== next.state || previous.mode !== next.mode || previous.stop !== next.stop) {
-                          const $start = controls[group].start;
-                          const $stop = controls[group].stop;
-                          $start.text(mode === 'restart' ? 'Redémarrer' : mode === 'start' ? 'Démarrer' : 'Indisponible');
-                          $start.removeAttr('aria-busy').attr('aria-label', mode === 'restart' ? 'Redémarrer ' + group : mode === 'start' ? 'Démarrer ' + group : 'Commande indisponible pour ' + group);
-                          $stop.attr('aria-label', 'Arrêter ' + group);
-                          $cardFor(group).attr('data-ezs-state', next.state);
-                          $start.toggleClass('btn-outline-primary', mode !== null)
-                              .toggleClass('btn-outline-secondary', mode === null);
-                          $stop.toggleClass('btn-outline-danger', next.stop)
-                              .toggleClass('btn-outline-secondary', !next.stop);
-                          $start.attr('title', 'État natif : ' + next.state);
-                          $stop.attr('title', 'État natif : ' + next.state);
-                          rendered[group] = next;
-                      }
-                      // Droits réévalués à chaque résultat attesté, sans changer les libellés.
-                      // Apply the permission returned by the same verified native snapshot.
-                      // PARTIAL is intentionally stoppable when the API reports stop=true.
-                      controls[group].start.prop('disabled', mode === null);
-                      controls[group].stop.prop('disabled', next.stop !== true);
-                      $cardFor(group).attr('data-ezs-stop-authorized', next.stop ? 'true' : 'false');
-                      $cardFor(group).attr('data-ezs-probe', 'verified');
-                      $cardFor(group).attr('data-ezs-state-probe-ms', String(Math.round(window.performance.now() - startedAt)));
-                  });
-              }).fail(function(xhr, textStatus) {
-                  if (acting || epoch !== groupsEpoch) return;
-                  const status = xhr && xhr.status ? String(xhr.status) : (textStatus || 'réseau');
-                  const reason = xhr && xhr.responseJSON && xhr.responseJSON.error ? String(xhr.responseJSON.error) : 'réponse indisponible';
-                  $feedback.text('Pilotage DEV : permissions indisponibles (HTTP ' + status + ' / ' + reason + ')');
-                  csrf = '';
-                  disableAll();
-                  indicateUnavailable('HTTP ' + status + ' / ' + reason);
-                  Object.keys(serviceNative).forEach(function(group) { serviceNative[group] = null; serviceDesired[group] = null; renderServiceBadge(group); });
-                  // Conserver le dernier libellé attesté. Ne pas convertir une panne API en STOPPED.
-                  Object.keys(controls).forEach(function(group) {
-                      $cardFor(group).attr('data-ezs-probe', 'unavailable');
-                  });
-              }).always(function() { groupsPending = false; });
+            $.ajax({
+                url:'/api/v2/infrastructure/dev-group/'+group,
+                method:'GET', dataType:'json', timeout:15000, cache:false
+            }).done(function(data) {
+                if (epoch !== groupEpoch[group] || groupActing[group]) return;
+                if (!data || data.schema !== 'ezs.dev_group_single.v1' ||
+                    data.group !== group || !data.permission || !data.csrf) {
+                    failGroup(group,'réponse invalide');
+                    return;
+                }
+                csrf = data.csrf;
+                const state = data.permission;
+                serviceNative[group] = ['RUNNING','STOPPED','PARTIAL'].includes(state.state) ? state.state : null;
+                serviceDesired[group] = ['RUNNING','STOPPED'].includes(state.desired) ? state.desired : null;
+                renderServiceBadge(group);
+                const mode = state.state === 'RUNNING' && state.restart === true ? 'restart'
+                    : state.state === 'STOPPED' && state.start === true ? 'start' : null;
+                const next = {state:state.state || 'UNVERIFIED',mode:mode,stop:state.stop === true};
+                const $start = controls[group].start;
+                const $stop = controls[group].stop;
+                modes[group] = mode;
+                $start.text(mode === 'restart' ? 'Redémarrer' : mode === 'start' ? 'Démarrer' : 'Indisponible');
+                $start.attr('aria-label', mode === 'restart' ? 'Redémarrer '+group : mode === 'start' ? 'Démarrer '+group : 'Commande indisponible pour '+group);
+                $stop.attr('aria-label','Arrêter '+group);
+                $cardFor(group).attr('data-ezs-state',next.state);
+                $start.toggleClass('btn-outline-primary',mode !== null)
+                      .toggleClass('btn-outline-secondary',mode === null);
+                $stop.toggleClass('btn-outline-danger',next.stop)
+                     .toggleClass('btn-outline-secondary',!next.stop);
+                $start.prop('disabled',mode === null);
+                $stop.prop('disabled',next.stop !== true);
+                $cardFor(group).attr('data-ezs-stop-authorized',next.stop ? 'true':'false')
+                    .attr('data-ezs-probe','verified')
+                    .attr('data-ezs-state-probe-ms',String(Math.round(window.performance.now()-startedAt)));
+            }).fail(function(xhr,textStatus) {
+                if (epoch !== groupEpoch[group] || groupActing[group]) return;
+                failGroup(group,(xhr && xhr.status) || textStatus || 'réseau');
+            }).always(function() {
+                groupPending[group] = false;
+            });
+        }
+        function refreshGroups() {
+            Object.keys(controls).forEach(function(group) { refreshGroup(group); });
         }
         // EZS_DIALOG_CONFIRM_V1: no window.confirm/alert/prompt or OS message box.
         function confirmEzs(message) {
@@ -245,15 +242,16 @@
         async function action(group, verb) {
             if (!controls[group]) return;
             const button = verb === 'stop' ? controls[group].stop : controls[group].start;
-            if (acting || !csrf || !button || button.prop('disabled')) return;
+            if (groupActing[group] || !csrf || !button || button.prop('disabled')) return;
             const label = {dev:'EZScore DEV',lab:'EZStudio LAB',assistant:'Assistant'}[group];
             const confirmation = verb === 'stop' ?
                 'Arrêter les processus natifs de '+label+' ? Les travaux en cours peuvent être interrompus. Les autres groupes et l’IA restent inchangés.' :
                 verb === 'restart' ? 'Redémarrer les processus natifs de '+label+' ? Les travaux en cours peuvent être interrompus. Si la relance échoue, le groupe peut rester arrêté. PROD et les autres groupes restent inchangés.' :
                 'Démarrer uniquement les processus natifs de '+label+' ?';
             if (!(await confirmEzs(confirmation))) return;
-            acting = true;
-            disableAll();
+            groupActing[group] = true;
+            controls[group].start.prop('disabled', true);
+            controls[group].stop.prop('disabled', true);
             $feedback.text((verb === 'start' ? 'Démarrage' : verb === 'restart' ? 'Redémarrage' : 'Arrêt')+' '+label+' en cours…');
             $.ajax({
                 url:'/api/v2/infrastructure/dev-groups/'+group+'/'+verb,
@@ -268,8 +266,8 @@
                 const message = xhr.responseJSON && xhr.responseJSON.error ? xhr.responseJSON.error : 'commande indisponible';
                 $feedback.text('Commande '+label+' refusée : '+message);
             }).always(function() {
-                acting = false;
-                refresh(); refreshBackend(); refreshGroups();
+                groupActing[group] = false;
+                refreshGroup(group);
             });
         }
         $('.ezs-server-card .ezs-server-actions a').on('click', function(event) {
