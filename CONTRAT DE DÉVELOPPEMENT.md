@@ -1,4 +1,4 @@
-# CONTRAT DE DÉVELOPPEMENT — MÉTHODE SYSTÉMATIQUE ET OBLIGATOIRE
+# CONTRAT DE DÉVELOPPEMENT DE LA PLATEFORME EZS — MÉTHODE SYSTÉMATIQUE ET OBLIGATOIRE
 
 **Instruction permanente :** appliquer les règles suivantes à chaque intervention de développement, correction, refactorisation, migration ou livraison, sans exception implicite.
 
@@ -405,3 +405,38 @@ Cette section s'applique à EZS_orchestrator, EZStudio_lab, EZStudioLab_assistan
 - Les tests couvrent : système OK / REST OK ; système OK / REST KO ; système KO / REST KO ; système ambigu / REST OK ; retour REST invalide ou périmé ; application `BUSY` ; application `DEGRADED` ; `STOPPED` volontaire ; port/PID étranger ; échec puis réussite de récupération ; absence d'effet sur PROD.
 - Les tests unitaires sont indépendants des services réels. Une recette MAIN prouve séparément la sonde système, la réponse REST applicative, les journaux, l'absence de redémarrage abusif et l'absence d'impact PROD. Une suite de tests verte ne prouve pas la reprise opérationnelle.
 - **Ordre du chantier en cours** : restaurer et valider le watchdog ROOT et la disponibilité HTTP de l'Orchestrator ; ensuite seulement contractualiser et intégrer les endpoints de supervision des autres applications. Le présent amendement ne constitue aucune autorisation d'activer immédiatement des sondes ou actions sur PROD.
+
+## CONTRAT DE PLATEFORME EZS — Socle technologique et responsabilités transversales
+
+### Périmètre normatif et synchronisation
+
+La **Plateforme EZS** regroupe exactement quatre dépôts de développement : `EZS_orchestrator`, `EZScore` (source DEV, dont PROD est un déploiement), `EZStudio_lab` et `EZStudioLab_assistant`. Le contrat de plateforme est **identique** dans les quatre dépôts ; leurs fichiers `VERSION`, cycles de publication, configurations et métiers demeurent propres à chacun. Toute modification transversale exige l'audit puis la propagation explicite aux quatre dépôts, avec suivi de convergence et vérification des écarts locaux avant pull, merge ou remplacement. Aucune synchronisation documentaire n'autorise un déploiement PROD.
+
+### Standard technique commun
+
+- **Web et architecture** : PHP 8.5 et Symfony maintenu ; organisation canonique `src/`, `config/`, `templates/`, `public/`, `assets/` si requis, `tests/`, `var/`, `migrations/` si nécessaire ; une responsabilité unique pour chaque service, route et composant.
+- **Interface** : Twig pour les vues, jQuery et Bootstrap pour l'interface standard ; libellés français et encodage UTF-8 sans BOM ; aucun dialogue natif interdit par le contrat.
+- **Asynchrone et temps** : Symfony Messenger pour les files et handlers lorsque des tâches asynchrones sont nécessaires ; Symfony Clock pour une gestion injectable et testable du temps ; Scheduler uniquement lorsque l'application a un besoin de planification. Transport, retry, échecs, idempotence et persistance sont explicitement contractualisés. Ne pas créer d'ordonnanceur ou de queue parallèle inutile.
+- **Tests** : PHPUnit, tests de contrat et d'intégration indépendants des états réels ; mocks/injections de l'horloge et des transports ; scénarios de disponibilité, d'échec, de non-régression et d'isolement. Les tests verts ne remplacent pas une recette opérationnelle.
+- **Python** : seulement dans les applications qui en ont besoin pour l'IA, les moteurs scientifiques et les workers ; environnement virtuel, dépendances, limites de ressources, messages, logs et cycle de vie sous la responsabilité exclusive de l'application propriétaire. Aucun moteur métier Python déplacé dans l'Orchestrator.
+- **Infrastructure** : mêmes principes de configuration séparée par environnement, supervision, santé, isolation des ports/processus, sécurité et secrets, démarrage/arrêt, journalisation, sauvegarde, récupération et diagnostic. Standard commun ne signifie ni instance partagée non maîtrisée ni installation de composants inutiles.
+
+### Contrats de santé et supervision fédérée
+
+- Le **watchdog Windows indépendant** assure exclusivement la disponibilité de ROOT : contrôle système (identité native, port TCP), santé HTTP applicative, récupération sûre et bornée, puis attestation HTTP finale. Un processus vivant ou un port ouvert ne suffit pas. Aucun impact PROD.
+- L'**Orchestrator** collecte, conserve et expose l'état global de chaque application en respectant son intention persistée et son mode maintenance. Il n'invente pas d'état interne, ne démarre pas un service volontairement STOPPED et ne répare pas directement les workers, frontend ou backend des applications.
+- **Chaque application** pilote et répare ses propres frontend, backend, workers, files et dépendances. Elle expose un endpoint léger de disponibilité (`GET /health` ou équivalent documenté) et un endpoint de supervision détaillée (`GET /api/status` ou équivalent documenté), protégés selon la sensibilité des informations.
+- Le **ping système** atteste la présence et l'identité du processus ainsi que la disponibilité TCP pertinente. Le **ping REST** confirme la santé applicative et restitue les informations de supervision nécessaires : identité, version, environnement, santé, activité, composants internes, anomalies, mesures disponibles et horodatage. `BUSY` n'est jamais une erreur. Un échec REST n'est pas transformé en état métier déduit.
+- Chaque application reste seule propriétaire de la signification de ses états et du détail de ses composants. Le panneau de diagnostic de la plateforme affiche chaque réponse source en JSON brut expurgé et horodaté, séparément de l'observation système ; les indicateurs synthétiques appartiennent à la couche opérationnelle.
+
+### Logs, diagnostic et preuve de fonctionnement
+
+- Chaque watchdog et application produit des **journaux structurés durables** (UTC, source, version, instance, identifiant de corrélation, contrôle, durée, état brut, erreur réelle, action et résultat). Les fichiers de fonctionnement sont dans `var/log` ou l'emplacement canonique non versionné de l'application ; les preuves ne sont jamais supprimées automatiquement pour masquer un incident.
+- Le **panneau Twig de diagnostic** de chaque application présente des dumps JSON fidèles, indentés, copiables et exportables, avec provenance et métadonnées de collecte séparées, expurgation déterministe des secrets et absence d'inférence. Les diagnostics sont en lecture seule ; les commandes opérationnelles sont distinctes.
+- Les tentatives de récupération consignent le résultat **avant/après**. HTTP 502, timeout, port étranger, identité ambiguë ou impossibilité d'attestation sont des échecs/alertes documentés, jamais des succès implicites. Les tâches de supervision produisent un résultat exploitable par l'ordonnanceur, sans boucle agressive.
+- Les recettes de plateforme couvrent disponibilité système et REST, états sains/dégradés/occupés, arrêt intentionnel, pannes internes déclarées, timeouts, port/PID étranger, redémarrage sûr, préservation des journaux et **absence d'interférence DEV/LAB/Assistant/PROD**.
+
+### Gouvernance des changements
+
+Le présent chapitre définit la **norme cible**, sans prétendre que chaque application y est déjà conforme. Les écarts constatés sont tracés dans des issues, traités par livraisons ciblées avec tests et sans réécriture simultanée des moteurs métier. Chaque dépôt conserve sa version canonique et ses conventions de commit ; tout correctif transversal est audité sur les quatre dépôts avant publication. Ordre de chantier en cours : restaurer ROOT par son watchdog et démontrer la disponibilité HTTP, puis implémenter progressivement les endpoints et tableaux de supervision des autres applications.
+
