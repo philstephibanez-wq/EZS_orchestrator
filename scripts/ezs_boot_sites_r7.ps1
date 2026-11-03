@@ -1,76 +1,141 @@
+# R8: a web server bootstrap is a single platform operation. No per-site PID lifecycle.
 [CmdletBinding()]
 param([Parameter(Mandatory=$true)][ValidateSet('Preflight','Boot','HardStatus')][string]$Action)
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $root='H:\EZS_orchestrator'
-$adapter=Join-Path $root 'scripts\ezs_platform_control.ps1'
-$maintenance=Join-Path $root 'runtime\supervision\prod-maintenance-mode-r6b.json'
-$lockDir=Join-Path $root 'runtime\supervision'
-$logFile=Join-Path $lockDir 'site-boot-r7.jsonl'
-$utf8=New-Object System.Text.UTF8Encoding($false)
-if (!(Test-Path -LiteralPath $lockDir -PathType Container)){New-Item -ItemType Directory -Path $lockDir -Force|Out-Null}
-$mutex=New-Object Threading.Mutex($false,'Local\EZS_SITE_BOOT_R7')
+$exe='H:\FRANKENPHP\bin\frankenphp.exe'
+$modeFile=Join-Path $root 'runtime\supervision\prod-maintenance-mode-r6b.json'
+$logDir=Join-Path $root 'runtime\supervision'
+$logFile=Join-Path $logDir 'site-boot-r8.jsonl'
+$utf8=New-Object Text.UTF8Encoding($false)
+$mutex=New-Object Threading.Mutex($false,'Local\EZS_WEB_BOOT_R8')
 $locked=$false
-function Emit([string]$site,[string]$event,[string]$reason=''){
-  $row=[ordered]@{timestamp_utc=[DateTime]::UtcNow.ToString('o');site=$site;event=$event;reason=$reason;phase=$Action}
-  $json=ConvertTo-Json -Compress -InputObject $row
-  [IO.File]::AppendAllText($logFile,$json+"`n",$utf8)
-  Write-Output $json
+$sites=[ordered]@{
+    dev=@{ports=@(8502,8602);url='http://127.0.0.1:8502/fr/catalog';config='Caddyfile.dev.native';entry='H:\EZScore_dev\public\index.php'}
+    lab=@{ports=@(8702,8701);url='http://127.0.0.1:8702/';config='Caddyfile.lab.native';entry='H:\EZStudio_lab\public\index.php'}
+    assistant=@{ports=@(8712,8713);url='http://127.0.0.1:8712/';config='Caddyfile.assistant.native';entry='H:\EZStudioLab_assistant\public\index.php'}
+    prod=@{ports=@(8501,8510,8511);url='http://127.0.0.1:8501/fr/catalog';config='Caddyfile.prod.native';entry='H:\EZScore\public\index.php'}
 }
 function Mode {
-  if (!(Test-Path -LiteralPath $maintenance -PathType Leaf)){return 'NORMAL'}
-  $x=Get-Content -LiteralPath $maintenance -Raw -Encoding UTF8|ConvertFrom-Json -ErrorAction Stop
-  if ($x.schema -ne 'ezs.prod-maintenance-mode.r6b' -or $x.mode -notin @('NORMAL','MAINTENANCE','TRANSITION','FAILED')){throw 'EZS_R7_MAINTENANCE_MODE_INVALID'}
-  return [string]$x.mode
+    if(!(Test-Path -LiteralPath $modeFile -PathType Leaf)){return 'NORMAL'}
+    $m=Get-Content -LiteralPath $modeFile -Raw -Encoding UTF8|ConvertFrom-Json -ErrorAction Stop
+    if($m.schema -ne 'ezs.prod-maintenance-mode.r6b' -or $m.mode -notin @('NORMAL','MAINTENANCE','TRANSITION','FAILED')){throw 'EZS_R8_MODE_INVALID'}
+    return [string]$m.mode
 }
-function Evidence([string]$site){
-  $lines=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $adapter -Site $site -Action Status 2>&1)
-  if ($LASTEXITCODE -ne 0){throw ('EZS_R7_STATUS_FAILED_'+$site)}
-  $rows=@($lines|Where-Object{[string]$_ -match '^HARD_SITE='})
-  if ($rows.Count -ne 1){throw ('EZS_R7_HARD_EVIDENCE_MISSING_'+$site)}
-  $pattern='^HARD_SITE=(dev|lab|assistant|prod) STATE=(RUNNING|ABSENT|UNVERIFIED) PROCESSES=(\d+) PORTS=(\d+) EXPECTED=(\d+) REASON=([A-Z_]+) RECORD=(True|False)$'
-  $m=[regex]::Match([string]$rows[0],$pattern)
-  if (!$m.Success -or $m.Groups[1].Value -ne $site){throw 'EZS_R7_HARD_EVIDENCE_INVALID'}
-  $expected=if($site -in @('assistant','prod')){3}else{2}
-  if([int]$m.Groups[5].Value -ne $expected){throw 'EZS_R7_HARD_EXPECTED_PORTS_INVALID'}
-  return @{state=$m.Groups[2].Value;owned=[int]$m.Groups[3].Value;
-    listeners=[int]$m.Groups[4].Value;expected=$expected;reason=$m.Groups[6].Value;
-    recorded=$m.Groups[7].Value}
+function Open-Ports([int[]]$ports){
+    $opened=@(Get-NetTCPConnection -State Listen -ErrorAction Stop|Where-Object{$_.LocalPort -in $ports}|Select-Object -ExpandProperty LocalPort -Unique)
+    return @($opened)
+}
+function Web-Http([string]$url){
+    $request=[Net.HttpWebRequest]([Net.WebRequest]::Create($url))
+    $request.Timeout=2500
+    $request.AllowAutoRedirect=$false
+    try {
+        $response=[Net.HttpWebResponse]$request.GetResponse()
+        try{return [int]$response.StatusCode}finally{$response.Close()}
+    } catch [Net.WebException] {
+        if($null -ne $_.Exception.Response){
+            $response=$_.Exception.Response
+            try{return [int]$response.StatusCode}finally{$response.Close()}
+        }
+        return 0
+    }
+}
+function Output-Record([string]$site,[string]$event,[string]$detail){
+    $record=[ordered]@{timestamp_utc=[DateTime]::UtcNow.ToString('o');site=$site;event=$event;detail=$detail;action=$Action}
+    $json=ConvertTo-Json -Compress -InputObject $record
+    if($Action -eq 'Boot'){
+        if(!(Test-Path -LiteralPath $logDir -PathType Container)){New-Item -ItemType Directory -Path $logDir -Force|Out-Null}
+        [IO.File]::AppendAllText($logFile,$json+"`n",$utf8)
+    }
+    Write-Output $json
+}
+function Status([string]$name,[hashtable]$spec,[string]$mode){
+    $open=@(Open-Ports $spec.ports)
+    $status=Web-Http $spec.url
+    $missing=@($spec.ports|Where-Object{$_ -notin $open})
+    $maintenance=$name -eq 'prod' -and $status -eq 503
+    $state=if($maintenance -and 8501 -in $open){'MAINTENANCE'}elseif($missing.Count -eq 0 -and $status -ge 200 -and $status -lt 400){'OK'}elseif($open.Count -eq 0){'ABSENT'}else{'PARTIAL'}
+    return @{state=$state;opened=$open;missing=$missing;http=$status}
+}
+function Start-Web([string]$name,[hashtable]$spec){
+    $config=Join-Path $root ('config\frankenphp\'+$spec.config)
+    foreach($file in @($exe,$config,$spec.entry)){
+        if(!(Test-Path -LiteralPath $file -PathType Leaf)){throw ('EZS_R8_REQUIRED_FILE_MISSING '+$file)}
+    }
+    if($name -eq 'prod'){
+        $gateway='H:\EZS_orchestrator\runtime_components\prod_gateway_php\router.php'
+        if(!(Test-Path -LiteralPath $gateway -PathType Leaf)){throw 'EZS_R8_PROD_GATEWAY_MISSING'}
+    }
+    $previousMedia=[Environment]::GetEnvironmentVariable('EZSCORE_MEDIA_ROOT','Process')
+    if($name -eq 'dev'){
+        $media='H:\EZScore_dev\var\storage\stems'
+        if(!(Test-Path -LiteralPath $media -PathType Container)){throw 'EZS_R8_DEV_MEDIA_ROOT_MISSING'}
+        $env:EZSCORE_MEDIA_ROOT=$media
+    }
+    # PROD cutover to EZS_maintenance still requires its canonical native owner record.
+    # Keep this boundary intact; hard pings themselves never inspect PID.
+    if($name -eq 'prod'){
+        $adapter=Join-Path $root 'scripts\ezs_platform_control.ps1'
+        if(!(Test-Path -LiteralPath $adapter -PathType Leaf)){throw 'EZS_R8_PROD_ADAPTER_MISSING'}
+        foreach($phase in @('Preflight','Start')){
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $adapter -Site prod -Action $phase
+            if($LASTEXITCODE -ne 0){throw ('EZS_R8_PROD_'+$phase.ToUpperInvariant()+'_FAILED')}
+        }
+        return
+    }
+    $previousEnv=[Environment]::GetEnvironmentVariable('APP_ENV','Process')
+    $previousDbg=[Environment]::GetEnvironmentVariable('APP_DEBUG','Process')
+    try {
+        [Environment]::SetEnvironmentVariable('APP_ENV',$(if($name -eq 'prod'){'prod'}else{'dev'}),'Process')
+        [Environment]::SetEnvironmentVariable('APP_DEBUG',$(if($name -eq 'prod'){'0'}else{'1'}),'Process')
+        # No saved PID, no stop, no user-facing console.
+        $null=Start-Process -FilePath $exe -ArgumentList @('run','--config',('"'+$config+'"'),'--adapter','caddyfile') -WorkingDirectory $root -WindowStyle Hidden -PassThru -ErrorAction Stop
+    } finally {
+        [Environment]::SetEnvironmentVariable('APP_ENV',$previousEnv,'Process')
+        [Environment]::SetEnvironmentVariable('APP_DEBUG',$previousDbg,'Process')
+        [Environment]::SetEnvironmentVariable('EZSCORE_MEDIA_ROOT',$previousMedia,'Process')
+    }
 }
 try {
-  try {$locked=$mutex.WaitOne(0)}catch [Threading.AbandonedMutexException]{$locked=$true}
-  if (!$locked){throw 'EZS_R7_BOOT_LOCK_BUSY'}
-  if (!(Test-Path -LiteralPath $adapter -PathType Leaf)){throw 'EZS_R7_PLATFORM_ADAPTER_MISSING'}
-  $mode=Mode
-  $sites=@('dev','lab','assistant','prod')
-  $failures=0
-  foreach($site in $sites){
-    if($site -eq 'prod' -and $mode -ne 'NORMAL'){
-      Emit $site 'SKIPPED_PROD_MAINTENANCE' $mode
-      continue
+    try {$locked=$mutex.WaitOne(0)}catch [Threading.AbandonedMutexException]{$locked=$true}
+    if(!$locked){throw 'EZS_R8_BOOT_ALREADY_RUNNING'}
+    $mode=Mode
+    $failed=0
+    foreach($site in @('dev','lab','assistant','prod')){
+        $spec=$sites[$site]
+        if($site -eq 'prod' -and $mode -ne 'NORMAL'){
+            $probe=Status $site $spec $mode
+            Output-Record $site 'SKIPPED_PROD_MAINTENANCE' ('mode='+$mode+' http='+$probe.http)
+            if($Action -eq 'HardStatus' -and $probe.state -ne 'MAINTENANCE'){$failed++}
+            continue
+        }
+        try {
+            $before=Status $site $spec $mode
+            Output-Record $site ('HARD_'+$before.state) ('ports='+($before.opened -join ',')+' missing='+($before.missing -join ',')+' http='+$before.http)
+            if($Action -eq 'HardStatus'){if($before.state -ne 'OK' -and !($site -eq 'prod' -and $before.state -eq 'MAINTENANCE')){$failed++};continue}
+            if($before.state -eq 'OK' -or ($site -eq 'prod' -and $before.state -eq 'MAINTENANCE')){continue}
+            if($before.state -ne 'ABSENT'){
+                Output-Record $site 'BLOCKED_PARTIAL' 'Listening ports are preserved; no competing instance started'
+                $failed++;continue
+            }
+            if($Action -eq 'Preflight'){
+                Output-Record $site 'READY_TO_START' 'All configured web ports free'
+                continue
+            }
+            Start-Web $site $spec
+            $after=$null
+            foreach($step in 1..20){
+                Start-Sleep -Milliseconds 450
+                $after=Status $site $spec $mode
+                if($after.state -eq 'OK'){break}
+            }
+            Output-Record $site ('AFTER_'+$after.state) ('ports='+($after.opened -join ',')+' http='+$after.http)
+            if($after.state -ne 'OK'){$failed++}
+        }catch{Output-Record $site 'ERROR' $_.Exception.Message;$failed++}
     }
-    try {
-      $before=Evidence $site
-      Emit $site ('BEFORE_'+$before.state) ('processes='+$before.owned+' ports='+$before.listeners+' reason='+$before.reason+' record='+$before.recorded)
-      if($Action -eq 'HardStatus'){if($before.state -ne 'RUNNING' -and !($site -eq 'prod' -and $mode -ne 'NORMAL')){$failures++};continue}
-      if($before.state -eq 'RUNNING'){Emit $site 'ALREADY_RUNNING';continue}
-      if($before.state -ne 'ABSENT') {Emit $site 'BLOCKED_AMBIGUOUS' 'No adoption and no process termination';$failures++;continue}
-      $result=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $adapter -Site $site -Action Preflight 2>&1)
-      if($LASTEXITCODE -ne 0){throw ('EZS_R7_PREFLIGHT_FAILED_'+$site)}
-      if($Action -eq 'Preflight'){Emit $site 'PREFLIGHT_OK_NO_START';continue}
-      # One explicit Boot pass: no automatic retries from subsequent polling cycles.
-      $result=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $adapter -Site $site -Action Start 2>&1)
-      if($LASTEXITCODE -ne 0){throw ('EZS_R7_START_FAILED_'+$site)}
-      Start-Sleep -Milliseconds 900
-      $after=Evidence $site
-      if($after.state -ne 'RUNNING'){
-        Emit $site 'START_UNVERIFIED' ('processes='+$after.owned+' ports='+$after.listeners+' reason='+$after.reason)
-        $failures++;continue
-      }
-      Emit $site 'HARD_ATTESTED_RUNNING' ('listeners='+$after.listeners)
-    }catch{Emit $site 'ERROR' $_.Exception.Message;$failures++}
-  }
-  if($failures -gt 0){throw ('EZS_R7_BOOT_INCOMPLETE_'+$failures)}
-  Write-Host ('EZS_R7_'+$Action.ToUpperInvariant()+'_OK')
+    if($failed -gt 0){throw ('EZS_R8_WEB_INCOMPLETE_'+$failed)}
+    Write-Host ('EZS_R8_'+$Action.ToUpperInvariant()+'_OK')
 }catch{Write-Error $_;exit 2}
 finally{if($locked){$mutex.ReleaseMutex()};$mutex.Dispose()}

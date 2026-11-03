@@ -70,10 +70,7 @@
     }
 
     const sources = [
-        '/api/v2/infrastructure/dev-debug-native',
-        '/api/v2/infrastructure/dev-groups',
-        '/api/v2/infrastructure/dev-health',
-        '/api/v2/infrastructure/dev-backend'
+        '/api/v2/infrastructure/web-hard-ping'
     ];
     const secretKey = /(?:csrf|token|cookie|authorization|password|secret|api[_-]?key|private[_-]?key|session|credential)/i;
     const privateKey = /(?:email|user[_-]?id|client[_-]?ip|address|hostname|command[_-]?line|executable[_-]?path|file[_-]?path)/i;
