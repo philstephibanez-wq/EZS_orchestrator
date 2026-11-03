@@ -2,6 +2,7 @@
 {% block title %}EZS Orchestrator — Infrastructure{% endblock %}
 {% block page_scripts %}
     <script src="/assets/ezs-web-hard.js?v={{ orchestrator_version|url_encode }}" defer></script>
+    <script src="/assets/ezs-dev-web-mode.js?v={{ orchestrator_version|url_encode }}" defer></script>
     <script src="/assets/ezs-rest-supervision.js?v=4.2c85" defer></script>
     <script src="/assets/ezs-recovery-preflight.js" defer></script>
     <script src="/assets/ezs-prod-control.js?v={{ orchestrator_version|url_encode }}" defer></script>
@@ -16,7 +17,7 @@
             <div class="card-header d-flex justify-content-between align-items-center"><h2 id="dev-title" class="h6 mb-0">DEV · EZScore</h2><span id="state-dev" class="badge text-bg-secondary">Inconnu</span></div>
             <div class="card-body">
               <div class="ezs-server-summary"><div>Public <strong>8502</strong></div><div>HTTP <strong id="http-dev">—</strong></div><div>TCP <strong id="tcp-dev">—</strong></div></div>
-              <div class="ezs-server-actions"><a class="btn btn-outline-primary btn-sm" href="http://127.0.0.1:8502/fr/catalog" target="_blank" rel="noopener noreferrer">Ouvrir DEV</a></div>
+              <div class="ezs-server-actions"><a class="btn btn-outline-primary btn-sm" href="http://127.0.0.1:8502/fr/catalog" target="_blank" rel="noopener noreferrer">Ouvrir DEV</a><button type="button" id="dev-maintenance-button" class="btn btn-outline-warning btn-sm" disabled>Maintenance</button><button type="button" id="dev-normal-button" class="btn btn-outline-success btn-sm" disabled>Mode normal</button><span id="dev-web-mode-label" class="small text-secondary" aria-live="polite">Indetermine</span></div>
               <details open><summary>Détails techniques</summary><dl class="small mt-2 mb-0 ezs-tech-grid"><dt>Façade</dt><dd>8502 · HTTP <span id="tech-http-dev">—</span></dd><dt>Backend</dt><dd>8602 · <strong id="dev-backend">Non mesuré</strong></dd><dt>Autorité Orchestrator</dt><dd><strong id="dev-backend-ownership">Non vérifiée</strong></dd><dt>Action</dt><dd>Commandes indisponibles dans cette interface</dd><dt>État complémentaire</dt><dd>Consultation sans modification de processus</dd></dl></details>
             </div>
           </section>
@@ -65,5 +66,23 @@
           </div>
         </div>
       </div>
+    </div>
+    <div class="modal fade" id="dev-mode-modal" tabindex="-1" aria-labelledby="dev-mode-modal-title" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title fs-5" id="dev-mode-modal-title">EZScore DEV - changement de mode</h2>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Annuler"></button>
+                </div>
+                <div class="modal-body">
+                    <p id="dev-mode-description"></p>
+                    <p id="dev-mode-error" class="text-danger" role="alert" hidden></p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline-secondary" data-bs-dismiss="modal" type="button">Annuler</button>
+                    <button class="btn btn-warning" id="dev-mode-confirm" type="button">Confirmer</button>
+                </div>
+            </div>
+        </div>
     </div>
 {% endblock %}

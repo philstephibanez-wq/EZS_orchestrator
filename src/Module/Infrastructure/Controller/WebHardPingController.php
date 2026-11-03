@@ -44,14 +44,15 @@ final class WebHardPingController
         $body=@file_get_contents($url,false,$ctx);
         $headers=$http_response_header??[];
         $status=preg_match('~^HTTP/\\S+ (\\d{3})~',(string)($headers[0]??''),$match)?(int)$match[1]:null;
-        return ['status'=>$status,'reachable'=>$status!==null,'bytes'=>is_string($body)?strlen($body):null];
+        return ['status'=>$status,'reachable'=>$status!==null,'bytes'=>is_string($body)?strlen($body):null,
+            'maintenance_marker'=>is_string($body) && str_contains($body,'EZScore DEV') && str_contains($body,'Maintenance en cours')];
     }
 
     public static function classify(array $ports, array $http, bool $maintenance): string
     {
         if (!in_array(true,array_map(static fn($v):bool=>$v===false,$ports),true)
             && isset($http['status']) && $http['status']>=200 && $http['status']<400) return 'OK';
-        if ($maintenance && ($ports['8501']??false) === true && ($http['status']??null)===503) return 'MAINTENANCE';
+        if ($maintenance && (($ports['8501']??false) === true || ($ports['8502']??false) === true) && ($http['status']??null)===503) return 'MAINTENANCE';
         return 'ECHEC';
     }
 
@@ -66,7 +67,8 @@ final class WebHardPingController
             foreach($definition['ports'] as $port) $ports[(string)$port]=self::tcp($port);
             $http=self::page($definition['page']);
             // Maintenance is a web operating mode, never an assumption from a PID record.
-            $maint=$site==='prod' && $http['status']===503;
+            $maint=($site==='prod' && $http['status']===503)
+                || ($site==='dev' && $http['status']===503 && $http['maintenance_marker']===true);
             $results[$site]=['ports'=>$ports,'http'=>$http,'state'=>self::classify($ports,$http,$maint)];
         }
         return new JsonResponse(['schema'=>'ezs.web_hard_ping.v1','captured_utc'=>gmdate('c'),
