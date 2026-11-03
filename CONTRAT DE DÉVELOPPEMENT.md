@@ -439,3 +439,67 @@ La **Plateforme EZS** regroupe exactement quatre dépôts de développement : `E
 ### Gouvernance des changements
 
 Le présent chapitre définit la **norme cible**, sans prétendre que chaque application y est déjà conforme. Les écarts constatés sont tracés dans des issues, traités par livraisons ciblées avec tests et sans réécriture simultanée des moteurs métier. Chaque dépôt conserve sa version canonique et ses conventions de commit ; tout correctif transversal est audité sur les quatre dépôts avant publication. Ordre de chantier en cours : restaurer ROOT par son watchdog et démontrer la disponibilité HTTP, puis implémenter progressivement les endpoints et tableaux de supervision des autres applications.
+
+## CONTRAT NORMATIF — Propriété applicative et ping REST détaillé
+
+### 1. Frontières de responsabilité
+
+- **EZS_orchestrator** assure exclusivement le démarrage, l'arrêt et la supervision des applications DEV et PROD comme unités, ainsi que la gestion et la distribution de la queue des jobs. Il respecte l'intention persistante, les protections de PROD, l'identité des processus et l'isolation entre services. Il n'administre pas les composants métier des applications.
+- **EZScore** possède ses médias et chemins de stockage, leur contrôle d'accès, ses modèles IA, ses moteurs, paramètres métier et workers internes. EZScore DEV reste la source fonctionnelle ; PROD reçoit le code validé avec sa configuration d'environnement propre.
+- **EZStudio_lab** possède ses pipelines, presets, moteurs scientifiques, modèles IA, ressources et workers internes.
+- **EZStudioLab_assistant** possède ses modèles, son moteur Llama, ses ressources et ses processus internes. Le lancement et l'arrêt de l'Assistant sont délégués à son interface canonique ; l'Orchestrator ne pilote jamais directement Llama. Une mutualisation future de Llama nécessitera un contrat explicite distinct.
+- Un chemin média, un modèle IA, un moteur, un worker ou une dépendance interne ne devient jamais une ressource administrée par l'Orchestrator parce qu'il apparaît dans un diagnostic. Le propriétaire applicatif fournit et valide sa configuration ; l'Orchestrator peut transmettre une configuration fournie, mais ne l'invente ni ne l'impose.
+- La queue de jobs orchestrée à l'échelle de la plateforme n'autorise pas l'Orchestrator à prendre possession des queues, tentatives, workers ou algorithmes internes d'une application. Les responsabilités d'ordonnancement, de transport et d'exécution sont contractualisées aux frontières.
+
+### 2. Deux sondes indépendantes
+
+- **Ping hard (système/TCP)** : dès maintenant, l'Orchestrator contrôle à intervalle borné l'identité native des processus et les ports TCP attendus. Le résultat TCP et l'attestation d'identité sont deux preuves séparées. Un port ouvert n'atteste ni propriété, ni santé métier.
+- **Ping soft (REST)** : chaque application **devra implémenter** une réponse de supervision détaillée sur un endpoint documenté (préférence : `GET /api/status`; `GET /health` peut rester une sonde légère distincte). La réponse doit couvrir l'application et **tous ses composants internes pertinents**, selon l'inventaire défini et maintenu par leur propriétaire : frontend, backend, stockage, workers, queues locales, moteurs, modèles IA, Llama pour l'Assistant, etc. Ne pas imposer une liste fixe commune de composants.
+- Tant que l'endpoint REST d'une application n'est pas implémenté et déclaré comme tel dans son contrat de déploiement, l'Orchestrator expose `NOT_IMPLEMENTED` (ou `NOT_CONFIGURED` si aucune URL n'est fournie). Cet état **ne bloque ni le démarrage ni le ping TCP** et ne doit jamais être converti en `OK` ou `KO` artificiel. Dès que l'endpoint est annoncé comme implémenté, une absence de réponse, un timeout, un JSON invalide ou un code HTTP inattendu est une **erreur de collecte distincte**, et non une réponse métier `KO`.
+- La sonde REST est une opération **lecture seule**, bornée et sans effet de bord, sans démarrage implicite ni réparation de composants. Les accès et détails sensibles sont protégés ; le dump affiché est expurgé des secrets.
+
+### 3. Réponse REST attendue de chaque application — contrat cible V1
+
+Chaque application implémente et teste une réponse JSON comprenant au minimum :
+
+```json
+{
+  "schema": "ezs.service-status.v1",
+  "service": "ezscore",
+  "environment": "dev",
+  "version": "VERSION_CANONIQUE",
+  "timestamp_utc": "2026-11-03T17:00:00Z",
+  "state": "OK",
+  "message": "Service opérationnel",
+  "components": [
+    {
+      "id": "composant_stable",
+      "state": "OK",
+      "message": "Composant disponible",
+      "error_code": null
+    }
+  ]
+}
+```
+
+- `service` est un identifiant stable ; `environment` distingue DEV et PROD ; `version` est la version canonique réelle ; `timestamp_utc` est une date UTC ISO 8601 de la mesure. Les valeurs ci-dessus sont un **exemple de forme**, pas une preuve d'état réel.
+- `state` vaut `OK` ou `KO` pour la santé globale calculée **par l'application propriétaire**. `message` explique clairement la conclusion. Chaque entrée `components` possède `id` stable, `state` (`OK`, `KO` ou `UNKNOWN` si non attestable), `message` explicite et `error_code` optionnel. La liste couvre tous les composants que l'application doit surveiller ; ne pas inventer un succès pour un composant non observé.
+- Une dépendance interne indisponible mais non indispensable peut être détaillée sans imposer un `KO` global : **seule l'application** définit et documente ses critères d'agrégation. Une défaillance critique doit produire `KO` et un message exploitable. Éviter tout calcul métier implicite dans l'Orchestrator.
+- Le JSON et les codes HTTP doivent être cohérents avec le contrat applicatif. La réponse peut contenir des détails techniques additionnels non sensibles, mais jamais jetons, secrets, chemins privés, traces brutes ni données utilisateur.
+- Cette spécification est **à implémenter dans EZScore, EZStudio_lab et EZStudioLab_assistant**, chacun avec ses composants réellement présents ; l'Orchestrator implémente le client de collecte et la restitution. Son application ROOT suit les mêmes principes de diagnostic.
+
+### 4. Anti-spam, suivi des incidents et alertes
+
+- **Sonder régulièrement ne signifie pas notifier régulièrement.** L'Orchestrator continue les sondes et conserve les observations, même en cas de `KO` prolongé ; aucune boucle de notification par polling.
+- Une notification est émise à la **première transition attestée** vers `KO` (ou vers une erreur technique distincte), puis l'incident reste ouvert et son identité est persistée durablement : service, environnement, composant si applicable, code ou cause normalisée, début et dernière observation.
+- Tant que l'état et la cause significative restent identiques, **ne pas répéter le même message** à chaque passage. Une transition `KO`→`OK` émet au plus une notification de rétablissement et clôt l'incident. Une nouvelle panne ultérieure ouvre un nouvel incident.
+- Un changement réel de composant affecté, de cause normalisée ou de gravité peut justifier une nouvelle notification **dédupliquée**. Les escalades ou rappels périodiques sont désactivés par défaut ; s'ils sont autorisés ultérieurement, ils exigent une politique explicite de fréquence maximale et de destinataires.
+- La déduplication survit au redémarrage de l'Orchestrator ; ne pas perdre l'identité d'un incident à chaque cycle. Ne pas écrire une nouvelle ligne d'alerte identique à chaque ping. Le journal de mesures peut rester distinct de l'historique d'incidents/notifications.
+- Prévoir hystérésis ou temporisation bornée pour les fluctuations transitoires, sans masquer les erreurs ni convertir une absence de preuve en succès. Aucun arrêt ou redémarrage automatique n'est autorisé sur la seule base d'une réponse `KO` sans attestation native, intention conforme et autorisation de cycle de vie.
+
+### 5. Recette et traçabilité
+
+- Tester pour **chaque service** : réponse globale `OK`, globale `KO`, composant `KO`, composant `UNKNOWN`, message clair, erreur de collecte, REST non implémenté, TCP ouvert avec REST `KO`, TCP fermé avec REST non configuré, confidentialité du JSON.
+- Tester les notifications : premier `KO`, 100 sondes `KO` identiques sans doublon, cause modifiée, redémarrage du superviseur avec incident ouvert, retour `OK`, puis nouvelle panne ; isolation entre environnements et composants.
+- Les métriques natives, les dumps REST et les erreurs de collecte restent séparés, horodatés et consultables sans inférence dans l'interface de diagnostic. Les badges opérationnels suivent leur contrat propre et ne changent pas la sémantique du JSON source.
+- **Norme cible, pas attestation de fonctionnalité livrée** : publier ce contrat ne crée aucun endpoint, ne démarre aucun service et n'autorise aucun déploiement PROD. Chaque dépôt suivra son implémentation et ses tests dans une issue et une livraison technique séparées.
