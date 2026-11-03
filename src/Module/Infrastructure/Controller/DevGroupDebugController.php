@@ -7,7 +7,7 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
 
-/** DEV-only observation: no PID, commands, tokens or mutation. */
+/** DEV-only native observation: no PID, commands, secrets or process mutation. */
 final class DevGroupDebugController
 {
     public static function allowed(string $environment,string $host,string $ip):bool
@@ -15,7 +15,7 @@ final class DevGroupDebugController
         return DevGroupOperationsController::allowed($environment,$host,$ip);
     }
 
-    /** Legacy pure presentation helper, retained for existing diagnostic consumers. */
+    /** Historic presentation helper retained for consumers and tests. */
     public static function summary(array $states):array
     {
         $result=[];
@@ -27,10 +27,16 @@ final class DevGroupDebugController
         return $result;
     }
 
-    private static function observeAssistant(NativeSiteObservation $observer): string
+    private static function diagnostic(NativeSiteObservation $observer, string $site): array
     {
-        try { return $observer->observe('assistant')['state']; }
-        catch (\Throwable) { return 'UNVERIFIED'; }
+        try { return $observer->observeDiagnostic($site); }
+        catch (\Throwable $failure) {
+            $message=$failure->getMessage();
+            $safe = preg_match('/^EZS_[A-Z0-9_]{1,160}$/D',$message) === 1
+                ? $message : 'NATIVE_OBSERVATION_FAILED';
+            return ['state'=>'UNVERIFIED','reason_code'=>$safe,
+                'can_start'=>false,'can_stop'=>false];
+        }
     }
 
     #[Route('/api/v2/infrastructure/dev-debug-native', name:'ezs_dev_group_debug_native', methods:['GET'])]
@@ -39,17 +45,15 @@ final class DevGroupDebugController
         if (!self::allowed((string)($_SERVER['APP_ENV']??getenv('APP_ENV')?:''),$request->getHost(),(string)$request->getClientIp())) {
             return new Response('forbidden',403,['Cache-Control'=>'no-store']);
         }
-        try {
-            $observer=new NativeSiteObservation();
-            $result=['schema'=>'ezs.dev_group_native_debug.v1',
-                'groups'=>[
-                    'dev'=>['dev'=>$observer->observe('dev')['state']],
-                    'lab'=>['lab'=>$observer->observe('lab')['state']],
-                    'assistant'=>['assistant'=>self::observeAssistant($observer)],
-                ], 'error'=>null];
-        }catch(\Throwable $error){
-            $result=['schema'=>'ezs.dev_group_native_debug.v1','groups'=>[],'error'=>'INVENTORY_UNAVAILABLE'];
+        $observer=new NativeSiteObservation();
+        $diagnostics=[];
+        $groups=[];
+        foreach (['dev','lab','assistant'] as $site) {
+            $diagnostics[$site]=self::diagnostic($observer,$site);
+            $groups[$site]=[$site=>$diagnostics[$site]['state']];
         }
+        $result=['schema'=>'ezs.dev_group_native_debug.v1','groups'=>$groups,
+            'diagnostics'=>$diagnostics,'error'=>null];
         return new Response(json_encode($result,JSON_THROW_ON_ERROR),200,[
             'Content-Type'=>'application/json; charset=UTF-8','Cache-Control'=>'no-store',
             'X-Content-Type-Options'=>'nosniff','X-Robots-Tag'=>'noindex, nofollow',
