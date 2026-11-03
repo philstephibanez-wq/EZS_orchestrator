@@ -52,8 +52,16 @@ final class DevGroupDebugController
             $diagnostics[$site]=self::diagnostic($observer,$site);
             $groups[$site]=[$site=>$diagnostics[$site]['state']];
         }
+        // Preserve the historic global failure contract while retaining per-site errors.
+        // A single failed inventory must not hide independent, valid observations.
+        $failed=0;
+        foreach ($diagnostics as $detail) {
+            if (!array_key_exists('desired', $detail)) ++$failed;
+        }
         $result=['schema'=>'ezs.dev_group_native_debug.v1','groups'=>$groups,
-            'diagnostics'=>$diagnostics,'error'=>null];
+            'diagnostics'=>$diagnostics,
+            'error'=>$failed === count($diagnostics) ? 'INVENTORY_UNAVAILABLE' : null,
+            'timestamp_utc'=>gmdate('Y-m-d\TH:i:s\Z')];
         return new Response(json_encode($result,JSON_THROW_ON_ERROR),200,[
             'Content-Type'=>'application/json; charset=UTF-8','Cache-Control'=>'no-store',
             'X-Content-Type-Options'=>'nosniff','X-Robots-Tag'=>'noindex, nofollow',
