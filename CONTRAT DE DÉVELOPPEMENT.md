@@ -552,3 +552,67 @@ Ce chapitre constitue la **référence prioritaire** en cas de contradiction ave
 La **détection décisionnelle**, le verrouillage de la transition, l'arrêt attesté des processus PROD, l'occupation alternative du port 8501 par le serveur PHP Maintenance, l'audit, la mise en échec sûre et le retour manuel sont **définis, implémentés, testés et versionnés uniquement dans `EZS_orchestrator`**. Les applications EZScore et EZS_maintenance restent des cibles de contrôle et des sources de données de santé : elles n'orchestrent rien et ne portent aucun contrat de cycle de vie croisé. Les applications LAB et Assistant n'ont aucun rôle dans ce protocole.
 
 Ce chapitre local ne rend pas obligatoires des commits synchronisés vers d'autres dépôts ; seuls les changements éventuels de leurs interfaces indépendantes nécessiteraient leur propre livraison.
+
+## DÉCISION PRIORITAIRE — SERVICE FRANKENPHP ET SUPERVISION WEB HARD (04/11/2026)
+
+**Statut : décision architecturale normative, approuvée par le mainteneur.** Ce chapitre remplace, pour le démarrage et la supervision des **sites web**, toute disposition antérieure contraire de ce document : démarrage/arrêt manuel site par site, PID de supervision, intention RUNNING/STOPPED par site, boutons de commande individuels, boot de chaque Caddyfile par l'Orchestrator, obligation de ping REST dès cette étape, ou bascule PROD nécessitant l'arrêt du serveur partagé. Les exigences générales de sauvegarde, sécurité, isolation et recette restent applicables.
+
+### Répartition stricte des responsabilités
+
+1. **Service Windows EZS_FrankenPHP** : seul responsable du démarrage et de l'arrêt du **serveur web FrankenPHP** au niveau plateforme (y compris après reboot selon sa configuration de service). Le cycle de vie ne doit pas être piloté par l'interface Orchestrator, les sondes ou un bootstrap supplémentaire après ROOT.
+2. **FrankenPHP** : héberge les sites configurés, leurs frontaux et routes, y compris EZScore DEV, EZStudio LAB, Assistant, EZScore PROD et ROOT/Orchestrator si la configuration réelle le permet. **Un serveur commun est l'option par défaut.** Une instance PROD séparée n'est admissible qu'après démonstration documentée d'une nécessité technique réelle (isolation PHP/variables d'environnement, sécurité, collision de ports, indisponibilité du mode Maintenance, etc.). Ne pas affirmer que la cohabitation dans une seule instance est possible avant tests de configuration, d'isolation et de fonctionnement réel.
+3. **EZS_orchestrator** : supervise les interfaces web en lecture seule et publie les observations dans la page Infrastructure et son **dump Twig/JSON**. Il ne lance, n'arrête, ne redémarre, n'adopte ni ne réconcilie aucun site à l'occasion d'un ping. Aucun watchdog de site ne transforme une sonde en mutation de processus.
+4. **PROD** : seules les actions visibles **Normal** et **Maintenance** sont conservées, avec contrôle d'accès, confirmation, CSRF, journalisation, tests et préflight adaptés. Le reste de la page Infrastructure, la queue de jobs et les fonctionnalités non concernées sont préservés.
+
+### Ping hard web : seule sonde de disponibilité pour cette étape
+
+- Pour **DEV** (8502, 8602), **LAB** (8702, 8701), **Assistant** (8712, 8713), **PROD** (8501, 8510, 8511) et, si nécessaire, ROOT (8790), relever séparément et de manière bornée la disponibilité TCP des ports configurés ainsi que la réponse HTTP d'une **page web réelle** du site.
+- Les ports cités décrivent la topologie actuellement publiée ; le service FrankenPHP ne doit pas être reconfiguré aveuglément pour satisfaire une liste ancienne. Tout changement de topologie exige inventaire, cohérence des Caddyfiles et recette Windows.
+- Une redirection HTTP 3xx peut être un résultat valide si elle est prévue pour la page demandée et si la cible reste conforme. Une réponse **503 de Maintenance** atteste qu'un serveur répond mais n'est **pas** un site PROD en mode Normal : rapporter séparément le code HTTP, le mode et la disponibilité des ports.
+- États explicites et non trompeurs : **OK**, **PARTIEL**, **ÉCHEC**, **MAINTENANCE** ou **INCONNU/COLLECTION_ERROR**, selon les preuves observées. Une réponse HTTP seule ne justifie pas de marquer un ensemble de ports absents ; une connexion TCP seule ne suffit pas à prouver que la page est accessible. Ne jamais fabriquer un état sain.
+- Le ping hard web ne dépend **ni de WMI/CIM, ni des PID, ni de fichiers d'attestation d'ownership**. Les PID ne figurent pas dans le dump de supervision web. Exception uniquement pour la sécurité d'une **opération destructrice séparément autorisée**, dans laquelle l'identification exacte du processus reste requise afin de ne jamais arrêter un processus étranger.
+- La source du ping hard dans le dump est **en lecture seule** : horodatage UTC, ports testés et booléens TCP, URL locale de page non sensible, statut HTTP, accessibilité, durée bornée, erreur de collecte distincte. Aucun jeton, cookie, commande, PID ni chemin privé. Le bouton **Actualiser** ne démarre rien.
+- **Aucun ping soft/REST métier pour l'instant.** Les anciens endpoints peuvent continuer d'exister pour compatibilité, mais leur absence ou leur échec ne conditionne ni le démarrage FrankenPHP ni le ping hard. L'intégration du ping soft est **une étape ultérieure distincte**, après validation des pages et des pings hard sur MAIN.
+
+### Cycle de vie et nettoyage
+
+- Retirer de l'interface les boutons et actions **Démarrer, Arrêter, Redémarrer** pour DEV, LAB, Assistant et PROD. Conserver les liens **Ouvrir** sans désactivation fondée sur des états PID obsolètes.
+- Retirer les parcours de commandes individuelles et les intentions persistées **après inventaire des appelants réels**, des tâches Windows, des contrats et des dépendances de Maintenance ; ne pas supprimer aveuglément un composant encore appelé. Aucun contrôleur REST obsolète ne doit demeurer accessible pour muter un site sans nécessité et approbation explicites.
+- La suppression du bootstrap web de l'Orchestrator doit être accompagnée d'une vérification que le **service EZS_FrankenPHP** démarre bien les sites, avec un seul propriétaire du cycle de vie du serveur et sans double lancement au reboot.
+- Séparer clairement **gestion du service FrankenPHP** (hors Orchestrator) et **observation de ses sites** (Orchestrator).
+
+### PROD Normal / Maintenance avec serveur partagé
+
+- **Invariance absolue** : une action de maintenance PROD ne doit ni arrêter le serveur FrankenPHP commun, ni fermer les sites DEV/LAB/Assistant/ROOT, ni provoquer de compétition sur le port 8501.
+- Privilégier le mécanisme de maintenance déjà fonctionnel s'il permet une réponse contrôlée sur la route PROD **sans arrêter le serveur partagé**, en conservant l'URL publique, le SSO et les médias non concernés.
+- La procédure historique de remplacement de l'instance PROD par `EZS_maintenance` sur 8501 (arrêt de processus PROD puis `php -S`) est **suspendue pour une instance FrankenPHP partagée** : elle ne peut être réactivée que si l'isolation de l'instance PROD est démontrée, ou remplacée par une commutation de routage/configuration indépendante qui préserve réellement les autres sites. Aucune bascule destructive automatique sur un simple ping hard ou en l'absence de REST.
+- Le passage **Normal → Maintenance → Normal** exige une recette des deux pages, du HTTP de Maintenance, des assets et du chemin public Cloudflare, sans régression sur les autres sites. En cas de mode inconnu, refuser l'action plutôt que de supposer un serveur arrêté.
+
+### EZScore DEV : mode Normal / Maintenance pour la recette
+
+- **EZScore DEV dispose aussi d'un contrôle Normal / Maintenance**, de même vocation que PROD mais **strictement indépendant**. Il permet d'éprouver le routage, le rendu des pages de maintenance, les assets, les codes HTTP et le retour au mode Normal **avant tout changement de bascule sur PROD**.
+- Le mode DEV n'est pas un bouton Démarrer/Arrêter : **le serveur Windows EZS_FrankenPHP reste en fonctionnement** ; le changement de mode ne doit jamais arrêter/redémarrer un processus FrankenPHP partagé, modifier l'intention de service ni toucher aux ports d'autres sites.
+- Définir un état et une configuration de mode propres à DEV, séparés des données, serrures, jetons, journaux et routes PROD. Une action DEV ne modifie **jamais** le port 8501, le routage public PROD, Cloudflare, le SSO PROD ni ses fichiers. La bascule de DEV ne doit pas modifier LAB, Assistant ou ROOT.
+- Le mode DEV Normal sert l'application EZScore DEV sur son chemin et ses ports canoniques ; le mode DEV Maintenance expose une **page web de maintenance identifiable**, sans erreur blanche et avec les assets requis, sur **la même URL DEV**. La présentation peut réutiliser les composants de maintenance existants **sans coupler les états DEV et PROD**.
+- L'interface Orchestrator conserve les liens Ouvrir et ajoute pour DEV **uniquement les commandes Normal et Maintenance**, avec contrôle loopback, CSRF, confirmation non native, indication explicite du mode observé et refus en cas de mode incertain. Aucun bouton Démarrer, Arrêter ou Redémarrer.
+- Le **ping hard DEV** relève les ports TCP et la réponse HTTP de la page DEV, puis restitue **MAINTENANCE** lorsque la page de maintenance est effectivement observée ; HTTP 503 avec corps HTML non vide peut être la réponse attendue en maintenance, mais n'est jamais un succès en mode Normal. Le ping ne déclenche aucune bascule.
+- La recette DEV doit couvrir Normal → Maintenance → Normal, les erreurs partielles, la persistance du mode, les liens CSS/JS/images, le SSO Google DEV et l'accès protégé aux médias après retour en Normal, sans interruption ni effet croisé vers PROD, LAB, Assistant ou ROOT.
+- **Préservation des configurations FastCGI historiquement fonctionnelles** : l'inventaire et la migration FrankenPHP devront comparer, avant écriture, `config/caddy/Caddyfile.dev`, `config/caddy/Caddyfile.dev-lab-assistant-candidate`, `config/caddy/Caddyfile.prod`, et leurs équivalents natifs. Conserver notamment DEV `8502 → 8602`, `forward_auth /internal/media/auth`, `EZSCORE_MEDIA_ROOT`, et PROD `8501 → 8510 → 8511`, `X-Forwarded-Proto=https`, `X-Forwarded-Port=443`, `X-Forwarded-Host` et le routage des médias. Ces fichiers sont des **références de comportement**, non des instructions de réactiver FastCGI ou de supposer que le SSO reste fonctionnel sans recette navigateur.
+- La bascule DEV est une **étape technique ultérieure à développer et valider** ; cette clause n'atteste ni son existence actuelle ni sa sécurité. La recette DEV ne dispense jamais de contrôles supplémentaires sur PROD, notamment du trajet public Cloudflare et de l'isolation des environnements.
+
+### Priorités et critères de recette
+
+**Ordre obligatoire :**
+
+1. Inventorier le service Windows FrankenPHP existant, sa commande, sa configuration effective, ses sites, ses variables PHP et ses ports ; préserver ses fichiers, tâches et logs. Évaluer l'isolation DEV/PROD et la faisabilité du serveur commun **avant** toute migration.
+2. Valider le **démarrage du seul service** et l'accès réel aux pages ROOT, DEV, LAB, Assistant et PROD (ou page Maintenance attendue). Un service démarré ne suffit pas : le navigateur doit afficher les pages.
+3. Valider les **pings hard TCP/HTTP** et leur restitution fidèle dans le dump Twig. Tester site absent, port partiel, HTTP 200/302/503, panne de collecte, boot à froid/chaud et non-régression du mode PROD.
+4. Nettoyer de manière traçable les commandes et modules de cycle de vie devenus inutiles, avec tests, rollback et absence de commandes automatiques. Une livraison peut fractionner le nettoyage par dépendance prouvée : ne jamais déclarer le cleanup terminé avant la suppression vérifiée des références obsolètes.
+5. **Seulement après** ces validations, concevoir et intégrer le **ping soft REST** dans une livraison distincte.
+
+**Étude d'impact et sécurité :** un service commun augmente les risques d'indisponibilité croisée et de fuite d'environnement PHP ; conserver DEV/PROD isolés fonctionnellement, ne pas couper des ports existants ni toucher au DNS/Cloudflare sans recette. Un besoin démontré d'instances isolées prime sur la préférence pour un seul serveur. Aucun changement de service/processus par un simple commit documentaire. La présente décision ne certifie ni la faisabilité technique du serveur unique ni l'état réel de MAIN.
+
+### Contrats historiques
+
+Les descriptions R2/R6B/R7/R8, les tests de permissions et les voies start/stop de sites antérieures sont **historiques** là où ils contredisent ce chapitre. Leur existence dans le dépôt ne constitue pas une autorisation de les exécuter. Le contrat général de sécurité des opérations destructrices et la traçabilité des incidents restent en vigueur. Toute modification technique ultérieure requiert une **livraison ZIP différentiel**, préflight, tests, rollback et recette Windows réelle, distincte de cette publication documentaire.
+
