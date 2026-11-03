@@ -16,8 +16,7 @@ final class RootHealthController
         $headers = ['Cache-Control' => 'no-store'];
         if (($_SERVER['APP_ENV'] ?? getenv('APP_ENV') ?: '') !== 'dev'
             || !in_array($request->getClientIp(), ['127.0.0.1', '::1'], true)
-            || !in_array($request->getHost(), ['127.0.0.1', 'localhost'], true)
-            || $request->getPort() !== 8790) {
+            || !in_array($request->getHost(), ['127.0.0.1', 'localhost'], true)) {
             return new JsonResponse(['status' => 'FORBIDDEN'], 403, $headers);
         }
 

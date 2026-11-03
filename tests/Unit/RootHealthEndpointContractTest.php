@@ -13,23 +13,25 @@ final class RootHealthEndpointContractTest extends TestCase
             ['REMOTE_ADDR' => $remote]);
     }
 
-    public function testHealthIsExplicitlyScopedToDevLoopbackRoot(): void
+    public function testHealthIsScopedToDevAndLoopbackButNotFixedPort(): void
     {
         $previous = $_SERVER['APP_ENV'] ?? null;
         try {
             $_SERVER['APP_ENV'] = 'dev';
             $controller = new RootHealthController();
-            $good = $controller->health($this->request());
-            self::assertSame(200, $good->getStatusCode());
-            $data = json_decode((string)$good->getContent(), true, 512, JSON_THROW_ON_ERROR);
-            self::assertSame('ezs.root.health.v1', $data['schema']);
-            self::assertSame('orchestrator-root', $data['component']);
-            self::assertSame('HEALTHY', $data['status']);
-            self::assertSame(trim((string)file_get_contents(dirname(__DIR__,2).'/VERSION')), $data['version']);
-            self::assertArrayNotHasKey('services', $data);
-            self::assertArrayNotHasKey('secrets', $data);
-            self::assertContains('no-store', array_map('trim', explode(',', (string) $good->headers->get('Cache-Control'))));
-            self::assertSame(403, $controller->health($this->request('127.0.0.1',8501))->getStatusCode());
+            foreach ([8790, 18792] as $port) {
+                $good = $controller->health($this->request('127.0.0.1', $port));
+                self::assertSame(200, $good->getStatusCode());
+                $data = json_decode((string)$good->getContent(), true, 512, JSON_THROW_ON_ERROR);
+                self::assertSame('ezs.root.health.v1', $data['schema']);
+                self::assertSame('orchestrator-root', $data['component']);
+                self::assertSame('HEALTHY', $data['status']);
+                self::assertSame(trim((string)file_get_contents(dirname(__DIR__,2).'/VERSION')), $data['version']);
+                self::assertArrayNotHasKey('services', $data);
+                self::assertArrayNotHasKey('secrets', $data);
+                self::assertContains('no-store', array_map('trim', explode(',', (string) $good->headers->get('Cache-Control'))));
+            }
+            self::assertSame(403, $controller->health($this->request('evil.example',8790))->getStatusCode());
             self::assertSame(403, $controller->health($this->request('localhost',8790,'192.0.2.5'))->getStatusCode());
             $_SERVER['APP_ENV'] = 'prod';
             self::assertSame(403, $controller->health($this->request())->getStatusCode());
