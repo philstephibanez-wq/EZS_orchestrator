@@ -444,7 +444,7 @@ Le présent chapitre définit la **norme cible**, sans prétendre que chaque app
 
 ### Autorité et périmètre
 
-Ce chapitre est **normatif et identique dans les cinq dépôts** `EZS_orchestrator`, `EZScore`, `EZStudio_lab`, `EZStudioLab_assistant` et `EZS_maintenance`. Il actualise les dispositions plus anciennes qui lui seraient contraires, sans réduire les protections de sécurité, de propriété native, de PROD, d'authentification ni d'isolation.
+Les principes communs de démarrage et de supervision figurent dans les quatre dépôts historiques. **Les dispositions particulières concernant la bascule PROD vers EZS_maintenance sont exclusivement du ressort et du contrat de `EZS_orchestrator`.** Il actualise les dispositions plus anciennes qui lui seraient contraires, sans réduire les protections de sécurité, de propriété native, de PROD, d'authentification ni d'isolation.
 
 L'Orchestrator a exactement trois responsabilités à ce stade : **démarrage et arrêt des services**, **supervision** et **gestion de la queue de jobs de plateforme** (ordonnancement, distribution, suivi). Les opérations autorisées s'appliquent aux applications comme des unités, pas à leurs composants internes.
 
@@ -507,7 +507,7 @@ Exemple de **schéma**, valeurs illustratives et non observations :
 
 ### Standard technique, contrôles et ordre du chantier
 
-- **Étape 1 :** publier le présent contrat dans les cinq dépôts et vérifier le texte identique, avec leur `VERSION` canonique propre.
+- **Étape 1 :** maintenir les règles communes de supervision dans les quatre dépôts historiques et documenter exclusivement dans `EZS_orchestrator` les mécanismes particuliers de bascule PROD, avec leur `VERSION` canonique propre.
 - **Étape 2 :** finaliser sur l'Orchestrator le démarrage manuel, les intentions persistées, la supervision hard processus/TCP des DEV et PROD, le client REST soft même avant disponibilité des endpoints, les modes Normal/Maintenance PROD et la bascule contrôlée **vers EZS_maintenance**, jamais un redémarrage automatique de PROD. Ne déclarer opérationnel que ce qui est prouvé sur MAIN.
 - **Étape 3 :** aligner les applications **une par une**, chacune propriétaire de son endpoint et de ses composants, puis réaliser leur homogénéisation progressive : PHP 8.5/Symfony, Twig, jQuery, Bootstrap, PHPUnit et contrats de tests selon pertinence ; Python reste interne aux moteurs IA et scientifiques propriétaires. Aucune modification scientifique ni transfert de responsabilité implicite.
 - Recettes obligatoires : intention STOPPED, démarrage manuel, état natif ambigu, TCP seul, endpoint REST non implémenté, `OK` et `KO` multi-composants, erreurs de collecte, 100 sondes répétées sans doublon, `A/B/A/B`, résolution partielle, rechute, persistance après relance de ROOT, modes PROD et absence d'effet croisé DEV/LAB/Assistant/PROD.
@@ -515,7 +515,7 @@ Exemple de **schéma**, valeurs illustratives et non observations :
 
 ## CONTRAT EZS — BASCULE PROD VERS MAINTENANCE R2 (décision du 03/11/2026)
 
-Ce chapitre constitue la **référence prioritaire** en cas de contradiction avec les chapitres antérieurs (notamment toute mention de récupération/redémarrage automatique de PROD, de frontal supplémentaire obligatoire ou de runtime FrankenPHP séparé pour Maintenance). Le contrat transversal complet est conservé **identique dans les cinq dépôts**.
+Ce chapitre constitue la **référence prioritaire** en cas de contradiction avec les chapitres antérieurs (notamment toute mention de récupération/redémarrage automatique de PROD, de frontal supplémentaire obligatoire ou de runtime FrankenPHP séparé pour Maintenance). Le présent protocole est **propre au seul `EZS_orchestrator`**. Aucun changement de contrat, de code ou de responsabilité n'est requis dans `EZScore`, `EZStudio_lab`, `EZStudioLab_assistant` ou `EZS_maintenance` pour la prise de décision et la conduite de la bascule.
 
 ### Politique uniforme de cycle de vie et supervision
 
@@ -546,3 +546,9 @@ Ce chapitre constitue la **référence prioritaire** en cas de contradiction ave
 - Aucun endpoint de l'application Maintenance ne peut démarrer, arrêter ou changer PROD ; seuls les contrôles sécurisés d'Orchestrator commandent la bascule. Le site expose un minimum d'informations publiques, sans secret ni configuration interne.
 - Tests obligatoires sur environnement sûr avant PROD : syntaxe et PHPUnit, permissions, assets sur le même port, HTTP 200 des sondes, HTTP 503 des pages, `Retry-After`, tests de 8501 déjà occupé et PID étranger, arrêt PROD sécurisé, crash PHP Maintenance, défaillance PHP/REST, panne fatale vs simple erreur, pas de redémarrage automatique, journalisation/anti-spam, redémarrage d'Orchestrator, retour manuel et rollback. **Aucune activation de la bascule sur PROD avant validation MAIN documentée et autorisation distincte.**
 - Contrat documentaire seulement : la présente publication ne modifie ni les binaires, ni le serveur courant, ni le DNS, ni la configuration de Cloudflare, ni la santé réelle de PROD.
+
+### Attribution exclusive des responsabilités de bascule
+
+La **détection décisionnelle**, le verrouillage de la transition, l'arrêt attesté des processus PROD, l'occupation alternative du port 8501 par le serveur PHP Maintenance, l'audit, la mise en échec sûre et le retour manuel sont **définis, implémentés, testés et versionnés uniquement dans `EZS_orchestrator`**. Les applications EZScore et EZS_maintenance restent des cibles de contrôle et des sources de données de santé : elles n'orchestrent rien et ne portent aucun contrat de cycle de vie croisé. Les applications LAB et Assistant n'ont aucun rôle dans ce protocole.
+
+Ce chapitre local ne rend pas obligatoires des commits synchronisés vers d'autres dépôts ; seuls les changements éventuels de leurs interfaces indépendantes nécessiteraient leur propre livraison.
