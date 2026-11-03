@@ -3,13 +3,11 @@ declare(strict_types=1);
 
 namespace Ezs\Web\Module\Infrastructure;
 
-use Symfony\Component\Process\Exception\ProcessFailedException;
 use Symfony\Component\Process\Process;
 
 /**
- * V2 system boundary. No shell scripts or interpreter wrappers.
- * Running this class does not alone certify zero visible windows on Windows 11;
- * this is a separate mandatory live acceptance gate.
+ * Native command boundary. PHP-CGI is deliberately not an authorized executable.
+ * The remaining allowlist is preserved for existing consumers.
  */
 final class NativeCommandRunner
 {
@@ -17,7 +15,6 @@ final class NativeCommandRunner
         'git.exe' => true,
         'caddy.exe' => true,
         'php.exe' => true,
-        'php-cgi.exe' => true,
         'nvidia-smi.exe' => true,
     ];
 
@@ -38,7 +35,6 @@ final class NativeCommandRunner
                 throw new \InvalidArgumentException('NATIVE_ARGUMENT_INVALID');
             }
         }
-        // Symfony Process receives an argv array, never a shell command string.
         $process = new Process(array_merge([$executable], $arguments), $cwd);
         $process->setTimeout($timeout);
         $process->run();
