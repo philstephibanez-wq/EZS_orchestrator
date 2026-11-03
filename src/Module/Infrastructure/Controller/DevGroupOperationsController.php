@@ -1,16 +1,17 @@
 <?php
 declare(strict_types=1);
-
 namespace Ezs\Web\Module\Infrastructure\Controller;
 
-use Ezs\Web\Module\Infrastructure\NativeWindowsLifecycle;
 use Ezs\Web\Module\Infrastructure\DesiredServiceState;
-use Ezs\Web\Module\Infrastructure\SymfonyDevCachePreparation;
+use Ezs\Web\Module\Infrastructure\NativeSiteLifecycle;
+use Ezs\Web\Module\Infrastructure\NativeSiteObservation;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Attribute\Route;
 
-/** Local control only. Existing NativeWindowsLifecycle remains the sole lifecycle authority. */
+/** DEV-local REST facade for the canonical FrankenPHP native lifecycle.
+ * No legacy PHP-CGI process manager. Assistant operations are out of scope.
+ */
 final class DevGroupOperationsController
 {
     public static function allowed(string $environment, string $host, string $ip): bool
@@ -20,185 +21,136 @@ final class DevGroupOperationsController
             && in_array($ip, ['127.0.0.1', '::1'], true);
     }
 
+    /** Existing pure group semantics retained for callers and historic tests.
+     * This helper does not inspect or control any process.
+     */
     public static function permission(array $states, string $group): array
     {
-        $groups = NativeWindowsLifecycle::groups();
+        $groups = ['dev' => ['ezscore_dev','ezscore_preview'], 'lab' => ['lab'], 'assistant' => ['assistant']];
         if (!isset($groups[$group])) throw new \InvalidArgumentException('EZS_DEV_GROUP_UNKNOWN');
         $names = $groups[$group];
-        // Chaque groupe est indépendant : une preuve ambiguë ailleurs ne bloque pas son démarrage.
         foreach ($names as $name) {
-            if (!array_key_exists($name, $states) || !in_array($states[$name], ['ATTESTED', 'ABSENT'], true)) {
-                return ['start' => false, 'restart' => false, 'stop' => false, 'state' => 'UNVERIFIED'];
+            if (!isset($states[$name]) || !in_array($states[$name], ['ATTESTED','ABSENT'], true)) {
+                return ['start'=>false,'restart'=>false,'stop'=>false,'state'=>'UNVERIFIED'];
             }
         }
         $values = array_map(static fn(string $name): string => $states[$name], $names);
-        $allUp = count(array_filter($values, static fn(string $s): bool => $s === 'ATTESTED')) === count($values);
-        $allDown = count(array_filter($values, static fn(string $s): bool => $s === 'ABSENT')) === count($values);
-        return [
-            // DEV and Preview share one Symfony cache: refuse partial cold start while sibling runs.
-            'start' => $allDown,
-            'restart' => $allUp,
-            'stop' => !$allDown,
-            'state' => $allUp ? 'RUNNING' : ($allDown ? 'STOPPED' : 'PARTIAL'),
-        ];
+        $up = count(array_filter($values, static fn(string $state): bool => $state === 'ATTESTED'));
+        $state = $up === count($values) ? 'RUNNING' : ($up === 0 ? 'STOPPED' : 'PARTIAL');
+        return ['start'=>$state === 'STOPPED','restart'=>$state === 'RUNNING',
+            'stop'=>$state === 'RUNNING' || $state === 'PARTIAL','state'=>$state];
+    }
+
+    private static function inaccessibleAssistant(): array
+    {
+        return ['state'=>'UNVERIFIED','start'=>false,'restart'=>false,'stop'=>false,'desired'=>'UNVERIFIED'];
     }
 
     private function allowedRequest(Request $request): bool
     {
-        return self::allowed(
-            (string) ($_SERVER['APP_ENV'] ?? getenv('APP_ENV') ?: ''),
-            $request->getHost(),
-            (string) $request->getClientIp()
-        );
+        return self::allowed((string) ($_SERVER['APP_ENV'] ?? getenv('APP_ENV') ?: ''),
+            $request->getHost(), (string) $request->getClientIp());
     }
 
     private function token(): string
     {
         if (session_status() !== PHP_SESSION_ACTIVE) {
-            session_start(['cookie_httponly' => true, 'cookie_samesite' => 'Strict', 'use_strict_mode' => true]);
+            session_start(['cookie_httponly'=>true,'cookie_samesite'=>'Strict','use_strict_mode'=>true]);
         }
-        if (!isset($_SESSION['ezs_dev_group_csrf'])) {
-            $_SESSION['ezs_dev_group_csrf'] = bin2hex(random_bytes(32));
-        }
+        if (!isset($_SESSION['ezs_dev_group_csrf'])) $_SESSION['ezs_dev_group_csrf'] = bin2hex(random_bytes(32));
         return (string) $_SESSION['ezs_dev_group_csrf'];
     }
 
     #[Route('/api/v2/infrastructure/dev-groups', name: 'ezs_dev_groups_read', methods: ['GET'])]
     public function read(Request $request): JsonResponse
     {
-        if (!$this->allowedRequest($request)) return new JsonResponse(['error' => 'forbidden'], 403);
-        $token = $this->token();
+        if (!$this->allowedRequest($request)) return new JsonResponse(['error'=>'forbidden'],403);
         try {
-            $lifecycle = new NativeWindowsLifecycle();
-            $states = $lifecycle->status();
-            $groups = [];
-            foreach (NativeWindowsLifecycle::groups() as $name => $_members) {
-                $groups[$name] = self::permission($states, $name);
-                $groups[$name]['desired'] = (new DesiredServiceState())->get($name);
-            }
+            $observation = new NativeSiteObservation();
             return new JsonResponse([
-                'schema' => 'ezs.dev_groups.v1',
-                'csrf' => $token,
-                'groups' => $groups,
-            ], 200, ['Cache-Control' => 'no-store']);
-        } catch (\Throwable $failure) {
-            return new JsonResponse(['error' => $failure->getMessage()], 503, ['Cache-Control' => 'no-store']);
+                'schema'=>'ezs.dev_groups.v1', 'csrf'=>$this->token(),
+                'groups'=>[
+                    'dev'=>$observation->observe('dev'),
+                    'lab'=>$observation->observe('lab'),
+                    'assistant'=>self::inaccessibleAssistant(),
+                ],
+            ],200,['Cache-Control'=>'no-store']);
+        } catch (\Throwable $error) {
+            return new JsonResponse(['error'=>'native_inventory_unavailable'],503,['Cache-Control'=>'no-store']);
         }
     }
 
-
-    #[Route('/api/v2/infrastructure/dev-group/{group}', name: 'ezs_dev_group_read_single', requirements: ['group' => 'dev|lab|assistant'], methods: ['GET'])]
+    #[Route('/api/v2/infrastructure/dev-group/{group}', name: 'ezs_dev_group_read_single', requirements: ['group'=>'dev|lab|assistant'], methods: ['GET'])]
     public function readGroup(Request $request, string $group): JsonResponse
     {
-        if (!$this->allowedRequest($request)) return new JsonResponse(['error' => 'forbidden'], 403);
+        if (!$this->allowedRequest($request)) return new JsonResponse(['error'=>'forbidden'],403);
+        if ($group === 'assistant') {
+            return new JsonResponse(['schema'=>'ezs.dev_group_single.v1','group'=>'assistant',
+                'permission'=>self::inaccessibleAssistant(),'csrf'=>$this->token()],200,['Cache-Control'=>'no-store']);
+        }
+        if (!in_array($group,['dev','lab'],true)) return new JsonResponse(['error'=>'unknown_group'],404);
         try {
-            $lifecycle = new NativeWindowsLifecycle();
-            $states = $lifecycle->status();
-            return new JsonResponse([
-                'schema' => 'ezs.dev_group_single.v1',
-                'group' => $group,
-                'permission' => array_merge(
-                    self::permission($states, $group),
-                    ['desired' => (new DesiredServiceState())->get($group)]
-                ),
-                'csrf' => $this->token(),
-            ], 200, ['Cache-Control' => 'no-store']);
-        } catch (\Throwable $failure) {
-            return new JsonResponse(['error' => 'group_inventory_unavailable'], 503, ['Cache-Control' => 'no-store']);
+            return new JsonResponse(['schema'=>'ezs.dev_group_single.v1','group'=>$group,
+                'permission'=>(new NativeSiteObservation())->observe($group),
+                'csrf'=>$this->token()],200,['Cache-Control'=>'no-store']);
+        } catch (\Throwable $error) {
+            return new JsonResponse(['error'=>'group_inventory_unavailable'],503,['Cache-Control'=>'no-store']);
         }
     }
 
-    #[Route('/api/v2/infrastructure/dev-groups/{group}/{action}', name: 'ezs_dev_groups_action', requirements: ['group' => 'dev|lab|assistant', 'action' => 'start|stop|restart'], methods: ['POST'])]
+    #[Route('/api/v2/infrastructure/dev-groups/{group}/{action}', name: 'ezs_dev_groups_action', requirements: ['group'=>'dev|lab|assistant','action'=>'start|stop|restart'], methods: ['POST'])]
     public function action(Request $request, string $group, string $action): JsonResponse
     {
-        if (!$this->allowedRequest($request)) return new JsonResponse(['error' => 'forbidden'], 403);
-        if (!in_array($request->headers->get('Origin', ''), ['http://127.0.0.1:8790', 'http://localhost:8790'], true)) {
-            return new JsonResponse(['error' => 'invalid_origin'], 403);
+        if (!$this->allowedRequest($request)) return new JsonResponse(['error'=>'forbidden'],403);
+        if (!in_array($request->headers->get('Origin',''),['http://127.0.0.1:8790','http://localhost:8790'],true)) {
+            return new JsonResponse(['error'=>'invalid_origin'],403);
         }
-        if (!hash_equals($this->token(), (string) $request->headers->get('X-EZS-CSRF', ''))) {
-            return new JsonResponse(['error' => 'csrf'], 403);
+        if (!hash_equals($this->token(), (string) $request->headers->get('X-EZS-CSRF',''))) {
+            return new JsonResponse(['error'=>'csrf'],403);
         }
-        if ((string) $request->request->get('confirmation', '') !== strtoupper($action).'_'.strtoupper($group)) {
-            return new JsonResponse(['error' => 'confirmation_required'], 400);
+        if ((string) $request->request->get('confirmation','') !== strtoupper($action).'_'.strtoupper($group)) {
+            return new JsonResponse(['error'=>'confirmation_required'],400);
         }
-        $ezsTraceStart = hrtime(true); // EZS_C83_TIMING
-        $ezsTraceLast = $ezsTraceStart;
-        $ezsTrace = static function (string $stage) use ($group, $action, &$ezsTraceLast, $ezsTraceStart): void {
-            $now = hrtime(true);
-            $line = gmdate('c').' group='.$group.' action='.$action.' stage='.$stage
-                .' step_ms='.round(($now-$ezsTraceLast)/1000000,2)
-                .' total_ms='.round(($now-$ezsTraceStart)/1000000,2).PHP_EOL;
-            $ezsTraceLast = $now;
-            $path = 'H:/EZS_orchestrator/var/log/supervision/http-action-timing.log';
-            if (is_dir(dirname($path))) { @file_put_contents($path, $line, FILE_APPEND | LOCK_EX); }
-        };
-        $ezsTrace('accepted');
+        if (!in_array($group,['dev','lab'],true)) {
+            return new JsonResponse(['error'=>'native_site_only'],409,['Cache-Control'=>'no-store']);
+        }
         try {
-            $lifecycle = new NativeWindowsLifecycle();
-            $states = $lifecycle->status();
-            $ezsTrace('inventory');
-            $permission = self::permission($states, $group);
-            if (!$permission[$action]) {
-                return new JsonResponse(['error' => 'action_not_available'], 409, ['Cache-Control' => 'no-store']);
-            }
-            // L'intention est durable AVANT toute mutation de processus.
-            (new DesiredServiceState())->set($group, $action === 'stop' ? DesiredServiceState::STOPPED : DesiredServiceState::RUNNING);
-            $ezsTrace('intent_persisted');
+            $native = new NativeSiteLifecycle();
+            $observation = new NativeSiteObservation($native);
+            $permission = $observation->observe($group);
+            if (!$permission[$action]) return new JsonResponse(['error'=>'action_not_available'],409,['Cache-Control'=>'no-store']);
+            $intent = new DesiredServiceState();
             if ($action === 'start') {
-                $specs = array_intersect_key(NativeWindowsLifecycle::specs(), array_flip(NativeWindowsLifecycle::groups()[$group]));
-                $roots = SymfonyDevCachePreparation::rootsToPrepare(array_intersect_key($states, $specs), $specs);
-                SymfonyDevCachePreparation::prepare($roots);
-                $ezsTrace('cache_prepared');
-                $result = $lifecycle->startGroup($group);
-                $ezsTrace('group_started');
-            } elseif ($action === 'restart') {
-                // Le cycle natif refuse tout PID non attesté et contrôle son identité à chaque arrêt.
-                // Vérifier les dépendances de relance AVANT toute interruption.
-                $specs = array_intersect_key(NativeWindowsLifecycle::specs(), array_flip(NativeWindowsLifecycle::groups()[$group]));
-                foreach ($specs as $name => $spec) {
-                    if (!is_file($spec['exe']) || !is_dir($spec['cwd'])) {
-                        return new JsonResponse(['error' => 'restart_dependency_unavailable_'.$name], 409, ['Cache-Control' => 'no-store']);
-                    }
-                }
-                $stopped = $lifecycle->stopGroup($group);
-                $ezsTrace('group_stopped_restart');
-                try {
-                    $afterStop = $lifecycle->status();
-                    if (self::permission($afterStop, $group)['state'] !== 'STOPPED') {
-                        throw new \RuntimeException('EZS_RESTART_STOP_NOT_VERIFIED');
-                    }
-                    $roots = SymfonyDevCachePreparation::rootsToPrepare(array_intersect_key($afterStop, $specs), $specs);
-                    SymfonyDevCachePreparation::prepare($roots);
-                    $started = $lifecycle->startGroup($group);
-                    $ezsTrace('group_started_restart');
-                    $afterStart = $lifecycle->status();
-                    if (self::permission($afterStart, $group)['state'] !== 'RUNNING') {
-                        throw new \RuntimeException('EZS_RESTART_START_NOT_VERIFIED');
-                    }
-                    $result = ['stopped' => $stopped, 'started' => $started];
-                } catch (\Throwable $restartFailure) {
-                    // Ne jamais tenter de récupération implicite sur une identité incertaine.
-                    return new JsonResponse(['error' => 'restart_incomplete', 'phase' => 'after_stop'], 503, ['Cache-Control' => 'no-store']);
-                }
-            } else {
-                $result = $lifecycle->stopGroup($group);
-                $ezsTrace('group_stopped');
-                $afterStop = $lifecycle->status();
-                if (self::permission($afterStop, $group)['state'] !== 'STOPPED') {
+                $native->request($group,'Preflight');
+                $intent->set($group,DesiredServiceState::RUNNING);
+                $result = $native->start($group);
+            } elseif ($action === 'stop') {
+                $intent->set($group,DesiredServiceState::STOPPED);
+                $result = $native->stop($group);
+                if ($observation->observe($group)['state'] !== 'STOPPED') {
                     throw new \RuntimeException('EZS_STOP_NOT_VERIFIED_'.$group);
                 }
-                $ezsTrace('group_stop_verified');
+            } else {
+                // Distinct intent transitions: STOP first, reattest, then START.
+                // A failed STOP never causes a speculative START.
+                $native->request($group,'Preflight');
+                $intent->set($group,DesiredServiceState::STOPPED);
+                $stopped = $native->stop($group);
+                try {
+                    if ($observation->observe($group)['state'] !== 'STOPPED') {
+                        throw new \RuntimeException('EZS_RESTART_STOP_NOT_VERIFIED');
+                    }
+                    $intent->set($group,DesiredServiceState::RUNNING);
+                    $started = $native->start($group);
+                    $result = ['stopped'=>$stopped,'started'=>$started];
+                } catch (\Throwable $restartFailure) {
+                    return new JsonResponse(['error'=>'restart_incomplete','phase'=>'after_stop'],503,['Cache-Control'=>'no-store']);
+                }
             }
-            $ezsTrace('completed');
-            return new JsonResponse([
-                'schema' => 'ezs.dev_group_action.v1',
-                'group' => $group,
-                'action' => $action,
-                'processes' => $result,
-            ], 200, ['Cache-Control' => 'no-store']);
-        } catch (\Throwable $failure) {
-            $ezsTrace('failed_'.preg_replace('/[^a-zA-Z0-9_]/','_',get_class($failure)));
-            return new JsonResponse(['error' => $failure->getMessage()], 503, ['Cache-Control' => 'no-store']);
+            return new JsonResponse(['schema'=>'ezs.dev_group_action.v1','group'=>$group,
+                'action'=>$action,'processes'=>$result],200,['Cache-Control'=>'no-store']);
+        } catch (\Throwable $error) {
+            return new JsonResponse(['error'=>'native_action_refused'],503,['Cache-Control'=>'no-store']);
         }
     }
 }
