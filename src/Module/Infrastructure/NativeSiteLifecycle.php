@@ -10,7 +10,7 @@ final class NativeSiteLifecycle
 {
     private const ROOT = 'H:/EZS_orchestrator';
     private const SCRIPT = self::ROOT.'/scripts/ezs_platform_control.ps1';
-    private const SITES = ['dev', 'lab', 'prod'];
+    private const SITES = ['dev', 'lab', 'assistant', 'prod'];
 
     /** @var \Closure(list<string>):array{exit_code:int,stdout:string,stderr:string} */
     private readonly \Closure $invoke;
@@ -62,13 +62,33 @@ final class NativeSiteLifecycle
             throw new \RuntimeException('EZS_NATIVE_SITE_RESULT_INVALID');
         }
         if ($result['exit_code'] !== 0) {
-            throw new \RuntimeException('EZS_NATIVE_SITE_ACTION_FAILED_'.$site.'_'.$action.'_CODE_'.$result['exit_code']);
+            $safeCode = self::nativeFailureCode($result['stderr']);
+            throw new \RuntimeException('EZS_NATIVE_SITE_ACTION_FAILED_'.$site.'_'.$action.'_CODE_'.$result['exit_code']
+                .($safeCode === null ? '' : '_REASON_'.$safeCode));
         }
         $marker = 'EZS_PLATFORM_'.strtoupper($site).'_'.strtoupper($action).'_OK';
         if (!str_contains($result['stdout'], $marker)) {
             throw new \RuntimeException('EZS_NATIVE_SITE_UNATTESTED_SUCCESS');
         }
         return $result['stdout'];
+    }
+
+    /** A conservative whitelist, never expose untrusted subprocess output. */
+    private static function nativeFailureCode(string $stderr): ?string
+    {
+        foreach (['DEV_MEDIA_ROOT_ENV_MISSING','FRANKENPHP_ADAPT_FAILED','FRANKENPHP_EXE_MISSING',
+            'CADDY_CONFIG_MISSING','CADDY_CONFIG_FASTCGI_REFUSED','PHP_ENTRY_MISSING',
+            'INTENT_MISSING','INTENT_SCHEMA_INVALID','INTENT_SITE_INVALID',
+            'INTENT_STOPPED_REFUSED','FOREIGN_LISTENER','MULTIPLE_OWNED',
+            'ALREADY_RUNNING_OR_STALE_OWNER_REFUSED','OWNER_RECORD_INVALID',
+            'START_PROCESS_NOT_FOUND','PLATFORM_DELEGATE_MISSING',
+            'ASSISTANT_CANONICAL_SCRIPT_MISSING','ASSISTANT_INTENT_MISSING',
+            'ASSISTANT_START_LLAMA_CONTRACT_INVALID','ASSISTANT_STOP_LLAMA_CONTRACT_INVALID'] as $token) {
+            if (preg_match('/(?<![A-Z0-9_])'.preg_quote($token,'/').'(?![A-Z0-9_])/', $stderr) === 1) {
+                return $token;
+            }
+        }
+        return null;
     }
 
     /** Native sites have no implicit STOP/START retry or adoption on ambiguous state. */

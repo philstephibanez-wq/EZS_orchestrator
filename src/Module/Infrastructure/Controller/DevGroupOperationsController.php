@@ -10,7 +10,7 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Attribute\Route;
 
 /** DEV-local REST facade for the canonical FrankenPHP native lifecycle.
- * No legacy PHP-CGI process manager. Assistant operations are out of scope.
+ * No legacy PHP-CGI process manager. Assistant delegates to its own canonical scripts.
  */
 final class DevGroupOperationsController
 {
@@ -46,6 +46,13 @@ final class DevGroupOperationsController
         return ['state'=>'UNVERIFIED','start'=>false,'restart'=>false,'stop'=>false,'desired'=>'UNVERIFIED'];
     }
 
+    /** Failure to prove Assistant ownership stays UNVERIFIED, never STOPPED. */
+    private static function assistantObservation(NativeSiteObservation $observer): array
+    {
+        try { return $observer->observe('assistant'); }
+        catch (\Throwable) { return self::inaccessibleAssistant(); }
+    }
+
     private function allowedRequest(Request $request): bool
     {
         return self::allowed((string) ($_SERVER['APP_ENV'] ?? getenv('APP_ENV') ?: ''),
@@ -72,7 +79,7 @@ final class DevGroupOperationsController
                 'groups'=>[
                     'dev'=>$observation->observe('dev'),
                     'lab'=>$observation->observe('lab'),
-                    'assistant'=>self::inaccessibleAssistant(),
+                    'assistant'=>self::assistantObservation($observation),
                 ],
             ],200,['Cache-Control'=>'no-store']);
         } catch (\Throwable $error) {
@@ -84,14 +91,12 @@ final class DevGroupOperationsController
     public function readGroup(Request $request, string $group): JsonResponse
     {
         if (!$this->allowedRequest($request)) return new JsonResponse(['error'=>'forbidden'],403);
-        if ($group === 'assistant') {
-            return new JsonResponse(['schema'=>'ezs.dev_group_single.v1','group'=>'assistant',
-                'permission'=>self::inaccessibleAssistant(),'csrf'=>$this->token()],200,['Cache-Control'=>'no-store']);
-        }
-        if (!in_array($group,['dev','lab'],true)) return new JsonResponse(['error'=>'unknown_group'],404);
+        if (!in_array($group,['dev','lab','assistant'],true)) return new JsonResponse(['error'=>'unknown_group'],404);
         try {
             return new JsonResponse(['schema'=>'ezs.dev_group_single.v1','group'=>$group,
-                'permission'=>(new NativeSiteObservation())->observe($group),
+                'permission'=>$group === 'assistant'
+                    ? self::assistantObservation(new NativeSiteObservation())
+                    : (new NativeSiteObservation())->observe($group),
                 'csrf'=>$this->token()],200,['Cache-Control'=>'no-store']);
         } catch (\Throwable $error) {
             return new JsonResponse(['error'=>'group_inventory_unavailable'],503,['Cache-Control'=>'no-store']);
@@ -111,7 +116,7 @@ final class DevGroupOperationsController
         if ((string) $request->request->get('confirmation','') !== strtoupper($action).'_'.strtoupper($group)) {
             return new JsonResponse(['error'=>'confirmation_required'],400);
         }
-        if (!in_array($group,['dev','lab'],true)) {
+        if (!in_array($group,['dev','lab','assistant'],true)) {
             return new JsonResponse(['error'=>'native_site_only'],409,['Cache-Control'=>'no-store']);
         }
         try {
@@ -150,7 +155,10 @@ final class DevGroupOperationsController
             return new JsonResponse(['schema'=>'ezs.dev_group_action.v1','group'=>$group,
                 'action'=>$action,'processes'=>$result],200,['Cache-Control'=>'no-store']);
         } catch (\Throwable $error) {
-            return new JsonResponse(['error'=>'native_action_refused'],503,['Cache-Control'=>'no-store']);
+            $reason = strtoupper($error->getMessage());
+            // Only an explicitly controlled alphanumeric error code reaches the API.
+            if (!preg_match('/^EZS_[A-Z0-9_]{1,160}$/D', $reason)) $reason = 'EZS_NATIVE_ACTION_UNKNOWN';
+            return new JsonResponse(['error'=>'native_action_refused','reason_code'=>$reason],503,['Cache-Control'=>'no-store']);
         }
     }
 }

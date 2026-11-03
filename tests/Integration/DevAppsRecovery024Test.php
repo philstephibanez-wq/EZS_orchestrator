@@ -1,19 +1,17 @@
 <?php
 declare(strict_types=1);
+
 use PHPUnit\Framework\TestCase;
-use Symfony\Component\Console\Application;
-use Symfony\Component\Console\Tester\CommandTester;
-use Ezs\Web\Module\Infrastructure\EcosystemEntryCommand;
-use Ezs\Web\Module\Infrastructure\EcosystemStopCommand;
-final class DevAppsRecovery024Test extends TestCase {
-    public function testComposerSymfonyPlansNeverMutateRuntime():void {
-        $app=new Application();
-        $app->add(new EcosystemEntryCommand());
-        $app->add(new EcosystemStopCommand());
-        foreach(['ezs:ecosystem:start','ezs:ecosystem:stop'] as $name){
-            $tester=new CommandTester($app->find($name));
-            self::assertSame(0,$tester->execute(['--plan'=>true]));
-            self::assertStringContainsString('EZS_ECOSYSTEM_PLAN=', $tester->getDisplay());
+use Ezs\Web\Module\Infrastructure\NativeSiteLifecycle;
+
+final class DevAppsRecovery024Test extends TestCase
+{
+    public function testNativeSitePlanIsPureAndDoesNotStartAnyService(): void
+    {
+        foreach (['dev','lab','assistant'] as $site) {
+            $args = NativeSiteLifecycle::arguments($site, 'Preflight');
+            self::assertSame($site,$args[array_search('-Site',$args,true)+1]);
+            self::assertSame('Preflight',end($args));
         }
     }
 }

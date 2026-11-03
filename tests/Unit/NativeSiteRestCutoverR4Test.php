@@ -36,7 +36,7 @@ final class NativeSiteRestCutoverR4Test extends TestCase
         }
     }
 
-    public function testRestControllerCannotInvokeLegacyFastCgiOrMutateAssistant(): void
+    public function testRestControllerCannotInvokeLegacyFastCgiAndAssistantUsesNativeBridge(): void
     {
         $root=dirname(__DIR__,2);
         foreach (['DevGroupOperationsController.php','DevGroupDebugController.php'] as $name) {
@@ -46,7 +46,7 @@ final class NativeSiteRestCutoverR4Test extends TestCase
             self::assertStringNotContainsString('php-cgi.exe',$content);
         }
         $ops=(string)file_get_contents($root.'/src/Module/Infrastructure/Controller/DevGroupOperationsController.php');
-        self::assertStringContainsString("if (!in_array(\$group,['dev','lab'],true))",$ops);
+        self::assertStringContainsString("if (!in_array(\$group,['dev','lab','assistant'],true))",$ops);
         self::assertStringContainsString('new NativeSiteLifecycle()', $ops);
         self::assertStringContainsString('restart_incomplete', $ops);
         self::assertStringContainsString('DesiredServiceState::STOPPED',$ops);

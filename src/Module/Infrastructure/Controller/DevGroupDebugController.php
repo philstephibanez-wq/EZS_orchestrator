@@ -27,6 +27,12 @@ final class DevGroupDebugController
         return $result;
     }
 
+    private static function observeAssistant(NativeSiteObservation $observer): string
+    {
+        try { return $observer->observe('assistant')['state']; }
+        catch (\Throwable) { return 'UNVERIFIED'; }
+    }
+
     #[Route('/api/v2/infrastructure/dev-debug-native', name:'ezs_dev_group_debug_native', methods:['GET'])]
     public function native(Request $request):Response
     {
@@ -39,7 +45,7 @@ final class DevGroupDebugController
                 'groups'=>[
                     'dev'=>['dev'=>$observer->observe('dev')['state']],
                     'lab'=>['lab'=>$observer->observe('lab')['state']],
-                    'assistant'=>['assistant'=>'UNVERIFIED'],
+                    'assistant'=>['assistant'=>self::observeAssistant($observer)],
                 ], 'error'=>null];
         }catch(\Throwable $error){
             $result=['schema'=>'ezs.dev_group_native_debug.v1','groups'=>[],'error'=>'INVENTORY_UNAVAILABLE'];

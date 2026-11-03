@@ -22,8 +22,18 @@ if($Site -ne 'assistant' -and $Action -in @('Preflight','Start')) {
     $content=Get-Content -LiteralPath $config -Raw -Encoding UTF8
     if($content -match '(?i)\bphp_fastcgi\b|\bphp-cgi\b'){throw 'CADDY_CONFIG_FASTCGI_REFUSED'}
     # Caddy/FrankenPHP parses the configuration. No service is started.
-    $null=& $exe adapt --config $config --adapter caddyfile 2>&1
-    if($LASTEXITCODE -ne 0){throw ('FRANKENPHP_ADAPT_FAILED '+$Site+' exit='+$LASTEXITCODE)}
+    # Windows PowerShell 5.1 converts native stderr warnings to error records when
+    # redirecting 2>&1. Caddy emits formatting warnings on stderr even on exit 0.
+    # Temporarily permit those records, but keep strict execution and the native exit gate.
+    $previousErrorActionPreference=$ErrorActionPreference
+    try {
+        $ErrorActionPreference='Continue'
+        $null=& $exe adapt --config $config --adapter caddyfile 2>&1
+        $adaptExitCode=$LASTEXITCODE
+    } finally {
+        $ErrorActionPreference=$previousErrorActionPreference
+    }
+    if($adaptExitCode -ne 0){throw ('FRANKENPHP_ADAPT_FAILED '+$Site+' exit='+$adaptExitCode)}
 }
 $args=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$target,'-Action',$Action)
 if($Site -ne 'assistant'){$args+=@('-Site',$Site)}
