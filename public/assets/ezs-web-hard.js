@@ -37,9 +37,14 @@
                 .done(function(data){
                     if(!data || data.schema!=='ezs.web_hard_ping.v1' || !data.sites) throw new Error('HARD_PAYLOAD_INVALID');
                     names.forEach(name=>state(name,data.sites[name]));
+                    const prod=data.sites.prod;
+                    $('#http-prod').text(prod && prod.http && prod.http.status!==null ? String(prod.http.status) : 'Sans réponse');
+                    $('#tcp-prod').text(prod && prod.ports && prod.ports['8501'] ? 'Ouvert' : 'Fermé');
                     feedback.text('Ping hard TCP/HTTP · '+(data.captured_utc||'mesuré'));
                 }).fail(function(){
                     names.forEach(name=>state(name,null));
+                    $('#http-prod').text('Sans réponse');
+                    $('#tcp-prod').text('Inconnu');
                     feedback.text('Ping hard indisponible');
                 }).always(function(){busy=false;refreshButton.prop('disabled',false);});
         }

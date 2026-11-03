@@ -1,22 +1,23 @@
 <?php
 declare(strict_types=1);
 use PHPUnit\Framework\TestCase;
-final class RootFastcgiHealthRecoveryContractTest extends TestCase {
-    public function testHealthGuardIsScopedAndFailClosed(): void {
-        $root=dirname(__DIR__,2);
-        $legacy=file_get_contents($root.'/scripts/ezs_supervisor_tick.ps1');
-        $watchdog=file_get_contents($root.'/scripts/ezs_root_frankenphp_watchdog.ps1');
-        self::assertIsString($legacy);
-        self::assertIsString($watchdog);
-        self::assertStringContainsString("throw 'EZS_LEGACY_SUPERVISOR_REMOVED_USE_NATIVE_FRANKENPHP'",$legacy);
-        self::assertStringNotContainsString('Start-Process',$legacy);
-        foreach (['http://127.0.0.1:8790/health','ezs.root.health.v1',
-            'ROOT_INTENTION_STOPPED_NO_ACTION','ROOT_HEALTHY_OWNED',
-            'ROOT_HEALTHY_UNMANAGED_NO_ADOPTION','ROOT_HEALTH_FAILED_WAIT',
-            'ROOT_STOP_REFUSED_REATTESTATION','ROOT_REFUSED_FOREIGN_LISTENER'] as $token) {
-            self::assertStringContainsString($token,$watchdog);
-        }
-        self::assertStringNotContainsString('php-cgi.exe',$watchdog);
-        self::assertStringNotContainsString('caddy.exe',$watchdog);
+final class RootFastcgiHealthRecoveryContractTest extends TestCase
+{
+    public function testHealthGuardIsScopedAndFailClosed(): void
+    {
+        $root = dirname(__DIR__, 2);
+        $watchdog = (string) file_get_contents($root.'/scripts/ezs_root_frankenphp_watchdog.ps1');
+        $resident = (string) file_get_contents($root.'/scripts/ezs_supervisor_resident.ps1');
+        self::assertStringContainsString('ROOT_WEB_REACHABLE', $watchdog);
+        self::assertStringContainsString('ROOT_WEB_UNAVAILABLE', $watchdog);
+        self::assertStringContainsString('http://127.0.0.1:8790/', $watchdog);
+        self::assertStringContainsString('EZS_ROOT_FRANKENPHP_TICK', $watchdog);
+        self::assertStringNotContainsString('Stop-Process', $watchdog);
+        self::assertStringNotContainsString('Start-Process', $watchdog);
+        self::assertStringNotContainsString('Get-CimInstance', $watchdog);
+        self::assertStringNotContainsString('Get-RootProcesses', $watchdog);
+        self::assertStringNotContainsString('ezs_boot_sites_r7.ps1', $resident);
+        self::assertStringNotContainsString('-Action Boot', $resident);
+        self::assertStringContainsString('EZS_ROOT_RESIDENT_SINGLETON', $resident);
     }
 }

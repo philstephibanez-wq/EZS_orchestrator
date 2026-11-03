@@ -49,7 +49,9 @@
          $edge.text(d.caddy_listening?'Écoute 8501':'Arrêté');
          // Same user-facing service vocabulary as DEV, LAB and Assistant.
          // Maintenance is a separate operational mode, not the service-health badge.
-         if (d.gateway_online === true && d.backend_ready === true) {
+         if (d.maintenance===true && d.caddy_listening) {
+           setStatus('Maintenance','warning');
+         } else if (d.gateway_online === true && d.backend_ready === true) {
            setStatus('En ligne','success');
          } else if (d.gateway_online === false || (d.gateway_online === true && d.backend_ready === false)) {
            setStatus('En erreur','danger');

@@ -21,15 +21,43 @@ final class DevWebModeController
             && in_array($ip, ['127.0.0.1', '::1'], true);
     }
 
+    /**
+     * Shared local anti-CSRF nonce: the native FrankenPHP PHP runtime may not
+     * preserve session cookies between separate site handlers. Keep the token
+     * outside document roots, guarded by a lock, and do not use a predictable
+     * value. Origin + loopback + explicit confirmation are still mandatory.
+     */
     private static function token(): string
     {
-        if (session_status() !== PHP_SESSION_ACTIVE) {
-            session_start(['cookie_httponly' => true, 'cookie_samesite' => 'Strict', 'use_strict_mode' => true]);
+        if (!is_dir(self::FLAG_DIR) && !@mkdir(self::FLAG_DIR, 0750, true) && !is_dir(self::FLAG_DIR)) {
+            throw new \RuntimeException('dev_csrf_directory_unavailable');
         }
-        if (!isset($_SESSION['ezs_dev_web_mode_csrf'])) {
-            $_SESSION['ezs_dev_web_mode_csrf'] = bin2hex(random_bytes(32));
+        $path = self::FLAG_DIR.'/dev-csrf.key';
+        $handle = @fopen($path, 'c+');
+        if (!is_resource($handle)) {
+            throw new \RuntimeException('dev_csrf_open_failed');
         }
-        return (string) $_SESSION['ezs_dev_web_mode_csrf'];
+        try {
+            if (!flock($handle, LOCK_EX)) {
+                throw new \RuntimeException('dev_csrf_lock_failed');
+            }
+            rewind($handle);
+            $token = trim((string) stream_get_contents($handle));
+            if (!preg_match('/\A[a-f0-9]{64}\z/D', $token)) {
+                if ($token !== '') {
+                    throw new \RuntimeException('dev_csrf_token_invalid');
+                }
+                $token = bin2hex(random_bytes(32));
+                rewind($handle);
+                if (!ftruncate($handle, 0) || fwrite($handle, $token."\n") !== strlen($token) + 1 || !fflush($handle)) {
+                    throw new \RuntimeException('dev_csrf_write_failed');
+                }
+            }
+            return $token;
+        } finally {
+            flock($handle, LOCK_UN);
+            fclose($handle);
+        }
     }
 
     private static function permitted(Request $request): bool
@@ -42,10 +70,13 @@ final class DevWebModeController
     public function read(Request $request): JsonResponse
     {
         if (!self::permitted($request)) return new JsonResponse(['error'=>'forbidden'],403);
+        try { $csrf = self::token(); } catch (\RuntimeException $e) {
+            return new JsonResponse(['error'=>'dev_csrf_unavailable'],503);
+        }
         return new JsonResponse([
             'schema'=>'ezs.dev_web_mode.v1',
             'mode'=>is_file(self::FLAG) ? 'MAINTENANCE' : 'NORMAL',
-            'csrf'=>self::token(),
+            'csrf'=>$csrf,
         ],200,['Cache-Control'=>'no-store']);
     }
 
@@ -57,7 +88,10 @@ final class DevWebModeController
             ['http://127.0.0.1:8790','http://localhost:8790'], true)) {
             return new JsonResponse(['error'=>'invalid_origin'],403);
         }
-        if (!hash_equals(self::token(), (string) $request->headers->get('X-EZS-CSRF',''))) {
+        try { $csrf = self::token(); } catch (\RuntimeException $e) {
+            return new JsonResponse(['error'=>'dev_csrf_unavailable'],503);
+        }
+        if (!hash_equals($csrf, (string) $request->headers->get('X-EZS-CSRF',''))) {
             return new JsonResponse(['error'=>'csrf'],403);
         }
         if ((string) $request->request->get('confirmation','') !== strtoupper($mode).'_DEV') {

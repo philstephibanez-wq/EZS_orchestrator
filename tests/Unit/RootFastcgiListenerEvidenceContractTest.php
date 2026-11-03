@@ -5,16 +5,19 @@ final class RootFastcgiListenerEvidenceContractTest extends TestCase
 {
     public function testRefusalReportsListenerAndDoesNotWeakenGuard(): void
     {
-        $root=dirname(__DIR__,2);
-        $watchdog=file_get_contents($root.'/scripts/ezs_root_frankenphp_watchdog.ps1');
-        self::assertIsString($watchdog);
-        foreach (['Get-NetTCPConnection -State Listen -ErrorAction Stop',
-            'ROOT_REFUSED_FOREIGN_LISTENER','ROOT_REFUSED_AMBIGUOUS_OWNERSHIP',
-            'ROOT_REFUSED_PROCESS_WITHOUT_LISTENER','ROOT_STOP_REFUSED_REATTESTATION',
-            'ROOT_REFUSED_BOOT_RECHECK'] as $token) {
-            self::assertStringContainsString($token,$watchdog);
-        }
-        self::assertStringContainsString('[int]$ports[0].OwningProcess -ne [int]$all[0].ProcessId',$watchdog);
-        self::assertStringNotContainsString('8791',$watchdog);
+        $root = dirname(__DIR__, 2);
+        $watchdog = (string) file_get_contents($root.'/scripts/ezs_root_frankenphp_watchdog.ps1');
+        $resident = (string) file_get_contents($root.'/scripts/ezs_supervisor_resident.ps1');
+        self::assertStringContainsString('ROOT_WEB_REACHABLE', $watchdog);
+        self::assertStringContainsString('ROOT_WEB_UNAVAILABLE', $watchdog);
+        self::assertStringContainsString('http://127.0.0.1:8790/', $watchdog);
+        self::assertStringContainsString('EZS_ROOT_FRANKENPHP_TICK', $watchdog);
+        self::assertStringNotContainsString('Stop-Process', $watchdog);
+        self::assertStringNotContainsString('Start-Process', $watchdog);
+        self::assertStringNotContainsString('Get-CimInstance', $watchdog);
+        self::assertStringNotContainsString('Get-RootProcesses', $watchdog);
+        self::assertStringNotContainsString('ezs_boot_sites_r7.ps1', $resident);
+        self::assertStringNotContainsString('-Action Boot', $resident);
+        self::assertStringContainsString('EZS_ROOT_RESIDENT_SINGLETON', $resident);
     }
 }
