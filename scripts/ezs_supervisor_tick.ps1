@@ -1,5 +1,9 @@
 [CmdletBinding()]
 param([switch]$DevOnly,[switch]$RootOnly)
+# R1N7: retired entrypoint; fail closed before any historical Caddy/FastCGI launch.
+# Replaced by the canonical FrankenPHP service; no startup, stop, or process adoption here.
+Write-Output 'EZS_LEGACY_CADDY_FASTCGI_ENTRYPOINT_RETIRED'
+return
 # EZS watchdog: HTTP availability for Caddy DEV/PROD; bootstrap ROOT FastCGI.
 # Intentionally independent from Symfony, ezs:services, pending and PHPUnit.
 $ErrorActionPreference = 'Stop'
