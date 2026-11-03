@@ -38,27 +38,26 @@ final class SupervisorScheduledBoot058Test extends TestCase
 
     public function testWindowsTaskMustBeOptInAndUseExistingTick(): void
     {
-        $root = dirname(__DIR__, 2);
-        $installer = file_get_contents($root.'/scripts/ezs_supervisor_task.ps1');
-        $runner = file_get_contents($root.'/scripts/ezs_supervisor_tick.ps1');
-        self::assertIsString($installer);
-        self::assertIsString($runner);
-        self::assertStringContainsString("'Install','Update','Remove'", $installer);
-        self::assertStringContainsString('EZS_SUPERVISOR_TASK_ALREADY_EXISTS', $installer);
-        self::assertStringContainsString('Start-RootFastCgi', $runner);
-        self::assertStringNotContainsString('ezs:services start', $runner);
-        self::assertStringNotContainsString('extension=$extension', $runner);
-        self::assertStringContainsString('wscript.exe', $installer);
-        self::assertStringContainsString('Set-ScheduledTask', $installer);
-        // Both initial installation and an update must launch through the hidden host.
-        self::assertSame(2, substr_count($installer, 'New-ScheduledTaskAction -Execute'));
-        self::assertStringNotContainsString('powershell.exe', $installer);
-        self::assertSame(2, substr_count($installer, 'wscript.exe'));
-        self::assertSame(2, substr_count($installer, '//B //Nologo'));
-        self::assertStringContainsString('EZS_SUPERVISOR_TASK_UPDATED_HIDDEN', $installer);
-        $hidden = file_get_contents($root.'/scripts/ezs_supervisor_hidden.vbs');
-        self::assertIsString($hidden);
-        self::assertStringContainsString('WshShell.Run', $hidden);
-        self::assertStringContainsString(', 0, True', $hidden);
+        $root=dirname(__DIR__,2);
+        $legacy=file_get_contents($root.'/scripts/ezs_supervisor_tick.ps1');
+        $legacyTask=file_get_contents($root.'/scripts/ezs_supervisor_task.ps1');
+        $task=file_get_contents($root.'/scripts/ezs_root_resident_task.ps1');
+        $resident=file_get_contents($root.'/scripts/ezs_supervisor_resident.ps1');
+        $hidden=file_get_contents($root.'/scripts/ezs_supervisor_resident_hidden.vbs');
+        foreach ([$legacy,$legacyTask,$task,$resident,$hidden] as $source) self::assertIsString($source);
+        self::assertStringContainsString("throw 'EZS_LEGACY_SUPERVISOR_REMOVED_USE_NATIVE_FRANKENPHP'",$legacy);
+        self::assertStringNotContainsString('Start-RootFastCgi',$legacy);
+        self::assertStringNotContainsString('Start-Process',$legacy);
+        self::assertStringContainsString("'InstallDisabled'",$task);
+        self::assertStringContainsString('EZS_ROOT_TASK_ALREADY_EXISTS',$task);
+        self::assertStringContainsString('EZS_LEGACY_TASK_PRESENT_REFUSED',$task);
+        self::assertStringContainsString('New-ScheduledTaskSettingsSet',$task);
+        self::assertStringContainsString('-Disable',$task);
+        self::assertStringContainsString('ezs_root_frankenphp_watchdog.ps1',$resident);
+        self::assertStringNotContainsString('ezs_supervisor_tick.ps1',$resident);
+        self::assertStringContainsString('WshShell.Run',$hidden);
+        self::assertStringContainsString(', 0, True',$hidden);
+        // The historical task installer is not the canonical ROOT entrypoint.
+        self::assertStringContainsString('ezs_supervisor_tick.ps1',$legacyTask);
     }
 }

@@ -5,23 +5,24 @@ final class RootFastcgiIdentityConsistencyContractTest extends TestCase
 {
     public function testBothTerminationPathsAreGuarded(): void
     {
-        $s = file_get_contents(__DIR__ . '/../../scripts/ezs_supervisor_tick.ps1');
-        self::assertIsString($s);
-        self::assertStringContainsString('param([switch]$DevOnly,[switch]$RootOnly)', $s);
-        self::assertStringContainsString('if ($RootOnly) { $specs = @() }', $s);
-        self::assertStringContainsString('ROOT_RECOVERY_REFUSED_TCP_CONFLICT', $s);
-        self::assertStringContainsString('Get-NetTCPConnection -LocalPort 8791 -ErrorAction Stop', $s);
-        self::assertStringContainsString('ROOT_RECOVERY_REFUSED_FINAL_NETSTAT_LISTENER', $s);
-        self::assertStringContainsString('ROOT_HEALTH_RECOVERY_REFUSED_FINAL_NETSTAT_OWNER', $s);
-        self::assertSame(1, substr_count($s, 'Stop-Process -Id $targetPid -Force -ErrorAction Stop'));
-        self::assertSame(2, substr_count($s, 'Stop-Process -Id $pidToStop -Force -ErrorAction Stop'));
-        self::assertLessThan(
-            strpos($s, 'Stop-Process -Id $pidToStop -Force -ErrorAction Stop'),
-            strpos($s, 'ROOT_RECOVERY_REFUSED_TCP_CONFLICT')
-        );
-        self::assertLessThan(
-            strpos($s, 'Stop-Process -Id $targetPid -Force -ErrorAction Stop'),
-            strpos($s, 'ROOT_HEALTH_RECOVERY_REFUSED_FINAL_NETSTAT_OWNER')
-        );
+        $root=dirname(__DIR__,2);
+        $old=file_get_contents($root.'/scripts/ezs_supervisor_tick.ps1');
+        $watchdog=file_get_contents($root.'/scripts/ezs_root_frankenphp_watchdog.ps1');
+        self::assertIsString($old);
+        self::assertIsString($watchdog);
+        self::assertStringContainsString('EZS_LEGACY_SUPERVISOR_REMOVED_USE_NATIVE_FRANKENPHP',$old);
+        self::assertStringNotContainsString('Stop-Process',$old);
+        foreach (['Get-RootProcesses','Get-Listeners','Matches-Owner',
+            'ROOT_REFUSED_AMBIGUOUS_OWNERSHIP','ROOT_REFUSED_FOREIGN_LISTENER',
+            'ROOT_STOP_REFUSED_REATTESTATION','ROOT_REFUSED_PRIOR_PID_STILL_EXISTS',
+            'ROOT_REFUSED_BOOT_RECHECK'] as $token) {
+            self::assertStringContainsString($token,$watchdog);
+        }
+        self::assertSame(1,substr_count($watchdog,'Stop-Process -Id ([int]$owner.pid) -Force'));
+        $guard=strpos($watchdog,"Log 'ROOT_STOP_REFUSED_REATTESTATION'");
+        $kill=strpos($watchdog,'Stop-Process -Id ([int]$owner.pid) -Force');
+        self::assertNotFalse($guard);
+        self::assertNotFalse($kill);
+        self::assertLessThan($kill,$guard);
     }
 }
