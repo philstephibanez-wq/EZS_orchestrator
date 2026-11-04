@@ -3,21 +3,17 @@
 {% block page_scripts %}
     <script src="/assets/ezs-web-hard.js?v={{ orchestrator_version|url_encode }}" defer></script>
     <script src="/assets/ezs-dev-web-mode.js?v={{ orchestrator_version|url_encode }}" defer></script>
-    <script src="/assets/ezs-rest-supervision.js?v=4.2c85" defer></script>
-    <script src="/assets/ezs-recovery-preflight.js" defer></script>
     <script src="/assets/ezs-prod-control.js?v={{ orchestrator_version|url_encode }}" defer></script>
 {% endblock %}
 {% block content %}
     <main class="container-fluid py-4 ezs-main">
-        <p id="ezs-rest-supervision-state" role="status" aria-live="polite">Supervision applicative en attente</p>
-        <p id="ezs-web-recovery-preflight-status" role="status" aria-live="polite">Diagnostic de supervision en attente</p>
         <div class="ezs-statusline mb-2"><strong>Infrastructure</strong><span class="text-body-secondary">Supervision web TCP/HTTP et modes de maintenance</span><span id="dev-health-feedback" role="status" aria-live="polite">En attente…</span><button type="button" id="refresh-dev-health" class="btn btn-outline-info btn-sm">Actualiser</button></div>
         <div class="ezs-server-grid">
-          <section class="card ezs-server-card border-primary" aria-labelledby="dev-title">
-            <div class="card-header d-flex justify-content-between align-items-center"><h2 id="dev-title" class="h6 mb-0">DEV · EZScore</h2><span id="state-dev" class="badge text-bg-secondary">Inconnu</span></div>
+          <section id="dev-mode-card" class="card ezs-server-card border-primary" aria-labelledby="dev-title">
+            <div class="card-header d-flex justify-content-between align-items-center"><h2 id="dev-title" class="h6 mb-0">DEV · EZScore</h2><span id="dev-maintenance-badge" class="badge text-bg-warning d-none">MAINTENANCE ACTIVE</span><span id="state-dev" class="badge text-bg-secondary">Inconnu</span></div>
             <div class="card-body">
-              <div class="ezs-server-summary"><div>Public <strong>8502</strong></div><div>HTTP <strong id="http-dev">—</strong></div><div>TCP <strong id="tcp-dev">—</strong></div></div>
-              <div class="ezs-server-actions"><a class="btn btn-outline-primary btn-sm" href="http://127.0.0.1:8502/fr/catalog" target="_blank" rel="noopener noreferrer">Ouvrir DEV</a><button type="button" id="dev-maintenance-button" class="btn btn-outline-warning btn-sm" disabled>Maintenance</button><button type="button" id="dev-normal-button" class="btn btn-outline-success btn-sm" disabled>Mode normal</button><span id="dev-web-mode-label" class="small text-secondary" aria-live="polite">Indetermine</span></div>
+              <div id="dev-maintenance-banner" class="ezs-prod-maintenance-banner d-none" role="status">EZScore DEV en maintenance</div><div class="ezs-server-summary"><div>Public <strong>8502</strong></div><div>HTTP <strong id="http-dev">—</strong></div><div>TCP <strong id="tcp-dev">—</strong></div></div>
+              <div class="ezs-server-actions"><a class="btn btn-outline-primary btn-sm" href="http://127.0.0.1:8502/fr/catalog" target="_blank" rel="noopener noreferrer">Ouvrir DEV</a><button type="button" id="dev-maintenance-button" class="btn btn-outline-warning btn-sm" disabled>Maintenance</button><button type="button" id="dev-normal-button" class="btn btn-outline-success btn-sm" disabled>Mode normal</button><span id="dev-web-mode-detail" class="small text-secondary d-none"></span><span id="dev-web-mode-label" class="small text-secondary" aria-live="polite">Indetermine</span></div>
               <details open><summary>Détails techniques</summary><dl class="small mt-2 mb-0 ezs-tech-grid"><dt>Façade</dt><dd>8502 · HTTP <span id="tech-http-dev">—</span></dd><dt>Backend</dt><dd>8602 · <strong id="dev-backend">Non mesuré</strong></dd><dt>Autorité Orchestrator</dt><dd><strong id="dev-backend-ownership">Non vérifiée</strong></dd><dt>Action</dt><dd>Normal / Maintenance DEV, sans arrêt du serveur</dd><dt>État complémentaire</dt><dd>Consultation sans modification de processus</dd></dl></details>
             </div>
           </section>
