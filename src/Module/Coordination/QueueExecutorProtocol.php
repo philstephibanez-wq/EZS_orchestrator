@@ -9,7 +9,14 @@ final class QueueExecutorProtocol
 {
     public static function claimInput(array $input): array
     {
-        self::keys($input, ['resource_class', 'lease_seconds']);
+        $specific = array_key_exists('job_id', $input) || array_key_exists('kind', $input);
+        self::keys($input, $specific
+            ? ['resource_class', 'lease_seconds', 'job_id', 'kind']
+            : ['resource_class', 'lease_seconds']);
+        if ($specific && (!is_int($input['job_id']) || $input['job_id'] < 1
+            || $input['kind'] !== 'profile' || $input['resource_class'] !== 'gpu')) {
+            throw new \InvalidArgumentException('invalid_specific_claim');
+        }
         if (!in_array($input['resource_class'], ['cpu', 'gpu'], true)
             || !is_int($input['lease_seconds'])
             || $input['lease_seconds'] < 30 || $input['lease_seconds'] > 600) {
@@ -35,7 +42,15 @@ final class QueueExecutorProtocol
 
     public static function claim(GlobalQueueStore $store, array $validated): ?array
     {
-        $job = $store->claim($validated['resource_class'], $validated['lease_seconds']);
+        if (isset($validated['job_id'])) {
+            $candidate = $store->byId($validated['job_id']);
+            if ($candidate === null || $candidate['producer'] !== 'lab'
+                || $candidate['kind'] !== 'profile' || $candidate['resource_class'] !== 'gpu') {
+                return null;
+            }
+        }
+        $job = $store->claim($validated['resource_class'], $validated['lease_seconds'],
+            $validated['job_id'] ?? null);
         if ($job === null) {
             return null;
         }

@@ -84,12 +84,13 @@ final class GlobalQueueStore
     }
 
     /** Atomic claim; never shares a GPU slot and never steals a running lease. */
-    public function claim(string $resourceClass, int $leaseSeconds = 120): ?array
+    public function claim(string $resourceClass, int $leaseSeconds = 120, ?int $onlyJobId = null): ?array
     {
-        if (!in_array($resourceClass, ['cpu','gpu'],true) || $leaseSeconds < 5 || $leaseSeconds > 3600) {
+        if (!in_array($resourceClass, ['cpu','gpu'],true) || $leaseSeconds < 5 || $leaseSeconds > 3600
+            || ($onlyJobId !== null && $onlyJobId < 1)) {
             throw new \InvalidArgumentException('invalid_claim');
         }
-        return $this->transaction(function () use ($resourceClass,$leaseSeconds): ?array {
+        return $this->transaction(function () use ($resourceClass,$leaseSeconds,$onlyJobId): ?array {
             // The writer lock protects the slot check and the claim as one decision.
             // An expired lease still occupies the slot until an explicit, fenced recovery.
             if ($resourceClass === 'gpu') {
@@ -98,8 +99,10 @@ final class GlobalQueueStore
                     return null;
                 }
             }
-            $q=$this->db->prepare("SELECT id FROM global_queue_jobs WHERE state='queued' AND resource_class=? ORDER BY priority DESC,created_at ASC,id ASC LIMIT 1");
-            $q->execute([$resourceClass]);$id=$q->fetchColumn();
+            $q=$this->db->prepare("SELECT id FROM global_queue_jobs WHERE state='queued' AND resource_class=?"
+                .($onlyJobId === null ? "" : " AND id=?")
+                ." ORDER BY priority DESC,created_at ASC,id ASC LIMIT 1");
+            $q->execute($onlyJobId === null ? [$resourceClass] : [$resourceClass,$onlyJobId]);$id=$q->fetchColumn();
             if ($id===false) return null;
             $token=bin2hex(random_bytes(32));
             $now=time();
