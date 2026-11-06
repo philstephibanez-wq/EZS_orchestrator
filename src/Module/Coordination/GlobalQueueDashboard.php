@@ -28,7 +28,7 @@ final class GlobalQueueDashboard
                     j.priority DESC,j.created_at ASC,j.id ASC LIMIT 100";
             $rows = $db->query($sql)->fetchAll(PDO::FETCH_ASSOC);
             $now = time();
-            $counts = ['queued'=>0,'running'=>0,'completed'=>0,'failed'=>0,'expired'=>0];
+            $counts = ['queued'=>0,'running'=>0,'completed'=>0,'failed'=>0,'cancelled'=>0,'expired'=>0];
             foreach ($rows as &$row) {
                 $state = (string)$row['state'];
                 if (isset($counts[$state])) ++$counts[$state];

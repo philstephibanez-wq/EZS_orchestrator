@@ -16,7 +16,7 @@ final class QueueExecutorOwnership4_3A5Test extends TestCase
         $priorServer = $_SERVER['EZS_QUEUE_EXECUTOR_API'] ?? null;
         $priorEnv = $_ENV['EZS_QUEUE_EXECUTOR_API'] ?? null;
         try {
-            putenv('EZS_QUEUE_EXECUTOR_API');
+            putenv('EZS_QUEUE_EXECUTOR_API=0');
             unset($_SERVER['EZS_QUEUE_EXECUTOR_API'], $_ENV['EZS_QUEUE_EXECUTOR_API']);
             $controller = new QueueExecutorOwnershipController();
             self::assertSame(404, $controller->register(Request::create(

@@ -15,17 +15,18 @@ final class JobsPageSingleQueueContractTest extends TestCase
         return dirname(__DIR__, 2) . '/templates/jobs/index.html.twig';
     }
 
-    public function testGlobalQueueRemainsAuthorityAndLabOnlyObservation(): void
+    public function testSingleGlobalAuthorityAndHistoricalArchives(): void
     {
         $template = file_get_contents($this->template());
         self::assertIsString($template);
         self::assertStringContainsString('Queue globale — Orchestrator (autorité)', $template);
-        self::assertStringContainsString('Jobs LAB — vue du producteur (REST, lecture seule)', $template);
         self::assertStringContainsString('global_queue.jobs', $template);
-        self::assertStringContainsString('lab_queue.jobs', $template);
+        self::assertStringNotContainsString('Jobs LAB — vue du producteur (REST, lecture seule)', $template);
+        self::assertStringNotContainsString('lab_queue.jobs', $template);
         self::assertStringContainsString('Dernières tentatives archivées V1', $template);
         self::assertStringNotContainsString('recoverExpired(', $template);
         self::assertStringNotContainsString('claim(', $template);
+        self::assertStringNotContainsString('window.location.reload()', $template);
     }
 
     public function testJobsPageTemplateParsesWithoutRuntimeDependencies(): void

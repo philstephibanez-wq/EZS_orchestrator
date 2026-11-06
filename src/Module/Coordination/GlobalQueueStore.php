@@ -37,7 +37,7 @@ final class GlobalQueueStore
             kind TEXT NOT NULL,
             resource_class TEXT NOT NULL CHECK(resource_class IN ('cpu','gpu')),
             priority INTEGER NOT NULL CHECK(priority BETWEEN 0 AND 100),
-            state TEXT NOT NULL CHECK(state IN ('queued','running','completed','failed')),
+            state TEXT NOT NULL CHECK(state IN ('queued','running','completed','failed','cancelled')),
             lease_token TEXT,
             lease_until INTEGER,
             claim_generation INTEGER NOT NULL DEFAULT 0,
@@ -80,6 +80,36 @@ final class GlobalQueueStore
                 throw new \DomainException('queue_identity_collision');
             }
             return $row;
+        });
+    }
+
+    /** Cancel unclaimed queue requests atomically; running jobs require independent stop proof. */
+    public function cancelQueued(int $id, string $producer): array
+    {
+        if ($id < 1 || $producer === '' || strlen($producer) > 128) {
+            throw new \InvalidArgumentException('invalid_cancel_identity');
+        }
+        return $this->transaction(function () use ($id, $producer): array {
+            $job = $this->byId($id);
+            if ($job === null || $job['producer'] !== $producer) {
+                throw new \DomainException('queue_job_not_owned');
+            }
+            if ($job['state'] === 'cancelled') return $job;
+            if ($job['state'] === 'running') {
+                throw new \DomainException('active_executor_stop_attestation_required');
+            }
+            if ($job['state'] !== 'queued') {
+                throw new \DomainException('terminal_job_not_cancellable');
+            }
+            $now = time();
+            $stmt = $this->db->prepare("UPDATE global_queue_jobs SET state='cancelled',updated_at=? WHERE id=? AND producer=? AND state='queued' AND lease_token IS NULL AND lease_until IS NULL");
+            $stmt->execute([$now,$id,$producer]);
+            if ($stmt->rowCount() !== 1) {
+                throw new \DomainException('concurrent_job_claim_or_cancel');
+            }
+            $event = $this->db->prepare("INSERT INTO global_queue_events(job_id,producer,event_type,progress_percent,phase,message,created_at) VALUES (?,?,'warning',NULL,'cancelled_by_producer','queued_job_cancelled',?)");
+            $event->execute([$id,$producer,$now]);
+            return $this->byId($id);
         });
     }
 

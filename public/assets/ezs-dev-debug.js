@@ -70,7 +70,8 @@
     }
 
     const sources = [
-        '/api/v2/infrastructure/web-hard-ping'
+        '/api/v2/infrastructure/web-hard-ping',
+        '/api/v2/queue/dev-diagnostic'
     ];
     const secretKey = /(?:csrf|token|cookie|authorization|password|secret|api[_-]?key|private[_-]?key|session|credential)/i;
     const privateKey = /(?:email|user[_-]?id|client[_-]?ip|address|hostname|command[_-]?line|executable[_-]?path|file[_-]?path)/i;

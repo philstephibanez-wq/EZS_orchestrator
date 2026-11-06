@@ -82,7 +82,7 @@ final class QueueResultReceipt4_3A4Test extends TestCase
     {
         $before = getenv('EZS_QUEUE_EXECUTOR_API');
         try {
-            putenv('EZS_QUEUE_EXECUTOR_API');
+            putenv('EZS_QUEUE_EXECUTOR_API=0');
             $request = Request::create('/api/v2/queue/executor/finish', 'POST', [], [], [], [
                 'REMOTE_ADDR' => '127.0.0.1',
                 'CONTENT_TYPE' => 'application/json',
