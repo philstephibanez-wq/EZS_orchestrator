@@ -1,141 +1,119 @@
 {% extends 'layout/base.html.twig' %}
 
-{% block title %}
-    EZS Orchestrator — Files &amp; Jobs
-{% endblock %}
+{% block title %}EZS Orchestrator — Files &amp; Jobs{% endblock %}
 
 {% block content %}
-    <main class="container-fluid py-4 ezs-main">
-        <div class="ezs-statusline mb-3">
-            <strong>Files &amp; Jobs</strong>
-            <span class="text-body-secondary">Historique V1 en lecture seule · Snapshots result.json uniquement</span>
-        </div>
+<main class="container-fluid py-4 ezs-main">
+    <div class="ezs-statusline mb-3 d-flex justify-content-between align-items-center">
+        <span><strong>Files &amp; Jobs</strong> — état courant et historique distincts</span>
+        <span class="text-body-secondary">Actualisation toutes les 15 s (onglet visible)</span>
+    </div>
 
-        <div class="alert alert-secondary" role="status">
-            Ces tentatives sont archivées et ne représentent pas l'état actuel des files.
-            Aucun job n'est exécuté ou réclamé depuis cette page.
+    <section class="card mb-3" aria-labelledby="queue-title">
+        <div class="card-header d-flex justify-content-between">
+            <strong id="queue-title">Queue globale — Orchestrator (autorité)</strong>
+            <span class="badge {{ global_queue.available ? 'text-bg-success' : 'text-bg-secondary' }}">{{ global_queue.available ? 'Base accessible' : 'Indisponible' }}</span>
         </div>
-
-        <section class="card mb-3" aria-labelledby="queue-title">
-            <div class="card-header d-flex justify-content-between">
-                <strong id="queue-title">Queue globale — Orchestrator</strong>
-                <span class="badge {{ global_queue.available ? 'text-bg-success' : 'text-bg-secondary' }}">
-                    {{ global_queue.available ? 'Base accessible' : 'Indisponible' }}
-                </span>
-            </div>
-            <div class="card-body">
-                {% if global_queue.available %}
-                    <p class="text-body-secondary">
-                        Jobs réellement enregistrés dans la queue unique SQLite (100 maximum).
-                        Aucun job historique LAB ou Assistant n'est importé automatiquement.
-                    </p>
-                    <div class="table-responsive">
-                        <table class="table table-dark table-sm align-middle">
-                            <thead>
-                                <tr>
-                                    <th>Job</th><th>Provenance</th><th>Référence source</th>
-                                    <th>Type</th><th>Priorité</th><th>État</th>
-                                    <th>Progression</th><th>Phase</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for job in global_queue.jobs %}
-                                    <tr>
-                                        <td>{{ job.id }}</td>
-                                        <td>{{ job.producer }}</td>
-                                        <td>{{ job.external_id }}</td>
-                                        <td>{{ job.kind }}</td>
-                                        <td>{{ job.priority }}</td>
-                                        <td>{{ job.state }}</td>
-                                        <td>
-                                            {% if job.state == 'completed' %}
-                                                100 %
-                                            {% elseif job.progress_percent is not null %}
-                                                {{ job.progress_percent }} %
-                                            {% elseif job.state == 'running' %}
-                                                Indéterminée
-                                            {% else %}
-                                                —
-                                            {% endif %}
-                                        </td>
-                                        <td>{{ job.phase ?: '—' }}</td>
-                                    </tr>
-                                {% else %}
-                                    <tr>
-                                        <td colspan="8">
-                                            Aucun job dans la base globale. Les jobs historiques externes ne sont pas inclus.
-                                        </td>
-                                    </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                {% else %}
-                    <p class="mb-0 text-body-secondary">
-                        Base de la queue non consultable : {{ global_queue.reason }}.
-                        Aucun état des jobs externes n'est déduit.
-                    </p>
-                {% endif %}
-                <p class="text-body-secondary mb-0">
-                    Lecture seule. Aucun claim ni dispatch déclenché depuis cette page.
+        <div class="card-body">
+            {% if global_queue.available %}
+                <p class="text-body-secondary">Jobs admis dans la queue canonique SQLite (100 maximum). Un bail expiré ne libère pas automatiquement le GPU.</p>
+                <p><strong>{{ global_queue.jobs|length }}</strong> jobs affichés
+                    — en attente : <strong>{{ global_queue.counts.queued }}</strong>
+                    — en cours : <strong>{{ global_queue.counts.running }}</strong>
+                    — terminés : <strong>{{ global_queue.counts.completed }}</strong>
+                    — échoués : <strong>{{ global_queue.counts.failed }}</strong>
+                    {% if global_queue.counts.expired > 0 %}
+                        — <span class="badge text-bg-warning">{{ global_queue.counts.expired }} bail(s) expiré(s)</span>
+                    {% endif %}
                 </p>
-            </div>
-        </section>
-
-        <section class="card mb-3">
-            <div class="card-header">
-                <strong>Dernières tentatives archivées</strong>
-                <span class="text-body-secondary">({{ history|length }})</span>
-            </div>
-            <div class="table-responsive">
-                <table class="table table-dark table-striped table-sm align-middle mb-0">
-                    <thead>
-                        <tr>
-                            <th>Cible</th><th>Job</th><th>Run</th><th>Type</th>
-                            <th>Chanson</th><th>État archivé</th><th>RC analyse</th>
-                            <th>Finalisation</th><th>Horodatage fichier</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for item in history %}
+                <div class="table-responsive">
+                    <table class="table table-dark table-sm align-middle mb-0">
+                        <thead><tr>
+                            <th>Job</th><th>Provenance</th><th>Référence source</th><th>Type</th><th>Ressource</th><th>Priorité</th><th>État</th><th>Progression</th><th>Phase</th><th>Dernier événement</th>
+                        </tr></thead>
+                        <tbody>
+                        {% for job in global_queue.jobs %}
                             <tr>
-                                <td>{{ item.target }}</td>
-                                <td>{{ item.job_id }}</td>
-                                <td>{{ item.run }}</td>
-                                <td>{{ item.kind }}</td>
-                                <td>{{ item.song_title ?: (item.song_id ?? '—') }}</td>
+                                <td>{{ job.id }}</td><td>{{ job.producer }}</td><td>{{ job.external_id }}</td>
+                                <td>{{ job.kind }}</td><td>{{ job.resource_class }}</td><td>{{ job.priority }}</td>
                                 <td>
-                                    {% if item.state == 'completed' %}
-                                        <span class="badge text-bg-success">Terminé</span>
-                                    {% elseif item.state == 'failed' %}
-                                        <span class="badge text-bg-danger">Échec analyse</span>
-                                    {% elseif item.state == 'finalize_error' %}
-                                        <span class="badge text-bg-warning">Erreur finalisation</span>
-                                    {% elseif item.state == 'running' %}
-                                        <span class="badge text-bg-primary">En cours (archive)</span>
-                                    {% else %}
-                                        <span class="badge text-bg-secondary">En attente (archive)</span>
-                                    {% endif %}
+                                    {% if job.lease_expired %}
+                                        <span class="badge text-bg-warning" title="Le bail est expiré ; la récupération doit être attestée">running — bail expiré</span>
+                                    {% elseif job.state == 'completed' %}<span class="badge text-bg-success">completed</span>
+                                    {% elseif job.state == 'failed' %}<span class="badge text-bg-danger">failed</span>
+                                    {% elseif job.state == 'running' %}<span class="badge text-bg-primary">running</span>
+                                    {% else %}<span class="badge text-bg-secondary">{{ job.state }}</span>{% endif %}
                                 </td>
-                                <td>{{ item.analysis_returncode ?? '—' }}</td>
-                                <td>{{ item.finalize_status ?: '—' }}</td>
-                                <td>{{ item.timestamp }}</td>
+                                <td>{% if job.state == 'completed' %}100 %{% elseif job.progress_percent is not null %}{{ job.progress_percent }} %{% elseif job.state == 'running' %}Indéterminée{% else %}—{% endif %}</td>
+                                <td>{{ job.phase ?: '—' }}</td>
+                                <td>{% if job.last_event_at is not null %}{{ job.last_event_at|date('d/m/Y H:i:s', 'Europe/Paris') }}{% else %}—{% endif %}</td>
                             </tr>
                         {% else %}
-                            <tr>
-                                <td colspan="9" class="text-body-secondary">
-                                    Aucun result.json historique trouvé. Cela ne signifie pas que les files sont vides.
-                                </td>
-                            </tr>
+                            <tr><td colspan="10">Aucun job admis dans la queue globale.</td></tr>
                         {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </section>
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p class="mb-0 text-body-secondary">Queue globale inaccessible : {{ global_queue.reason }}. Aucun état n'est déduit.</p>
+            {% endif %}
+            <p class="text-body-secondary mt-2 mb-0">Lecture seule : aucun claim, dispatch, récupération ou changement d'état depuis cette page.</p>
+        </div>
+    </section>
 
-        <p class="text-body-secondary">
-            Lecture locale sans accès BDD externe ni lecture execution.log.
-            Les files temps réel et les workers Symfony restent en migration.
-        </p>
-    </main>
+    <section class="card mb-3" aria-labelledby="lab-title">
+        <div class="card-header d-flex justify-content-between">
+            <strong id="lab-title">Jobs LAB — vue du producteur (REST, lecture seule)</strong>
+            <span class="badge {{ lab_queue.connected ? 'text-bg-success' : 'text-bg-secondary' }}">{{ lab_queue.connected ? 'LAB connecté' : 'LAB non disponible' }}</span>
+        </div>
+        <div class="card-body">
+            {% if lab_queue.connected %}
+                <p class="text-body-secondary">{{ lab_queue.jobs|length }} jobs remontés par LAB (100 maximum). Ces états ne remplacent pas ceux de la queue globale ; un job peut être admis mais non démarré.</p>
+                <div class="table-responsive">
+                    <table class="table table-dark table-sm align-middle mb-0">
+                        <thead><tr><th>Job LAB</th><th>Type</th><th>État LAB</th><th>Priorité</th></tr></thead>
+                        <tbody>{% for job in lab_queue.jobs %}
+                            <tr><td>{{ job.id }}</td><td>{{ job.kind }}</td><td>{{ job.status }}</td><td>{{ job.priority is not null ? job.priority : '—' }}</td></tr>
+                        {% else %}<tr><td colspan="4">Aucun job remonté par l'API LAB.</td></tr>{% endfor %}</tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p class="mb-0 text-body-secondary">API LAB indisponible : {{ lab_queue.reason }}. Les données globales restent visibles indépendamment.</p>
+            {% endif %}
+        </div>
+    </section>
+
+    <section class="card mb-3">
+        <div class="card-header"><strong>Dernières tentatives archivées V1</strong> <span class="text-body-secondary">({{ history|length }}) — archives, pas états courants</span></div>
+        <div class="table-responsive">
+            <table class="table table-dark table-striped table-sm align-middle mb-0">
+                <thead><tr><th>Cible</th><th>Job</th><th>Run</th><th>Type</th><th>Chanson</th><th>État archivé</th><th>RC analyse</th><th>Finalisation</th><th>Horodatage fichier</th></tr></thead>
+                <tbody>
+                    {% for item in history %}
+                    <tr>
+                        <td>{{ item.target }}</td><td>{{ item.job_id }}</td><td>{{ item.run }}</td><td>{{ item.kind }}</td>
+                        <td>{{ item.song_title ?: (item.song_id ?? '—') }}</td>
+                        <td>{% if item.state == 'completed' %}<span class="badge text-bg-success">Terminé</span>
+                        {% elseif item.state == 'failed' %}<span class="badge text-bg-danger">Échec analyse</span>
+                        {% elseif item.state == 'finalize_error' %}<span class="badge text-bg-warning">Erreur finalisation</span>
+                        {% elseif item.state == 'running' %}<span class="badge text-bg-primary">En cours (archive)</span>
+                        {% else %}<span class="badge text-bg-secondary">En attente (archive)</span>{% endif %}</td>
+                        <td>{{ item.analysis_returncode ?? '—' }}</td><td>{{ item.finalize_status ?: '—' }}</td><td>{{ item.timestamp }}</td>
+                    </tr>
+                    {% else %}<tr><td colspan="9" class="text-body-secondary">Aucun result.json historique trouvé.</td></tr>{% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+    <p class="text-body-secondary">Lecture locale, lecture REST LAB et archives V1 distinctes. Aucun bouton d'exécution ni accès direct à la base LAB.</p>
+</main>
+<script>
+(function () {
+    window.setInterval(function () {
+        if (document.visibilityState === 'visible') {
+            window.location.reload();
+        }
+    }, 15000);
+}());
+</script>
 {% endblock %}

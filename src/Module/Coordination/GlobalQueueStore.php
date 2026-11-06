@@ -91,19 +91,20 @@ final class GlobalQueueStore
             throw new \InvalidArgumentException('invalid_claim');
         }
         return $this->transaction(function () use ($resourceClass,$leaseSeconds,$onlyJobId): ?array {
-            // The writer lock protects the slot check and the claim as one decision.
-            // An expired lease still occupies the slot until an explicit, fenced recovery.
-            if ($resourceClass === 'gpu') {
-                $busy = $this->db->query("SELECT 1 FROM global_queue_jobs WHERE resource_class='gpu' AND state='running' LIMIT 1");
-                if ($busy->fetchColumn() !== false) {
-                    return null;
-                }
+            // Single global execution slot. An expired lease requires an attested
+            // recovery; it is never silently stolen or considered completed.
+            $busy = $this->db->query("SELECT 1 FROM global_queue_jobs WHERE state='running' LIMIT 1");
+            if ($busy->fetchColumn() !== false) {
+                return null;
             }
-            $q=$this->db->prepare("SELECT id FROM global_queue_jobs WHERE state='queued' AND resource_class=?"
-                .($onlyJobId === null ? "" : " AND id=?")
-                ." ORDER BY priority DESC,created_at ASC,id ASC LIMIT 1");
-            $q->execute($onlyJobId === null ? [$resourceClass] : [$resourceClass,$onlyJobId]);$id=$q->fetchColumn();
-            if ($id===false) return null;
+            // FIFO globally, without CPU/GPU scheduling or priority inversion.
+            // A specialised executor must not bypass the oldest requested job.
+            $head = $this->db->query("SELECT id,resource_class FROM global_queue_jobs WHERE state='queued' ORDER BY created_at ASC,id ASC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+            if (!is_array($head) || $head['resource_class'] !== $resourceClass
+                || ($onlyJobId !== null && (int) $head['id'] !== $onlyJobId)) {
+                return null;
+            }
+            $id = (int) $head['id'];
             $token=bin2hex(random_bytes(32));
             $now=time();
             $u=$this->db->prepare("UPDATE global_queue_jobs SET state='running',lease_token=?,lease_until=?,claim_generation=claim_generation+1,updated_at=? WHERE id=? AND state='queued'");
