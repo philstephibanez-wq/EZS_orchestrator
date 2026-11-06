@@ -83,7 +83,7 @@ final class QueueExecutorFinishController
                 return $value;
             }
         }
-        return '';
+        return QueueExecutorAccess::localSetting(dirname(__DIR__, 4).'/.env.local', 'EZS_QUEUE_LAB_RESULT_ATTESTATION_KEY');
     }
 
     private static function reply(array $payload, int $status = 200): JsonResponse

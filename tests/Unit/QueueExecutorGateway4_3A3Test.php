@@ -18,7 +18,7 @@ final class QueueExecutorGateway4_3A3Test extends TestCase
         $beforeLab = getenv('EZS_QUEUE_LAB_TOKEN');
         $token = str_repeat('a', 48);
         try {
-            putenv('EZS_QUEUE_EXECUTOR_API');
+            putenv('EZS_QUEUE_EXECUTOR_API=0');
             putenv('EZS_QUEUE_EXECUTOR_TOKEN='.$token);
             self::assertFalse(QueueExecutorAccess::enabled());
             self::assertFalse(QueueExecutorAccess::authorized('Bearer '.$token));
