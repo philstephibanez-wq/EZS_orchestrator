@@ -61,7 +61,7 @@ final class QueueExecutorProtocol
             'kind' => (string) $job['kind'],
             'resource_class' => (string) $job['resource_class'],
             'claim_generation' => (int) $job['claim_generation'],
-            'lease_until' => (int) $job['lease_until'],
+            'lease_until' => null,
             'lease_token' => (string) $job['lease_token'],
         ];
     }

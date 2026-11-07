@@ -12,7 +12,7 @@ use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Attribute\Route;
 
-/** Disabled-by-default persisted-result acknowledgement; no worker or dispatch. */
+/** Persisted-result acknowledgement with generation and token fencing, no expiration. */
 final class QueueExecutorFinishController
 {
     #[Route('/api/v2/queue/executor/finish', name: 'ezs_queue_executor_finish', methods: ['POST'])]
@@ -53,14 +53,12 @@ final class QueueExecutorFinishController
             $current = $store->byId($data['job_id']);
             if ($current === null || $current['state'] !== 'running'
                 || (int) $current['claim_generation'] !== $data['claim_generation']
-                || !hash_equals((string) $current['lease_token'], $data['lease_token'])
-                || (int) $current['lease_until'] < time()) {
+                || !hash_equals((string) $current['lease_token'], $data['lease_token'])) {
                 return self::reply(['error' => 'lease_not_current'], 409);
             }
             if (!QueueResultReceipt::verify($data, $current, $secret)) {
                 return self::reply(['error' => 'invalid_persistence_attestation'], 422);
             }
-            // The existing store revalidates state, token and expiration atomically.
             $store->finish($data['job_id'], $data['lease_token'], $data['receipt']['result'] === 'completed');
             return self::reply([
                 'schema' => 'ezs.queue.executor.finish.v1',

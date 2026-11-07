@@ -34,7 +34,7 @@ final class ExecutorOwnershipRegistry
         )");
     }
 
-    /** Only the live claim holder can register an immutable executor identity. */
+    /** Only the current claim holder can register an immutable identity; no expiry. */
     public function register(int $jobId, int $generation, string $leaseToken, string $node, int $pid, string $createdAt, string $instanceId): array
     {
         if ($jobId <= 0 || $generation <= 0 || $pid <= 0 || !preg_match('/^[a-f0-9]{64}$/D', $leaseToken)) {
@@ -47,11 +47,11 @@ final class ExecutorOwnershipRegistry
         }
         $this->db->exec('BEGIN IMMEDIATE');
         try {
-            $stmt = $this->db->prepare("SELECT state,lease_token,lease_until,claim_generation FROM global_queue_jobs WHERE id=?");
+            $stmt = $this->db->prepare("SELECT state,lease_token,claim_generation FROM global_queue_jobs WHERE id=?");
             $stmt->execute([$jobId]);
             $job = $stmt->fetch(PDO::FETCH_ASSOC);
             if (!$job || $job['state'] !== 'running' || (int)$job['claim_generation'] !== $generation
-                || (int)$job['lease_until'] < time() || !hash_equals((string)$job['lease_token'], $leaseToken)) {
+                || !hash_equals((string)$job['lease_token'], $leaseToken)) {
                 throw new \DomainException('executor_claim_not_current');
             }
             $existing = $this->forClaim($jobId, $generation);
@@ -74,7 +74,7 @@ final class ExecutorOwnershipRegistry
         }
     }
 
-    /** Retains historical generations. No lease secret is exposed. */
+    /** Retains historical generations. No token is exposed. */
     public function forClaim(int $jobId, int $generation): ?array
     {
         if ($jobId <= 0 || $generation <= 0) {

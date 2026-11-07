@@ -56,8 +56,7 @@ final class GlobalQueueReceiver implements TransportInterface
         // Never bypass an active/exited-but-unreconciled execution.
         $busy = $this->db->query("SELECT 1 FROM global_queue_jobs WHERE state='running' LIMIT 1");
         if ($busy->fetchColumn() !== false) return [];
-        $floor = \Ezs\Web\Module\Coordination\GlobalQueueActiveWindow::floor($this->queuePath);
-        $row = $this->db->query("SELECT id,producer,external_id,kind,claim_generation FROM global_queue_jobs WHERE state='queued' AND id >= ".$floor." ORDER BY created_at,id LIMIT 1")
+        $row = $this->db->query("SELECT id,producer,external_id,kind,claim_generation FROM global_queue_jobs WHERE state='queued' ORDER BY created_at,id LIMIT 1")
             ->fetch(PDO::FETCH_ASSOC);
         if (!is_array($row)) return [];
         // No fallback to a different job: FIFO stays strict even for unimplemented producers.

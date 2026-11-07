@@ -37,6 +37,17 @@ final class GlobalQueueDashboard
                 if ($row['lease_expired']) ++$counts['expired'];
             }
             unset($row);
+            // Song metadata remains owned by LAB. A failed read never changes the queue.
+            $titles = QueueSongLabels::read();
+            foreach ($rows as &$row) {
+                $row['song_title'] = null;
+                if ($row['producer'] !== 'lab'
+                    || preg_match('/^analysis_job:([1-9][0-9]*)$/D', (string)$row['external_id'], $match) !== 1) {
+                    continue;
+                }
+                $row['song_title'] = $titles[(int)$match[1]] ?? null;
+            }
+            unset($row);
             return ['available'=>true,'reason'=>null,'jobs'=>$rows,'counts'=>$counts,'observed_at'=>$now];
         } catch (\Throwable) {
             return ['available'=>false,'reason'=>'queue_read_unavailable','jobs'=>[]];

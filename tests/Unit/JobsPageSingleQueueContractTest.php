@@ -15,7 +15,7 @@ final class JobsPageSingleQueueContractTest extends TestCase
         return dirname(__DIR__, 2) . '/templates/jobs/index.html.twig';
     }
 
-    public function testSingleGlobalAuthorityAndHistoricalArchives(): void
+    public function testSingleGlobalAuthorityAndCurrentQueueOnly(): void
     {
         $template = file_get_contents($this->template());
         self::assertIsString($template);
@@ -23,7 +23,10 @@ final class JobsPageSingleQueueContractTest extends TestCase
         self::assertStringContainsString('global_queue.jobs', $template);
         self::assertStringNotContainsString('Jobs LAB — vue du producteur (REST, lecture seule)', $template);
         self::assertStringNotContainsString('lab_queue.jobs', $template);
-        self::assertStringContainsString('Dernières tentatives archivées V1', $template);
+        self::assertStringContainsString('<th>Chanson</th>', $template);
+        self::assertStringContainsString('job.song_title', $template);
+        self::assertStringContainsString('Les archives V1 sont conservées', $template);
+        self::assertStringNotContainsString('<strong>Dernières tentatives archivées V1</strong>', $template);
         self::assertStringNotContainsString('recoverExpired(', $template);
         self::assertStringNotContainsString('claim(', $template);
         self::assertStringNotContainsString('window.location.reload()', $template);

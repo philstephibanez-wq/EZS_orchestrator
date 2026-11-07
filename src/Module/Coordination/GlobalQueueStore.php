@@ -115,7 +115,7 @@ final class GlobalQueueStore
         });
     }
 
-    /** Atomic claim; never shares a GPU slot and never steals a running lease. */
+    /** Atomic claim; no wall-clock expiration, no stealing a RUNNING job. */
     public function claim(string $resourceClass, int $leaseSeconds = 120, ?int $onlyJobId = null): ?array
     {
         if (!in_array($resourceClass, ['cpu','gpu'],true) || $leaseSeconds < 5 || $leaseSeconds > 3600
@@ -123,16 +123,15 @@ final class GlobalQueueStore
             throw new \InvalidArgumentException('invalid_claim');
         }
         return $this->transaction(function () use ($resourceClass,$leaseSeconds,$onlyJobId): ?array {
-            // Single global execution slot. An expired lease requires an attested
-            // recovery; it is never silently stolen or considered completed.
+            // One active execution globally. Only a separately attested stopped
+            // executor may be manually reconciled; time never releases ownership.
             $busy = $this->db->query("SELECT 1 FROM global_queue_jobs WHERE state='running' LIMIT 1");
             if ($busy->fetchColumn() !== false) {
                 return null;
             }
             // FIFO globally, without CPU/GPU scheduling or priority inversion.
             // A specialised executor must not bypass the oldest requested job.
-            $floor = GlobalQueueActiveWindow::floor($this->queuePath);
-            $head = $this->db->query("SELECT id,resource_class FROM global_queue_jobs WHERE state='queued' AND id >= ".$floor." ORDER BY created_at ASC,id ASC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+            $head = $this->db->query("SELECT id,resource_class FROM global_queue_jobs WHERE state='queued' ORDER BY created_at ASC,id ASC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
             if (!is_array($head) || $head['resource_class'] !== $resourceClass
                 || ($onlyJobId !== null && (int) $head['id'] !== $onlyJobId)) {
                 return null;
@@ -140,8 +139,8 @@ final class GlobalQueueStore
             $id = (int) $head['id'];
             $token=bin2hex(random_bytes(32));
             $now=time();
-            $u=$this->db->prepare("UPDATE global_queue_jobs SET state='running',lease_token=?,lease_until=?,claim_generation=claim_generation+1,updated_at=? WHERE id=? AND state='queued'");
-            $u->execute([$token,$now+$leaseSeconds,$now,(int)$id]);
+            $u=$this->db->prepare("UPDATE global_queue_jobs SET state='running',lease_token=?,lease_until=NULL,claim_generation=claim_generation+1,updated_at=? WHERE id=? AND state='queued'");
+            $u->execute([$token,$now,(int)$id]);
             if ($u->rowCount()!==1) throw new \RuntimeException('claim_conflict');
             return $this->byId((int)$id);
         });
@@ -153,7 +152,7 @@ final class GlobalQueueStore
         if ($id<=0 || !preg_match('/^[a-f0-9]{64}$/D',$token)) throw new \InvalidArgumentException('invalid_completion');
         return $this->transaction(function () use ($id,$token,$success): array {
             $row=$this->byId($id);
-            if ($row===null || $row['state']!=='running' || !hash_equals((string)$row['lease_token'],$token) || (int)$row['lease_until'] < time()) {
+            if ($row===null || $row['state']!=='running' || !hash_equals((string)$row['lease_token'],$token)) {
                 throw new \DomainException('lease_not_current');
             }
             $state=$success?'completed':'failed';
@@ -179,59 +178,49 @@ final class GlobalQueueStore
             $row=$this->byId($id);
             $now=time();
             if ($row===null || $row['state']!=='running' || !hash_equals((string)$row['lease_token'],$token)
-                || (int)$row['lease_until'] < $now) throw new \DomainException('lease_not_current');
+               ) throw new \DomainException('lease_not_current');
             if ($percent!==null) {
                 $query=$this->db->prepare("SELECT MAX(progress_percent) FROM global_queue_events WHERE job_id=? AND progress_percent IS NOT NULL");
                 $query->execute([$id]);
                 $previous=$query->fetchColumn();
                 if ($previous!==null && $previous!==false && $percent < (int)$previous) throw new \DomainException('progress_regression');
             }
-            $up=$this->db->prepare("UPDATE global_queue_jobs SET lease_until=?,updated_at=? WHERE id=? AND lease_token=? AND state='running'");
-            $up->execute([$now+$leaseSeconds,$now,$id,$token]);
+            $up=$this->db->prepare("UPDATE global_queue_jobs SET updated_at=? WHERE id=? AND lease_token=? AND state='running'");
+            $up->execute([$now,$id,$token]);
             if ($up->rowCount()!==1) throw new \RuntimeException('heartbeat_conflict');
             $event=$this->db->prepare('INSERT INTO global_queue_events(job_id,producer,event_type,progress_percent,phase,message,created_at) VALUES (?,?,?,?,?,?,?)');
             $event->execute([$id,$row['producer'],$percent===null?'heartbeat':'progress',$percent,$phase,$message,$now]);
-            return ['job_id'=>$id,'lease_until'=>$now+$leaseSeconds,'event_id'=>(int)$this->db->lastInsertId(),'progress_percent'=>$percent];
+            return ['job_id'=>$id,'lease_until'=>null,'event_id'=>(int)$this->db->lastInsertId(),'progress_percent'=>$percent];
         });
     }
 
-    /**
-     * Read-only inventory for a future independent supervisor. An expired lease is
-     * not evidence that its external process has stopped.
-     * No lease secrets are exposed in the returned rows.
-     */
-    public function expiredLeases(int $limit = 50): array
+    /** Read-only inventory of RUNNING claims, independent of age or deadline. */
+    public function runningClaims(int $limit = 50): array
     {
         if ($limit < 1 || $limit > 100) {
-            throw new \InvalidArgumentException('invalid_expired_lease_limit');
+            throw new \InvalidArgumentException('invalid_running_claim_limit');
         }
-        $stmt = $this->db->prepare("SELECT id,producer,external_id,kind,resource_class,claim_generation,lease_until FROM global_queue_jobs WHERE state='running' AND lease_until < ? ORDER BY lease_until ASC,id ASC LIMIT ?");
-        $stmt->bindValue(1, time(), PDO::PARAM_INT);
-        $stmt->bindValue(2, $limit, PDO::PARAM_INT);
+        $stmt = $this->db->prepare("SELECT id,producer,external_id,kind,resource_class,claim_generation FROM global_queue_jobs WHERE state='running' ORDER BY created_at ASC,id ASC LIMIT ?");
+        $stmt->bindValue(1, $limit, PDO::PARAM_INT);
         $stmt->execute();
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
     /**
-     * Recover a stopped executor only AFTER an independent authority attests
-     * that the previous execution was fenced/terminated. The attestation must
-     * be bound to this job and generation, not a generic boolean supplied by
-     * a producer. Retry budgets and automatic scheduling are separate work.
-     *
-     * @param \Closure(array): bool $attestStopped independent executor attestor
+     * Manual incident recovery of a stopped executor, independently attested.
+     * There is deliberately NO age/expiry condition; state and identity are decisive.
+     * This method must never be called automatically by a polling worker.
+     * @param \Closure(array): bool $attestStopped
      */
-    public function recoverExpired(int $id, int $expectedGeneration, \Closure $attestStopped): array
+    public function recoverStopped(int $id, int $expectedGeneration, \Closure $attestStopped): array
     {
         if ($id <= 0 || $expectedGeneration < 1) {
             throw new \InvalidArgumentException('invalid_recovery_identity');
         }
-
-        // Attestation may be slow: never hold a write lock across network I/O.
         $candidate = $this->byId($id);
         if ($candidate === null || $candidate['state'] !== 'running'
-            || (int)$candidate['claim_generation'] !== $expectedGeneration
-            || (int)$candidate['lease_until'] >= time()) {
-            throw new \DomainException('lease_not_expired_current');
+            || (int)$candidate['claim_generation'] !== $expectedGeneration) {
+            throw new \DomainException('claim_not_running_current');
         }
         $proof = [
             'id' => (int)$candidate['id'],
@@ -239,7 +228,6 @@ final class GlobalQueueStore
             'external_id' => $candidate['external_id'],
             'resource_class' => $candidate['resource_class'],
             'claim_generation' => $expectedGeneration,
-            'lease_until' => (int)$candidate['lease_until'],
         ];
         if ($attestStopped($proof) !== true) {
             throw new \DomainException('executor_not_attested_stopped');
@@ -248,17 +236,14 @@ final class GlobalQueueStore
             $current = $this->byId($id);
             if ($current === null || $current['state'] !== 'running'
                 || (int)$current['claim_generation'] !== $expectedGeneration
-                || (int)$current['lease_until'] >= time()
                 || !hash_equals((string)$candidate['lease_token'], (string)$current['lease_token'])) {
                 throw new \DomainException('recovery_generation_changed');
             }
             $now = time();
-            $stmt = $this->db->prepare("UPDATE global_queue_jobs SET state='queued',lease_token=NULL,lease_until=NULL,claim_generation=claim_generation+1,updated_at=? WHERE id=? AND state='running' AND claim_generation=? AND lease_token=? AND lease_until<?");
-            $stmt->execute([$now,$id,$expectedGeneration,$candidate['lease_token'],$now]);
-            if ($stmt->rowCount() !== 1) {
-                throw new \RuntimeException('recovery_conflict');
-            }
-            $event = $this->db->prepare("INSERT INTO global_queue_events(job_id,producer,event_type,progress_percent,phase,message,created_at) VALUES (?,?,'warning',NULL,'lease_recovery','executor_stopped_attested',?)");
+            $stmt = $this->db->prepare("UPDATE global_queue_jobs SET state='queued',lease_token=NULL,lease_until=NULL,claim_generation=claim_generation+1,updated_at=? WHERE id=? AND state='running' AND claim_generation=? AND lease_token=?");
+            $stmt->execute([$now,$id,$expectedGeneration,$candidate['lease_token']]);
+            if ($stmt->rowCount() !== 1) throw new \RuntimeException('recovery_conflict');
+            $event = $this->db->prepare("INSERT INTO global_queue_events(job_id,producer,event_type,progress_percent,phase,message,created_at) VALUES (?,?,'warning',NULL,'executor_recovery','executor_stopped_attested',?)");
             $event->execute([$id,$current['producer'],$now]);
             return $this->byId($id);
         });
