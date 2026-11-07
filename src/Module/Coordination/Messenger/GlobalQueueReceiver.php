@@ -11,18 +11,22 @@ use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Stamp\TransportMessageIdStamp;
 use Symfony\Component\Messenger\Transport\TransportInterface;
 
-/** Single-reader, receiver-only Messenger transport over the canonical queue. */
+/** Single-reader, receiver-only Messenger transport over the canonical queue.
+ * Never imports or replays pre-cutover local jobs.
+ */
 final class GlobalQueueReceiver implements TransportInterface
 {
     /** @var resource */
     private $lock;
     private PDO $db;
+    private string $queuePath;
     private int $deferUntil = 0;
     private int $nextAdmissionPoll = 0;
 
     public function __construct(?string $queuePath = null)
     {
         $path = $queuePath ?? GlobalQueueLocation::path();
+        $this->queuePath = $path;
         if (!is_file($path)) {
             throw new \RuntimeException('canonical_queue_missing');
         }
@@ -44,11 +48,16 @@ final class GlobalQueueReceiver implements TransportInterface
     public function get(): iterable
     {
         if (time() < $this->deferUntil) return [];
-        $this->publishLabPending();
+        // Explicit incident recovery must never publish a new LAB admission.
+        // Normal Messenger operation retains its canonical outbox publisher.
+        if (getenv('EZS_QUEUE_RECOVERY_ONLY') !== '9,10') {
+            $this->publishLabPending();
+        }
         // Never bypass an active/exited-but-unreconciled execution.
         $busy = $this->db->query("SELECT 1 FROM global_queue_jobs WHERE state='running' LIMIT 1");
         if ($busy->fetchColumn() !== false) return [];
-        $row = $this->db->query("SELECT id,producer,external_id,kind,claim_generation FROM global_queue_jobs WHERE state='queued' ORDER BY created_at,id LIMIT 1")
+        $floor = \Ezs\Web\Module\Coordination\GlobalQueueActiveWindow::floor($this->queuePath);
+        $row = $this->db->query("SELECT id,producer,external_id,kind,claim_generation FROM global_queue_jobs WHERE state='queued' AND id >= ".$floor." ORDER BY created_at,id LIMIT 1")
             ->fetch(PDO::FETCH_ASSOC);
         if (!is_array($row)) return [];
         // No fallback to a different job: FIFO stays strict even for unimplemented producers.
@@ -67,13 +76,6 @@ final class GlobalQueueReceiver implements TransportInterface
         $this->nextAdmissionPoll = time() + 10;
         $lab = 'H:/EZStudio_lab';
         if (!is_file($lab.'/bin/console')) return;
-        // Transfer only unstarted, contract-valid legacy PROFILE jobs to the global outbox.
-        $legacy = new Process([PHP_BINARY, 'bin/console', 'lab:queue:admit-existing-profile', '--apply'], $lab);
-        $legacy->setTimeout(30);
-        $legacy->run();
-        if (!$legacy->isSuccessful()) {
-            throw new \RuntimeException('legacy_profile_admission_failed');
-        }
         $process = new Process([PHP_BINARY, 'bin/console', 'lab:queue:publish-pending', '--apply'], $lab);
         $process->setTimeout(15);
         $process->disableOutput();

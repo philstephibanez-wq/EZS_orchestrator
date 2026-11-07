@@ -33,10 +33,20 @@ final class GlobalQueueJobHandler
         if (!is_file($lab.'/bin/console')) throw new \RuntimeException('lab_console_missing');
         $process = new Process([PHP_BINARY, 'bin/console', 'lab:queue:execute-profile', $match[1]], $lab);
         $process->setTimeout(null);
-        $process->disableOutput();
+        // LAB emits a bounded, non-sensitive state/error code. Retain output only
+        // in memory so that a failed bridge is diagnosable without showing tokens.
         $process->run();
         if (!$process->isSuccessful()) {
-            throw new \RuntimeException('lab_executor_failed_rc_'.(string)$process->getExitCode());
+            $result = $process->getOutput() . "\n" . $process->getErrorOutput();
+            $reason = 'unclassified';
+            if (preg_match('/LAB_GLOBAL_PROFILE_STATE=(waiting_gpu|failed|completed)/', $result, $m) === 1) {
+                $reason = 'state_' . $m[1];
+            } elseif (preg_match('/LAB_GLOBAL_PROFILE_EXECUTION_FAILED:\s*([A-Za-z0-9_\\]+)/', $result, $m) === 1) {
+                $reason = 'exception_' . str_replace('\\', '_', $m[1]);
+            } elseif (str_contains($result, 'PROFILE_PYTHON_UNAVAILABLE')) {
+                $reason = 'python_unavailable';
+            }
+            throw new \RuntimeException('lab_executor_failed_rc_'.(string)$process->getExitCode().'_'.$reason);
         }
         // Producer completion/failed proof must have been committed before ack.
         $stmt->execute([$reference->jobId]);

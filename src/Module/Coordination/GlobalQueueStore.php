@@ -12,12 +12,14 @@ use PDO;
 final class GlobalQueueStore
 {
     private PDO $db;
+    private string $queuePath;
 
     public function __construct(string $path)
     {
         if (!extension_loaded('pdo_sqlite')) {
             throw new \RuntimeException('pdo_sqlite_required');
         }
+        $this->queuePath = $path;
         $dir = dirname($path);
         if (!is_dir($dir) && !mkdir($dir, 0700, true) && !is_dir($dir)) {
             throw new \RuntimeException('queue_directory_unavailable');
@@ -129,7 +131,8 @@ final class GlobalQueueStore
             }
             // FIFO globally, without CPU/GPU scheduling or priority inversion.
             // A specialised executor must not bypass the oldest requested job.
-            $head = $this->db->query("SELECT id,resource_class FROM global_queue_jobs WHERE state='queued' ORDER BY created_at ASC,id ASC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+            $floor = GlobalQueueActiveWindow::floor($this->queuePath);
+            $head = $this->db->query("SELECT id,resource_class FROM global_queue_jobs WHERE state='queued' AND id >= ".$floor." ORDER BY created_at ASC,id ASC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
             if (!is_array($head) || $head['resource_class'] !== $resourceClass
                 || ($onlyJobId !== null && (int) $head['id'] !== $onlyJobId)) {
                 return null;
