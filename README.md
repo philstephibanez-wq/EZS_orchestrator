@@ -163,3 +163,7 @@ Live acceptance validated on 2026-10-04:
 8. One GPU slot is used until explicitly changed.
 9. No silent fallback.
 10. Runtime/log files are generated state and are not versioned.
+
+## Runtime endpoints contract
+
+See [canonical ports, ingress, egress and endpoints](docs/RUNTIME_MAPPING.md).

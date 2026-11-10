@@ -1,0 +1,158 @@
+{
+  "schema": "ezs.runtime.endpoints.v1",
+  "configuration_authority": "config/runtime.json",
+  "routes_note": "Routes are observations of Symfony router output, not guaranteed reachable URLs.",
+  "services": [
+    {
+      "id": "orchestrator",
+      "source": "README.md",
+      "role": "control",
+      "entrypoints": [
+        {
+          "method": "GET",
+          "path": "/",
+          "port": 8700,
+          "status": "documented"
+        }
+      ],
+      "egress_note": "Internal orchestration; exact routes/targets to inventory"
+    },
+    {
+      "id": "lab",
+      "source": "config/runtime.json",
+      "role": "lab",
+      "entrypoints": [
+        {
+          "method": "GET",
+          "path": "/home",
+          "status": "http_verified_2026-11-10"
+        },
+        {
+          "method": "GET",
+          "path": "/internal/diagnostic/local-queue",
+          "route": "lab_local_queue_diagnostic",
+          "status": "http_verified_2026-11-10"
+        },
+        {
+          "method": "POST",
+          "path": "/analysis/jobs/{id}/cancel",
+          "route": "analysis_job_cancel",
+          "status": "router_declared"
+        },
+        {
+          "method": "POST",
+          "path": "/catalogue/{id}/delete",
+          "route": "catalog_delete",
+          "status": "router_declared"
+        },
+        {
+          "method": "POST",
+          "path": "/catalogue/{id}/phase/{phase}/delete",
+          "route": "catalog_phase_delete",
+          "status": "router_declared"
+        },
+        {
+          "method": "GET",
+          "path": "/catalogue/{id}/presets.zip",
+          "route": "preset_export_zip",
+          "status": "router_declared"
+        }
+      ],
+      "unknowns": [
+        "Actual Catalogue page route (GET /catalogue returned 404)",
+        "Auth and polling routes"
+      ]
+    },
+    {
+      "id": "assistant",
+      "source": "config/runtime.json/transport/assistant_xps_url",
+      "role": "remote_xps",
+      "entrypoints": [
+        {
+          "method": "GET",
+          "path": "/api/status",
+          "route": "assistant_status",
+          "status": "router_declared_unreachable_2026-11-10"
+        },
+        {
+          "method": "GET",
+          "path": "/backoffice",
+          "route": "assistant_main_backoffice",
+          "status": "router_declared_unreachable_2026-11-10"
+        },
+        {
+          "method": "GET",
+          "path": "/api/inference/status",
+          "route": "assistant_inference_status",
+          "status": "router_declared"
+        },
+        {
+          "method": "GET",
+          "path": "/api/profile/direct-research/{id}",
+          "route": "assistant_profile_direct_research_status",
+          "status": "router_declared"
+        },
+        {
+          "method": "GET",
+          "path": "/api/backoffice/inference",
+          "route": "assistant_main_inference",
+          "status": "router_declared"
+        },
+        {
+          "method": "GET",
+          "path": "/api/backoffice/recordings",
+          "route": "assistant_main_recordings",
+          "status": "router_declared"
+        }
+      ],
+      "unknowns": [
+        "Auth, reverse communication/dispatch and egress endpoints to inventory"
+      ]
+    },
+    {
+      "id": "prod",
+      "source": "config/runtime.json",
+      "role": "prod",
+      "entrypoints": [
+        {
+          "method": "GET",
+          "path": "/__ezscore_gateway_status",
+          "port_role": "gateway",
+          "status": "documented_in_README"
+        }
+      ],
+      "egress_note": "Public /media/* calls forward_auth at gateway /internal/media/auth; gateway rewrite /router.php; backend Symfony 8511"
+    },
+    {
+      "id": "dev",
+      "source": "config/runtime.json",
+      "role": "dev",
+      "entrypoints": [],
+      "egress_note": "Public /media/* forward_auth at backend /internal/media/auth; remaining traffic reverse_proxy to backend"
+    }
+  ],
+  "probes": [
+    {
+      "service": "lab",
+      "path": "/home",
+      "method": "GET"
+    },
+    {
+      "service": "lab",
+      "path": "/internal/diagnostic/local-queue",
+      "method": "GET",
+      "sensitive": "May expose queue metadata; do not print response body"
+    },
+    {
+      "service": "assistant",
+      "path": "/api/status",
+      "method": "GET"
+    },
+    {
+      "service": "prod",
+      "path": "/__ezscore_gateway_status",
+      "role": "gateway",
+      "method": "GET"
+    }
+  ]
+}
