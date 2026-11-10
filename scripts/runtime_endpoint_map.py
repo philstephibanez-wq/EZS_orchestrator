@@ -24,9 +24,6 @@ def load(root=ROOT):
                 raise ValueError('INVALID_PORT:'+key+':'+k)
     if services['prod']['gateway_port'] == services['prod']['backend_port']:
         raise ValueError('PROD_GATEWAY_COLLISION')
-    base=cfg['transport']['assistant_xps_url']
-    if not isinstance(base,str) or not base.startswith('http://'):
-        raise ValueError('INVALID_ASSISTANT_URL')
     for service in endpoints['services']:
         for item in service.get('entrypoints',[]):
             if item['method'] not in ('GET','POST','PUT','PATCH','DELETE'):
@@ -36,7 +33,7 @@ def load(root=ROOT):
     for item in endpoints['probes']:
         if item.get('method') != 'GET' or '{' in item['path']:
             raise ValueError('UNSAFE_PROBE')
-        if item['service'] not in ('lab','assistant','prod','dev'):
+        if item['service'] not in ('lab','prod','dev'):
             raise ValueError('UNKNOWN_PROBE_SERVICE')
     return cfg,endpoints
 
@@ -49,7 +46,6 @@ def urls(cfg):
                    'backend':'http://127.0.0.1:'+str(spec['backend_port'])}
         if 'gateway_port' in spec:
             out[site]['gateway']='http://127.0.0.1:'+str(spec['gateway_port'])
-    out['assistant']={'public':cfg['transport']['assistant_xps_url'].rstrip('/')}
     return out
 
 def probe(cfg, endpoints):

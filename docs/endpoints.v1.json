@@ -59,26 +59,25 @@
         }
       ],
       "unknowns": [
-        "Actual Catalogue page route (GET /catalogue returned 404)",
         "Auth and polling routes"
       ]
     },
     {
       "id": "assistant",
-      "source": "config/runtime.json/transport/assistant_xps_url",
-      "role": "remote_xps",
+      "source": "EZStudioLab_assistant Symfony router",
+      "role": "assistant",
       "entrypoints": [
         {
           "method": "GET",
           "path": "/api/status",
           "route": "assistant_status",
-          "status": "router_declared_unreachable_2026-11-10"
+          "status": "router_declared"
         },
         {
           "method": "GET",
           "path": "/backoffice",
           "route": "assistant_main_backoffice",
-          "status": "router_declared_unreachable_2026-11-10"
+          "status": "router_declared"
         },
         {
           "method": "GET",
@@ -142,11 +141,6 @@
       "path": "/internal/diagnostic/local-queue",
       "method": "GET",
       "sensitive": "May expose queue metadata; do not print response body"
-    },
-    {
-      "service": "assistant",
-      "path": "/api/status",
-      "method": "GET"
     },
     {
       "service": "prod",

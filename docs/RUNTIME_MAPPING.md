@@ -19,10 +19,9 @@ Ne jamais utiliser un balayage de ports pour deviner la topologie. Lire d'abord 
 | EZScore DEV | `H:\EZScore_dev` | `127.0.0.1:8502` | backend Symfony `127.0.0.1:8602` |
 | EZScore PROD | `H:\EZScore` | `127.0.0.1:8501` | gateway `127.0.0.1:8510` vers backend Symfony `127.0.0.1:8511` |
 | EZStudio LAB | `H:\EZStudio_lab` | `127.0.0.1:8702` | backend Symfony `127.0.0.1:8701` |
-| Assistant XPS | XPS | `http://192.168.1.81:8712` | non inventorie |
 | Orchestrator | `H:\EZS_orchestrator` | `127.0.0.1:8700` documente dans README | controle interne a inventorier |
 
-Les ports sont lus dynamiquement dans `runtime.json` par `scripts/runtime_endpoint_map.py`. L'adresse XPS peut changer selon l'environnement ; ne pas recopier l'etat instantane dans le contrat.
+Les ports et adresses de DEV, PROD et LAB sont lus dynamiquement dans `runtime.json` par `scripts/runtime_endpoint_map.py`. L'Assistant dispose de son propre contrat applicatif ; aucune adresse distante ne doit etre supposee.
 
 ## Chaines ingress → egress
 
@@ -47,11 +46,11 @@ Les ports sont lus dynamiquement dans `runtime.json` par `scripts/runtime_endpoi
 
 `Navigateur → FrankenPHP :8702 → backend Symfony :8701 → routes LAB`.
 
-Le chemin `/home` et le diagnostic FIFO ont repondu en HTTP 200 le 10 novembre 2026. La route `GET /catalogue` a repondu **404** ; son vrai chemin Symfony reste a inventorier (ne jamais l'inventer).
+Le chemin `/home` (route Symfony `workbench_home`, page Catalogue) et le diagnostic FIFO ont repondu en HTTP 200 le 10 novembre 2026. Le chemin `/catalogue` n'est pas la route de cette page.
 
-### Assistant XPS
+### Assistant
 
-`MAIN → http://192.168.1.81:8712 → routes Assistant`. Le 10 novembre 2026, `/api/status` et `/backoffice` etaient inaccessibles par timeout. Les declarations Symfony figurent dans le manifest ; le transport inverse, les permissions, les flux worker et leur authentification restent a inventorier.
+Les routes Symfony de l'Assistant sont inventoriees par declaration. Son URL publique n'est pas determinee dans ce contrat ; elle doit etre etablie depuis sa configuration effective, sans sonde automatique ni hypothese de machine distante.
 
 ## Endpoints connus
 
