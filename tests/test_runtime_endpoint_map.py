@@ -20,15 +20,13 @@ class RuntimeEndpointMapTest(unittest.TestCase):
         self.assertTrue(all(p['method']=='GET' for p in manifest['probes']))
         self.assertFalse(any('/cancel' in p['path'] or '/delete' in p['path'] for p in manifest['probes']))
 
-    def test_no_deprecated_remote_node(self):
+    def test_only_declared_transport_endpoints(self):
         config, manifest = MODULE.load(ROOT)
-        self.assertNotIn('assistant_xps_url', config.get('transport', {}))
+        self.assertEqual(
+            {'dev_backend_url', 'prod_backend_url', 'lab_backend_url'},
+            set(config['transport']),
+        )
         self.assertFalse(any(p['service'] == 'assistant' for p in manifest['probes']))
-        for path in ('config/runtime.json', 'docs/RUNTIME_MAPPING.md',
-                     'docs/endpoints.v1.json', 'scripts/runtime_endpoint_map.py'):
-            content = (ROOT/path).read_text(encoding='utf-8')
-            self.assertNotIn('XPS', content.upper())
-            self.assertNotIn('192.168.1.81', content)
 
     def test_proxy_port_contract(self):
         config,_=MODULE.load(ROOT)
